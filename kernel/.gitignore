@@ -1,0 +1,27 @@
+# Node / build
+node_modules/
+dist/
+.next/
+coverage/
+
+# Local runtime files (do NOT commit)
+db.json
+keys.json
+.env
+.env.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Vercel / deployment
+.vercel/
+.vercelignore
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+

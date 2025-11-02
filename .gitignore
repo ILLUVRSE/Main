@@ -1,0 +1,56 @@
+# Node / build
+node_modules/
+dist/
+.next/
+coverage/
+
+# Local runtime files (do NOT commit)
+db.json
+keys.json
+.env
+.env.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Vercel / deployment
+.vercel/
+.vercelignore
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Terraform / infra
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Kubernetes / Helm / charts
+.kube/
+charts/
+*.tgz
+
+# Docker
+docker-compose.override.yml
+docker-compose.*.yml
+
+# Secrets / deployment
+.secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# JetBrains
+*.iml
+
+# Misc
+*.bak
+*.tmp
+

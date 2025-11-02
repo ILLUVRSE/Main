@@ -1,0 +1,32 @@
+# Node / build
+node_modules/
+dist/
+coverage/
+.next/
+
+# Local runtime files (do NOT commit)
+db.json
+keys.json
+.env
+.env.local
+
+# Kubernetes / Helm
+.kube/
+charts/
+*.tgz
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Container / images
+docker-compose.override.yml
+docker-compose.*.yml
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+

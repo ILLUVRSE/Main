@@ -173,8 +173,8 @@ SentinelNet is the real-time policy engine and autonomous enforcement layer for 
 1. **Budget cap** — deny allocations that would put division over budget.
 2. **High churn** — quarantine agent spawns when spawn rate for a user > N/min.
 3. **PII leakage** — deny manifest that contains detected PII unless ratified by multi-sig.
-4. **Signer age** — deny signature use if signer key older than rotation window or revoked.
-5. **Agent misbehavior** — quarantine agent if error rate > threshold AND suspicious outbound traffic detected.
+2. **High churn** — quarantine agent spawns when spawn rate for a user
+   exceeds N per minute.
 
 ---
 

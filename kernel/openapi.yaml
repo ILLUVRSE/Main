@@ -1,13 +1,261 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: ILLUVRSE Kernel API
   version: "1.0.0"
+  description: >
+    Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle,
+    eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
+
 servers:
   - url: http://localhost:3000
+    description: Local dev
+
+security:
+  - mutualTLS: []
+
+components:
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://auth.example.com/.well-known/openid-configuration
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: object
+      required:
+        - error
+
+    DivisionManifest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        goals:
+          type: array
+          items:
+            type: string
+        budget:
+          type: number
+          format: double
+        kpis:
+          type: array
+          items:
+            type: string
+        policies:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+      required:
+        - id
+        - name
+        - goals
+
+    AgentProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        codeRef:
+          type: string
+        state:
+          type: string
+          enum:
+            - created
+            - provisioning
+            - provisioned
+            - starting
+            - running
+            - paused
+            - stopping
+            - stopped
+            - failed
+            - destroyed
+        score:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - role
+        - state
+
+    EvalReport:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+          format: uuid
+        metricSet:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - id
+        - agentId
+        - metricSet
+
+    ManifestSignature:
+      type: object
+      properties:
+        manifestId:
+          type: string
+        signerId:
+          type: string
+        signature:
+          type: string
+        version:
+          type: string
+        ts:
+          type: string
+          format: date-time
+      required:
+        - manifestId
+        - signerId
+        - signature
+
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        payload:
+          type: object
+        ts:
+          type: string
+          format: date-time
+        prevHash:
+          type: string
+        hash:
+          type: string
+        signature:
+          type: string
+      required:
+        - id
+        - type
+        - payload
+        - ts
+        - hash
+        - signature
+
+    MemoryNode:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        embeddingId:
+          type: string
+        metadata:
+          type: object
+      required:
+        - id
+
+    AllocationRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        divisionId:
+          type: string
+        cpu:
+          type: number
+        gpu:
+          type: number
+        memoryMB:
+          type: integer
+        requester:
+          type: string
+      required:
+        - id
+        - divisionId
+
+    SignRequest:
+      type: object
+      properties:
+        manifest:
+          type: object
+        signerId:
+          type: string
+      required:
+        - manifest
+        - signerId
+
 paths:
+  /health:
+    get:
+      tags:
+        - kernel
+      summary: Liveness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  ts:
+                    type: string
+                    format: date-time
+
+  /ready:
+    get:
+      tags:
+        - kernel
+      summary: Readiness check (DB + KMS if required)
+      responses:
+        "200":
+          description: ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "503":
+          description: not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /kernel/division:
     post:
+      tags:
+        - kernel
       summary: Register or update a DivisionManifest
+      security:
+        - mutualTLS: []
       requestBody:
         required: true
         content:
@@ -15,33 +263,50 @@ paths:
             schema:
               $ref: '#/components/schemas/DivisionManifest'
       responses:
-        '200':
-          description: Registered/updated manifest
+        "200":
+          description: division stored
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DivisionManifest'
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          description: unauthorized
+
   /kernel/division/{id}:
     get:
-      summary: Retrieve a DivisionManifest
+      tags:
+        - kernel
+      summary: Fetch a DivisionManifest
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-          required: true
+            format: uuid
       responses:
-        '200':
-          description: Division manifest
+        "200":
+          description: division
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DivisionManifest'
-        '404':
-          description: Not found
+        "404":
+          description: not found
+
   /kernel/agent:
     post:
-      summary: Spawn a new agent from template
+      tags:
+        - kernel
+      summary: Spawn a new agent from template/manifest
+      security:
+        - mutualTLS: []
       requestBody:
         required: true
         content:
@@ -49,47 +314,59 @@ paths:
             schema:
               type: object
               properties:
-                role:
+                templateId:
                   type: string
-                skills:
-                  type: array
-                  items:
-                    type: string
-                code_ref:
+                divisionId:
                   type: string
+                overrides:
+                  type: object
+                requester:
+                  type: string
+              required:
+                - templateId
+                - divisionId
       responses:
-        '201':
-          description: Agent created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentProfile'
-  /kernel/agent/{id}/state:
-    get:
-      summary: Retrieve agent snapshot and metrics
-      parameters:
-        - in: path
-          name: id
-          schema:
-            type: string
-          required: true
-      responses:
-        '200':
-          description: Agent state and recent evals
+        "202":
+          description: agent instantiation accepted
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  agent:
-                    $ref: '#/components/schemas/AgentProfile'
-                  evals:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/EvalReport'
+                  agentId:
+                    type: string
+        "400":
+          description: validation error
+
+  /kernel/agent/{id}/state:
+    get:
+      tags:
+        - kernel
+      summary: Retrieve agent snapshot and recent metrics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: agent state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProfile'
+        "404":
+          description: not found
+
   /kernel/eval:
     post:
-      summary: Submit evaluation metrics
+      tags:
+        - kernel
+      summary: Submit an EvalReport
+      security:
+        - mutualTLS: []
       requestBody:
         required: true
         content:
@@ -97,88 +374,102 @@ paths:
             schema:
               $ref: '#/components/schemas/EvalReport'
       responses:
-        '200':
-          description: Eval accepted
+        "200":
+          description: eval accepted
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
                   eval_id:
                     type: string
+        "400":
+          description: validation error
+
   /kernel/allocate:
     post:
-      summary: Request or assign compute/capital resources
+      tags:
+        - kernel
+      summary: Request or assign compute / capital resources
+      security:
+        - mutualTLS: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                entity_id: { type: string }
-                pool: { type: string }
-                delta: { type: number }
-                reason: { type: string }
+              $ref: '#/components/schemas/AllocationRequest'
       responses:
-        '200':
-          description: Allocation recorded
+        "202":
+          description: allocation requested
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok: { type: boolean }
-                  allocation: { type: object }
+                  allocationId:
+                    type: string
+        "400":
+          description: validation error
+
   /kernel/sign:
     post:
-      summary: Sign a manifest and return signature record
+      tags:
+        - kernel
+      summary: Request a signature for a manifest
+      security:
+        - mutualTLS: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                manifest:
-                  type: object
+              $ref: '#/components/schemas/SignRequest'
       responses:
-        '200':
-          description: Signature record
+        "200":
+          description: signature returned
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ManifestSignature'
+        "400":
+          description: validation error
+
   /kernel/audit/{id}:
     get:
-      summary: Fetch signed audit event
+      tags:
+        - kernel
+      summary: Fetch a signed audit event
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-          required: true
       responses:
-        '200':
-          description: Audit event
+        "200":
+          description: audit event
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ManifestSignature'
+                $ref: '#/components/schemas/AuditEvent'
+        "404":
+          description: not found
+
   /kernel/reason/{node}:
     get:
-      summary: Retrieve reasoning trace for a node
+      tags:
+        - kernel
+      summary: Retrieve a reasoning trace for a graph node
       parameters:
-        - in: path
-          name: node
+        - name: node
+          in: path
+          required: true
           schema:
             type: string
-          required: true
       responses:
-        '200':
-          description: Reasoning trace
+        "200":
+          description: reasoning trace
           content:
             application/json:
               schema:
@@ -190,106 +481,10 @@ paths:
                     type: array
                     items:
                       type: object
-  /kernel/security/status:
-    get:
-      summary: Simple security status (signer id, public key)
-      responses:
-        '200':
-          description: Security status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  signer_id: { type: string }
-                  public_key: { type: string }
+        "404":
+          description: not found
 
-components:
-  schemas:
-    DivisionManifest:
-      type: object
-      required:
-        - id
-        - goals
-        - budget
-        - kpis
-        - policies
-      properties:
-        id:
-          type: string
-        goals:
-          type: array
-          items:
-            type: string
-        budget:
-          type: number
-        kpis:
-          type: array
-          items:
-            type: string
-        policies:
-          type: array
-          items:
-            type: string
-        metadata:
-          type: object
-    AgentProfile:
-      type: object
-      required:
-        - id
-        - role
-      properties:
-        id: { type: string }
-        role: { type: string }
-        skills:
-          type: array
-          items: { type: string }
-        code_ref: { type: string }
-        state:
-          type: string
-          enum: [stopped, running, paused]
-        score:
-          type: number
-        created_at:
-          type: string
-          format: date-time
-    EvalReport:
-      type: object
-      required:
-        - agent_id
-        - metric_set
-        - timestamp
-      properties:
-        id: { type: string }
-        agent_id: { type: string }
-        metric_set:
-          type: object
-        timestamp:
-          type: string
-          format: date-time
-    MemoryNode:
-      type: object
-      properties:
-        id: { type: string }
-        embedding:
-          type: array
-          items:
-            type: number
-        metadata:
-          type: object
-    ManifestSignature:
-      type: object
-      required:
-        - manifest_id
-        - signer_id
-        - signature
-        - ts
-      properties:
-        manifest_id: { type: string }
-        signer_id: { type: string }
-        signature: { type: string }
-        version: { type: string }
-        ts:
-          type: string
-          format: date-time
+tags:
+  - name: kernel
+    description: Kernel API endpoints
 

@@ -1,0 +1,57 @@
+# kernel/docker-compose.yml
+# Local dev docker-compose with Postgres and optional pgAdmin + Milvus (vector DB) stubs.
+# DO NOT USE these credentials in production. Use secrets manager / env vars for real deployments.
+
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: illuvrse-postgres
+    restart: unless-stopped
+    environment:
+      # Example local credentials — replace via env or secrets in real deployments
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: illuvrse
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: illuvrse-pgadmin
+    restart: unless-stopped
+    environment:
+      # Example UI credentials for local testing
+      PGADMIN_DEFAULT_EMAIL: pgadmin@localhost
+      PGADMIN_DEFAULT_PASSWORD: pgadmin
+    ports:
+      - "8080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Optional: vector DB for embeddings (Milvus). Keep commented or remove if not needed for local dev.
+  milvus:
+    image: milvusdb/milvus:v2.2.9
+    container_name: illuvrse-milvus
+    restart: unless-stopped
+    ports:
+      - "19530:19530" # Milvus gRPC
+      - "19121:19121" # Milvus HTTP
+    environment:
+      TZ: UTC
+    # NOTE: Milvus startup requires more configuration/volumes in production. This is a minimal stub for local testing.
+    # Depending on the image version, you may need to provide extra configs/volumes or run via docker-compose provided by Milvus.
+
+networks:
+  default:
+    name: illuvrse-net
+

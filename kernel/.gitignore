@@ -1,27 +1,31 @@
-# Node / build
-node_modules/
-dist/
-.next/
-coverage/
+# Kernel local ignores — DO NOT commit secrets or runtime artifacts
 
-# Local runtime files (do NOT commit)
-db.json
-keys.json
+# Runtime / secrets
 .env
 .env.local
+db.json
+keys.json
+keys/*.json
+
+# Node + build
+node_modules/
+dist/
+npm-debug.log
+pnpm-debug.log
+yarn-error.log
+*.tsbuildinfo
 
 # Editor / OS
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db
 
-# Vercel / deployment
-.vercel/
-.vercelignore
+# Local DB / runtime data
+pgdata/
+postgres-data/
 
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Misc
+*.log
+coverage/
+tmp/
 

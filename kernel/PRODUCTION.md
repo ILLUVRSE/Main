@@ -20,16 +20,16 @@ Required production environment variables (examples)
 ---------------------------------------------------
 Set these as secrets on the host and in CI. Do NOT store plaintext in repo.
 
-- `POSTGRES_URL`  
+- `POSTGRES_URL`
   Example: `postgresql://user:password@db.prod.example:5432/illuvrse?sslmode=require`
 
-- `KMS_ENDPOINT`  
+- `KMS_ENDPOINT`
   Example: `https://kms.internal/sign` (must support manifest sign and signData endpoints used by `signingProxy`)
 
-- `SIGNER_ID`  
+- `SIGNER_ID`
   KMS key identifier (string). Example: `kernel-signer-1`
 
-- `REQUIRE_KMS=true`  
+- `REQUIRE_KMS=true`
   Enforced in CI for prod pushes.
 
 - `NODE_ENV=production`, `PORT=3000`, `LOG_LEVEL=info`
@@ -93,41 +93,41 @@ High-level deployment steps (one-shot)
 
 Security & operations checklist (must pass)
 -------------------------------------------
-- [ ] **KMS in place**: `KMS_ENDPOINT` points to a production KMS signed by your security team. No local ephemeral keys in prod.  
-- [ ] **Signing verification**: Verifier can validate Ed25519 signatures returned by `/kernel/sign` using the public key from KMS. Run verification test vector.  
-- [ ] **Audit chain**: Chain integrity check passes end-to-end (create 10 audit events, verify `prev_hash` links and signature validation).  
-- [ ] **RBAC**: Critical endpoints enforce roles:  
-  - `POST /kernel/division`: `DivisionLead | SuperAdmin`  
-  - `POST /kernel/sign`: `SuperAdmin | Service`  
-  - `GET /kernel/audit/{id}`: `Auditor | SuperAdmin`  
-  - `POST /kernel/allocate`: `Operator | DivisionLead | SuperAdmin`  
-- [ ] **Sentinel policy**: `enforcePolicyOrThrow` integrated for manifests & allocations; policy decisions recorded in audit logs.  
-- [ ] **Secrets**: No secrets in repo; secrets exist only in host secret manager.  
-- [ ] **Backups**: Postgres backups configured (daily snapshot with 30/90-day retention).  
-- [ ] **Monitoring & alerting**: Metrics exported (sign ops/sec, audit latency, request p95/p99), alerts on key errors.  
+- [ ] **KMS in place**: `KMS_ENDPOINT` points to a production KMS signed by your security team. No local ephemeral keys in prod.
+- [ ] **Signing verification**: Verifier can validate Ed25519 signatures returned by `/kernel/sign` using the public key from KMS. Run verification test vector.
+- [ ] **Audit chain**: Chain integrity check passes end-to-end (create 10 audit events, verify `prev_hash` links and signature validation).
+- [ ] **RBAC**: Critical endpoints enforce roles:
+  - `POST /kernel/division`: `DivisionLead | SuperAdmin`
+  - `POST /kernel/sign`: `SuperAdmin | Service`
+  - `GET /kernel/audit/{id}`: `Auditor | SuperAdmin`
+  - `POST /kernel/allocate`: `Operator | DivisionLead | SuperAdmin`
+- [ ] **Sentinel policy**: `enforcePolicyOrThrow` integrated for manifests & allocations; policy decisions recorded in audit logs.
+- [ ] **Secrets**: No secrets in repo; secrets exist only in host secret manager.
+- [ ] **Backups**: Postgres backups configured (daily snapshot with 30/90-day retention).
+- [ ] **Monitoring & alerting**: Metrics exported (sign ops/sec, audit latency, request p95/p99), alerts on key errors.
 - [ ] **CI gating**: Merging to `main` requires CI green and `REQUIRE_KMS` enforced for production.
 
 Key rotation & compromise (summary)
 -----------------------------------
-- Keys are hosted in KMS/HSM. Rotate keys via KMS rotation API.  
+- Keys are hosted in KMS/HSM. Rotate keys via KMS rotation API.
 - Rotation workflow (short):
-  1. Create new key in KMS (`key-v2`), publish public key.  
-  2. Update `SIGNER_ID` to reference `key-v2` in a staging Kernel, sign a rotation audit event with both old and new signer IDs.  
-  3. Emit audit `upgrade.applied` once 3-of-5 multisig checklist passes.  
+  1. Create new key in KMS (`key-v2`), publish public key.
+  2. Update `SIGNER_ID` to reference `key-v2` in a staging Kernel, sign a rotation audit event with both old and new signer IDs.
+  3. Emit audit `upgrade.applied` once 3-of-5 multisig checklist passes.
   4. Retire old key in KMS after overlap period. Document exact steps in `kernel/security-governance.md`.
 
 Rollback plan
 -------------
 - Keep DB migrations backward-compatible when possible. For risky migrations:
-  - Deploy schema change behind feature flag, or  
-  - Use write-forward pattern (create new table, backfill, switch reads).  
+  - Deploy schema change behind feature flag, or
+  - Use write-forward pattern (create new table, backfill, switch reads).
 - On catastrophic failure, roll back to previous container image and restore DB snapshot.
 
 Troubleshooting quick hits
 --------------------------
-- **Server never starts**: Check host logs, confirm `POSTGRES_URL` reachable and `KMS_ENDPOINT` if `REQUIRE_KMS=true`.  
-- **Migration fails**: inspect SQL line, run migration locally against a copy of prod DB, fix idempotency.  
-- **Audit chain missing fields**: verify `audit_events` columns exist and `appendAuditEvent` uses UUID ids (no prefix).  
+- **Server never starts**: Check host logs, confirm `POSTGRES_URL` reachable and `KMS_ENDPOINT` if `REQUIRE_KMS=true`.
+- **Migration fails**: inspect SQL line, run migration locally against a copy of prod DB, fix idempotency.
+- **Audit chain missing fields**: verify `audit_events` columns exist and `appendAuditEvent` uses UUID ids (no prefix).
 - **Signatures invalid**: retrieve public key from KMS and verify Ed25519 signature of canonicalized payload.
 
 Appendix: Minimal commands

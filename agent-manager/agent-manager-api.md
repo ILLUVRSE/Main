@@ -1,6 +1,6 @@
 # Agent Manager — API Reference (Plain English)
 
-## Purpose
+# # Purpose
 This document lists the Agent Manager’s external API endpoints (the Kernel calls these). It describes each endpoint’s intent, required authentication, key fields in the request, and the minimal expected response. Keep implementations strictly compatible with these shapes.
 
 **Auth:** Kernel ↔ Agent Manager calls use mTLS + Kernel service identity. Human/CLI calls (if allowed) require Kernel-issued short-lived delegation tokens. All mutating calls must be authorized by Kernel (RBAC checked in Kernel).
@@ -9,21 +9,21 @@ This document lists the Agent Manager’s external API endpoints (the Kernel cal
 
 ---
 
-## 1) Register an AgentTemplate
-**Endpoint:** `POST /agent-manager/templates`  
-**Intent:** Register a new versioned AgentTemplate (must be signed by Kernel or an approved signer).  
-**Auth:** mTLS (Kernel service identity)  
+# # 1) Register an AgentTemplate
+**Endpoint:** `POST /agent-manager/templates`
+**Intent:** Register a new versioned AgentTemplate (must be signed by Kernel or an approved signer).
+**Auth:** mTLS (Kernel service identity)
 **Required payload (JSON):**
-- `id` (optional, server-generated if absent)  
-- `name`  
-- `description` (optional)  
-- `codeRef` (git url / image uri / artifact pointer)  
-- `manifest` (template config json)  
-- `resourceLimits` ({ cpu, memoryMB, gpuCount, diskMB })  
-- `env` (map)  
-- `signerId` and `signature` (kernel manifest signature)  
-- `version`  
-- `createdBy`  
+- `id` (optional, server-generated if absent)
+- `name`
+- `description` (optional)
+- `codeRef` (git url / image uri / artifact pointer)
+- `manifest` (template config json)
+- `resourceLimits` ({ cpu, memoryMB, gpuCount, diskMB })
+- `env` (map)
+- `signerId` and `signature` (kernel manifest signature)
+- `version`
+- `createdBy`
 **Minimal response (201 Created):**
 ```json
 {

@@ -1,0 +1,174 @@
+name: CI — Container + E2E
+
+# Runs on PRs targeting main and on pushes to main.
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Build, migrations, start server, run E2E
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: illuvrse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d illuvrse"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/illuvrse
+      NODE_ENV: test
+      PORT: 3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install kernel deps & build
+        working-directory: kernel
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          echo "Waiting for Postgres to be ready..."
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U postgres -d illuvrse && { echo "Postgres ready"; exit 0; }
+            sleep 2
+          done
+          echo "Postgres not ready" && exit 1
+
+      - name: Run migrations
+        working-directory: kernel
+        run: |
+          # prefer the compiled migration runner if present, else use psql
+          if [ -f ./dist/db/index.js ]; then
+            node ./dist/db/index.js
+          else
+            psql "$POSTGRES_URL" -f sql/migrations/001_init.sql
+          fi
+
+      - name: Enforce REQUIRE_KMS on pushes to main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: kernel
+        run: |
+          chmod +x kernel/ci/require_kms_check.sh
+          kernel/ci/require_kms_check.sh
+        env:
+          REQUIRE_KMS: 'true'
+          KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT }}
+
+      - name: Start Kernel server (background)
+        working-directory: kernel
+        run: |
+          # Start the built server in background and let it write logs to a file
+          node ./dist/server.js > kernel-server.log 2>&1 &
+          SERVER_PID=$!
+          echo "Started kernel server with pid $SERVER_PID"
+          # Wait for /health to respond
+          for i in {1..30}; do
+            if curl -sS http://localhost:3000/health | grep -q '"status": "ok"'; then
+              echo "Server healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server did not become healthy in time" && { tail -n 200 kernel-server.log || true; exit 1; }
+
+      - name: Run E2E smoke tests
+        working-directory: kernel
+        run: |
+          chmod +x test/integration/e2e.sh
+          PORT=3000 POSTGRES_URL="$POSTGRES_URL" ./test/integration/e2e.sh
+        env:
+          POSTGRES_URL: ${{ env.POSTGRES_URL }}
+
+      - name: Upload kernel server logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-server-log
+          path: kernel/kernel-server.log
+
+      - name: Cleanup background server
+        if: always()
+        run: |
+          pkill -f "node ./dist/server.js" || true
+
+  build-image:
+    name: Build Docker image (and optionally push on main)
+    runs-on: ubuntu-latest
+    needs: ci
+    # Only run when the ci job succeeded
+    if: needs.ci.result == 'success'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU/docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to container registry (optional)
+        if: secrets.DOCKERHUB_USERNAME
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          # Build from the kernel folder so Dockerfile path inside the job is relative
+          docker build -t illuvrse-kernel:${{ github.sha }} -f kernel/Dockerfile kernel
+
+      - name: Push Docker image (optional, on main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.DOCKERHUB_USERNAME
+        run: |
+          docker tag illuvrse-kernel:${{ github.sha }} ${{ secrets.DOCKERHUB_REPO }}:${{ github.sha }}
+          docker push ${{ secrets.DOCKERHUB_REPO }}:${{ github.sha }}
+
+      - name: Optionally deploy to Fly (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.FLY_API_TOKEN
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          curl -L https://fly.io/install.sh | sh
+          export PATH="$HOME/.fly/bin:$PATH"
+          flyctl deploy --config fly.toml --remote-only
+
+# Acceptance criteria (short)
+# - build-image runs only after ci job succeeds (needs/if configured).
+# - Enforce REQUIRE_KMS uses the repository secret KMS_ENDPOINT when pushing to main and fails CI when missing.
+# - Docker image build step executes successfully and optional registry push runs only when Docker Hub secrets are present.
+#
+# Operational notes:
+# - Add required secrets in GitHub: KMS_ENDPOINT, DOCKERHUB_USERNAME, DOCKERHUB_PASSWORD, DOCKERHUB_REPO, FLY_API_TOKEN as needed.
+# - If you want build-image to run for PRs as well, alter the if: condition appropriately.
+

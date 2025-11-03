@@ -1,64 +1,132 @@
 /**
  * kernel/src/signingProxy.ts
  *
- * KMS / signing proxy client for Kernel.
- * - Uses KMS_ENDPOINT + SIGNER_ID when configured.
- * - Falls back to local ephemeral Ed25519 key for dev (NOT for production).
+ * Production-minded KMS signing proxy client for Kernel.
  *
- * Responsibility:
- * - signManifest(manifest): returns a ManifestSignature-like record.
- * - signData(data): returns { signature, signerId } for arbitrary data.
+ * - Uses KMS_ENDPOINT (required when REQUIRE_KMS=true) to sign manifests and arbitrary data.
+ * - Supports Bearer token auth (KMS_BEARER_TOKEN) or mTLS auth via cert/key files (KMS_MTLS_CERT_PATH,
+ *   KMS_MTLS_KEY_PATH). If both are provided, mTLS is preferred.
+ * - If REQUIRE_KMS is true and KMS_ENDPOINT is missing/unreachable -> throws (fail-fast).
+ * - Local ephemeral Ed25519 fallback only used when REQUIRE_KMS !== 'true' and KMS is missing/unavailable.
  *
- * Notes:
- * - DO NOT COMMIT SECRETS — use Vault/KMS and environment variables for DB/keys.
- * - Replace the remote contract/response parsing below to match your KMS API.
+ * NOTE: DO NOT COMMIT SECRETS. Use host secret manager for KMS creds/certs and POSTGRES_URL, etc.
  */
 
-import fetch from 'node-fetch';
+import fs from 'fs';
+import path from 'path';
 import crypto from 'crypto';
+import https from 'https';
+import fetch from 'node-fetch';
 import { ManifestSignature } from './types';
 
-const KMS_ENDPOINT = process.env.KMS_ENDPOINT || '';
+const KMS_ENDPOINT = (process.env.KMS_ENDPOINT || '').replace(/\/$/, '');
 const SIGNER_ID = process.env.SIGNER_ID || 'kernel-signer-local';
+const REQUIRE_KMS = (process.env.REQUIRE_KMS || 'false').toLowerCase() === 'true';
+
+// Optional auth for KMS
+const KMS_BEARER_TOKEN = process.env.KMS_BEARER_TOKEN || '';
+const KMS_MTLS_CERT_PATH = process.env.KMS_MTLS_CERT_PATH || '';
+const KMS_MTLS_KEY_PATH = process.env.KMS_MTLS_KEY_PATH || '';
+const KMS_TIMEOUT_MS = Number(process.env.KMS_TIMEOUT_MS || 5000);
 
 /**
  * canonicalizePayload
- * Ensure deterministic JSON for signing (simple stable stringify).
- * For more strict canonicalization, replace with a canonical JSON library.
+ * Stable JSON canonicalization: sort object keys recursively so signatures are deterministic.
  */
 function canonicalizePayload(obj: any): string {
-  const sorted = (o: any): any => {
+  const normalize = (o: any): any => {
     if (o === null || typeof o !== 'object') return o;
-    if (Array.isArray(o)) return o.map(sorted);
-    const keys = Object.keys(o).sort();
+    if (Array.isArray(o)) return o.map(normalize);
     const out: any = {};
-    for (const k of keys) out[k] = sorted(o[k]);
+    for (const k of Object.keys(o).sort()) {
+      out[k] = normalize(o[k]);
+    }
     return out;
   };
-  return JSON.stringify(sorted(obj));
+  return JSON.stringify(normalize(obj));
 }
 
 /**
- * signWithLocalKey
- * Generates ephemeral ed25519 keypair and signs the payload.
- * WARNING: Ephemeral keys are only for dev/test and should never be used in prod.
+ * createHttpsAgentIfNeeded
+ * If mtls cert/key are provided, create an https.Agent for mutual TLS.
  */
-function signWithLocalKey(payload: string): { signature: string; signerId: string } {
+function createHttpsAgentIfNeeded(): https.Agent | undefined {
+  try {
+    if (KMS_MTLS_CERT_PATH && KMS_MTLS_KEY_PATH) {
+      const cert = fs.readFileSync(path.resolve(KMS_MTLS_CERT_PATH));
+      const key = fs.readFileSync(path.resolve(KMS_MTLS_KEY_PATH));
+      return new https.Agent({ cert, key, keepAlive: true });
+    }
+  } catch (err) {
+    console.warn('signingProxy: failed to read mTLS cert/key:', (err as Error).message || err);
+  }
+  return undefined;
+}
+
+/**
+ * httpPostJson
+ * Helper to call KMS endpoints with optional auth/mTLS and timeout.
+ */
+async function httpPostJson(url: string, body: any): Promise<any> {
+  if (!KMS_ENDPOINT) throw new Error('KMS_ENDPOINT not configured');
+  const agent = createHttpsAgentIfNeeded();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (KMS_BEARER_TOKEN) headers['Authorization'] = `Bearer ${KMS_BEARER_TOKEN}`;
+
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), KMS_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      agent,
+      signal: controller.signal as any,
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '<no body>');
+      throw new Error(`KMS error ${res.status}: ${txt}`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/**
+ * Local fallback signing (dev only)
+ * Generate an ephemeral ed25519 keypair and sign payload. Returns base64 signature and signerId.
+ * WARNING: ephemeral keys must NOT be used in production.
+ */
+function localEphemeralSign(payload: string): { signature: string; signerId: string } {
   const { privateKey } = crypto.generateKeyPairSync('ed25519');
   const sig = crypto.sign(null as any, Buffer.from(payload), privateKey).toString('base64');
   return { signature: sig, signerId: SIGNER_ID };
 }
 
 /**
+ * Map KMS response to ManifestSignature canonical shape.
+ * Adapt to your KMS response contract if it differs.
+ */
+function mapKmsManifestResponse(body: any, manifestId: string, ts: string): ManifestSignature {
+  return {
+    id: body.id ?? crypto.randomUUID(),
+    manifest_id: body.manifest_id ?? body.manifestId ?? manifestId,
+    signer_id: body.signer_id ?? body.signerId ?? SIGNER_ID,
+    signature: body.signature ?? body.sig ?? '',
+    version: body.version ?? body.key_version ?? undefined,
+    ts: body.ts ?? ts,
+    prev_hash: body.prev_hash ?? body.prevHash ?? null,
+  } as any; // allow both snake_case and camelCase from KMS; cast to ManifestSignature
+}
+
+/**
  * signManifest
- * Calls KMS endpoint if configured; otherwise falls back to ephemeral local signing.
- *
- * Expected remote KMS sign contract (example):
- * POST ${KMS_ENDPOINT}/sign
- * body: { signerId, payload, manifestId? }
- * response: { id, manifest_id, signer_id, signature, version, ts, prev_hash }
- *
- * The returned ManifestSignature uses keys: id, manifestId, signerId, signature, version, ts, prevHash
+ * Primary method used by the Kernel to request a manifest signature.
+ * - If KMS configured, call KMS_ENDPOINT + '/sign' with { signerId, payload, manifestId }.
+ * - If KMS disabled/unreachable and REQUIRE_KMS=true -> throw.
+ * - If KMS disabled/unreachable and REQUIRE_KMS=false -> fallback to local ephemeral sign (dev only).
  */
 export async function signManifest(manifest: any): Promise<ManifestSignature> {
   const ts = new Date().toISOString();
@@ -67,38 +135,51 @@ export async function signManifest(manifest: any): Promise<ManifestSignature> {
 
   if (KMS_ENDPOINT) {
     try {
-      const url = `${KMS_ENDPOINT.replace(/\/$/, '')}/sign`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signerId: SIGNER_ID, payload, manifestId }),
-      });
-      if (!res.ok) {
-        throw new Error(`KMS sign failed: ${res.status} ${res.statusText}`);
-      }
-      const body = await res.json();
-      // Map KMS response to local ManifestSignature shape.
-      // Adapt mapping if your KMS response uses different fields.
+      const url = `${KMS_ENDPOINT}/sign`;
+      const body = { signerId: SIGNER_ID, payload, manifestId };
+      const res = await httpPostJson(url, body);
+      // Map and return
+      const mapped = mapKmsManifestResponse(res, manifestId, ts);
+      // Normalize keys to camelCase to satisfy rest of codebase (Types use camelCase)
       const sig: ManifestSignature = {
-        id: body.id ?? crypto.randomUUID(),
-        manifestId: body.manifest_id ?? body.manifestId ?? manifestId,
-        signerId: body.signer_id ?? body.signerId ?? SIGNER_ID,
-        signature: body.signature,
-        version: body.version ?? manifest?.version ?? '1.0.0',
-        ts: body.ts ?? ts,
-        prevHash: body.prev_hash ?? body.prevHash ?? null,
+        id: String(mapped.id),
+        manifestId: (mapped as any).manifest_id ?? (mapped as any).manifestId,
+        signerId: (mapped as any).signer_id ?? (mapped as any).signerId ?? SIGNER_ID,
+        signature: mapped.signature,
+        version: mapped.version,
+        ts: mapped.ts,
+        prevHash: mapped.prev_hash ?? (mapped as any).prevHash ?? null,
       };
       return sig;
     } catch (err) {
-      // Log and fall through to local signing fallback
-      console.error('KMS sign error, falling back to local signing:', (err as Error).message || err);
+      const msg = (err as Error).message || err;
+      console.error('signingProxy: KMS signManifest failed:', msg);
+      if (REQUIRE_KMS) {
+        throw new Error(`KMS signing failed and REQUIRE_KMS=true: ${msg}`);
+      }
+      console.warn('signingProxy: falling back to local ephemeral signing (dev only)');
+      const { signature, signerId } = localEphemeralSign(payload);
+      return {
+        id: `sig-${crypto.randomUUID()}`,
+        manifestId,
+        signerId,
+        signature,
+        version: manifest?.version ?? '1.0.0',
+        ts,
+        prevHash: null,
+      };
     }
   }
 
-  // Local fallback signing (dev only)
-  const { signature, signerId } = signWithLocalKey(payload);
-  const localSig: ManifestSignature = {
-    id: crypto.randomUUID(),
+  // No KMS endpoint configured
+  if (REQUIRE_KMS) {
+    throw new Error('REQUIRE_KMS=true but KMS_ENDPOINT is not configured');
+  }
+
+  // Developer fallback
+  const { signature, signerId } = localEphemeralSign(payload);
+  return {
+    id: `sig-${crypto.randomUUID()}`,
     manifestId,
     signerId,
     signature,
@@ -106,62 +187,78 @@ export async function signManifest(manifest: any): Promise<ManifestSignature> {
     ts,
     prevHash: null,
   };
-  return localSig;
 }
 
 /**
  * signData
- * Sign arbitrary string data. Uses KMS if configured, otherwise uses ephemeral local key.
- * Returns { signature, signerId } where signature is base64.
+ * Sign arbitrary string data. Calls KMS_ENDPOINT + '/signData' if configured, similar semantics to signManifest.
  */
 export async function signData(data: string): Promise<{ signature: string; signerId: string }> {
-  const payload = canonicalizePayload({ data, ts: new Date().toISOString() });
+  const ts = new Date().toISOString();
+  const payload = canonicalizePayload({ data, ts });
 
   if (KMS_ENDPOINT) {
     try {
-      const url = `${KMS_ENDPOINT.replace(/\/$/, '')}/signData`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signerId: SIGNER_ID, data: payload }),
-      });
-      if (!res.ok) throw new Error(`KMS signData failed: ${res.status} ${res.statusText}`);
-      const body = await res.json();
-      return { signature: body.signature, signerId: body.signerId ?? SIGNER_ID };
+      const url = `${KMS_ENDPOINT}/signData`;
+      const body = { signerId: SIGNER_ID, data: payload };
+      const res = await httpPostJson(url, body);
+      // Expect response { signature, signerId? }
+      return { signature: res.signature, signerId: res.signerId ?? res.signer_id ?? SIGNER_ID };
     } catch (err) {
-      console.error('KMS signData error, falling back to local signing:', (err as Error).message || err);
+      const msg = (err as Error).message || err;
+      console.error('signingProxy: KMS signData failed:', msg);
+      if (REQUIRE_KMS) throw new Error(`KMS signData failed and REQUIRE_KMS=true: ${msg}`);
+      console.warn('signingProxy: falling back to local ephemeral signing (dev only)');
+      return localEphemeralSign(payload);
     }
   }
 
-  // Local fallback
-  return signWithLocalKey(payload);
+  if (REQUIRE_KMS) {
+    throw new Error('REQUIRE_KMS=true but KMS_ENDPOINT is not configured');
+  }
+
+  return localEphemeralSign(payload);
 }
 
 /**
- * Default export: convenient proxy object
+ * Exported proxy object
  */
 const signingProxy = {
   signManifest,
   signData,
+  // expose config for testing/inspection
+  _internal: {
+    KMS_ENDPOINT,
+    SIGNER_ID,
+    REQUIRE_KMS,
+    KMS_BEARER_TOKEN: !!KMS_BEARER_TOKEN,
+    KMS_MTLS_CERT_PATH,
+    KMS_MTLS_KEY_PATH,
+  },
 };
 
 export default signingProxy;
 
 /**
- * Acceptance criteria (testable)
+ * Acceptance criteria (short, testable):
  *
- * - signManifest returns a ManifestSignature with fields: id, manifestId, signerId, signature, version, ts.
- *   Test: Call signManifest({ id: 'm1', ... }) with no KMS and assert returned object has those fields and signature is base64.
+ * - When KMS_ENDPOINT is configured and reachable, signManifest calls KMS /sign and returns a ManifestSignature
+ *   that includes id, manifestId, signerId, signature (base64), version, ts, prevHash.
+ *   Test: Start a mock HTTP server that responds to /sign with expected fields and assert signManifest returns mapped fields.
  *
- * - When KMS_ENDPOINT is set and the KMS responds 200 with expected fields, signManifest should return the mapped KMS response.
- *   Test: Start a mock HTTP server that implements /sign and verify the mapping.
+ * - When REQUIRE_KMS=true and KMS_ENDPOINT is missing or KMS returns error, signManifest and signData throw.
+ *   Test: set REQUIRE_KMS=true, unset KMS_ENDPOINT, call signManifest -> expect thrown error.
  *
- * - signData returns signature and signerId and works both with and without KMS_ENDPOINT.
- *   Test: Call signData('hello') and verify signature is present and base64-decodable.
+ * - When REQUIRE_KMS is false/unset and KMS is not configured, signManifest and signData perform local ephemeral Ed25519 signing
+ *   and return base64 signature (dev only). Test: unset REQUIRE_KMS and KMS_ENDPOINT and assert signManifest returns signature.
  *
- * - canonicalizePayload produces stable JSON for identical inputs (keys sorted).
- *   Test: canonicalizePayload({b:2,a:1}) === canonicalizePayload({a:1,b:2})
+ * - mTLS support: When KMS_MTLS_CERT_PATH and KMS_MTLS_KEY_PATH point to cert/key files, httpPostJson will use an https.Agent
+ *   with the provided cert/key so the KMS can require client cert authentication. Test: run a mock TLS server requiring client cert and verify call succeeds.
  *
- * - Security note: local ephemeral signing must not be used in production. Ensure REQUIRE_KMS or equivalent policy is enforced by CI/ops when deploying.
+ * - Bearer token support: When KMS_BEARER_TOKEN is configured, Authorization: Bearer <token> is sent in requests.
+ *
+ * Security note: never rely on local ephemeral signing in production; ensure KMS is used and rails enforce REQUIRE_KMS=true in production CI/CD.
+ *
+ * Next file to update after saving this: kernel/src/routes/kernelRoutes.ts (apply RBAC and Sentinel policy enforcement).
  */
 

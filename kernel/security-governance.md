@@ -1,129 +1,130 @@
-# Kernel — Security & Governance
+# Kernel — Security & Governance (concise, operational)
 
-## Purpose
-This document defines the security model and governance controls for the Kernel. It covers authentication/authorization, service identity, key management, signing rules, multi-sig upgrade requirements, SentinelNet enforcement hooks, audit expectations, and incident/rotation procedures.
-
----
-
-## 1) High-level model
-- **Human access**: OIDC/SSO with strong 2FA required for privileged roles.  
-- **Service access**: mutual TLS (mTLS) for service-to-service authentication and authorization.  
-- **Signing**: Ed25519 signatures for manifests and audit events. Signing keys live in KMS/HSM and are never exported in clear.  
-- **Policy enforcement**: SentinelNet enforces policies in real time and can block or quarantine actions that violate governance rules.  
-- **Principle**: least privilege everywhere. Everything must be auditable and reversible via signed events and multi-sig for system-level changes.
+This document defines the minimum security, key-management, and governance requirements for
+running the Kernel in production. It's intentionally short and actionable — use it to obtain
+Security sign-off and to guide ops runbooks.
 
 ---
 
-## 2) Roles & RBAC
-- **SuperAdmin** (Ryan): full authority; able to approve multi-sig upgrades and break glass.  
-- **DivisionLead**: manages division manifests for assigned divisions (create/update within policy and budget).  
-- **Operator**: day-to-day operator for agent lifecycle, resource requests (subject to policy).  
-- **SecurityEngineer**: manages KMS/HSM, SentinelNet rules, incident response.  
-- **Auditor**: read-only access to audit logs and reasoning traces.  
-- **ServiceAccount**: non-human identities for infra services; authenticated via mTLS certs and mapped to least-privilege roles.
-
-**Enforcement rules**
-- All API calls must be evaluated against RBAC. Some endpoints require escalation (e.g., kernel-level upgrade requires multi-sig).  
-- Role-to-permission mappings retained in Kernel and enforced at the API gateway layer.
+## 1. Scope & goals
+- Ensure **all manifests and audit events are signed** by a KMS/HSM-backed key (Ed25519).  
+- Ensure **audit chain integrity** (hash chaining + signatures).  
+- Protect signing keys in KMS/HSM; **never store plaintext private keys** in repository or images.  
+- Provide clear **key rotation**, **compromise**, and **multisig upgrade** workflows that are auditable.
 
 ---
 
-## 3) Human authentication (OIDC/SSO)
-- Use enterprise-grade OIDC provider with enforced 2FA/SMS/Authenticator apps.  
-- Map SSO groups to Kernel roles (SuperAdmin, DivisionLead, Operator, Auditor).  
-- Expire interactive sessions after reasonable idle time (e.g., 30 minutes) and require reauth for sensitive flows.  
-- Log all login events to the audit bus.
+## 2. Key concepts & actors
+- **KMS / Signing Proxy** — network service that performs signing operations. The Kernel calls `sign` and `signData`.  
+- **SignerId** — logical identifier for the signing key used by Kernel (e.g., `kernel-signer-1`).  
+- **Security Engineer** — approver for KMS/HSM configuration, public key distribution and rotation.  
+- **SuperAdmin (Ryan)** — final approver for Kernel sign-off and production changes.
 
 ---
 
-## 4) Service authentication (mTLS)
-- All services must present mTLS certs issued by an internal CA.  
-- The Kernel validates client certs, extracts service identity, and maps to service roles.  
-- Short-lived certs preferred (e.g., 7–30 days) with automated rotation via CI/CD or Vault PKI.  
-- Reject connections without mTLS; reject certs not in the allowed service registry.
+## 3. Production requirements (must-have)
+1. **KMS/HSM for signing**
+   - All production signing operations (manifests, audit hashes) **must** use a KMS/HSM.
+   - The Kernel uses `KMS_ENDPOINT` and `SIGNER_ID`. Do **not** fall back to ephemeral keys in prod.
+   - KMS must implement an authenticated API for `signManifest` and `signData`. Prefer mTLS + client auth or OAuth tokens scoped to the Kernel service.
+
+2. **Public key distribution**
+   - The KMS public key for each `SIGNER_ID` must be available to verifiers (auditors) via a trusted endpoint or the truststore.
+   - Public keys must be freely distributable (not secret) and versioned (key id + version).
+
+3. **Signing algorithm**
+   - Use Ed25519 for manifest and audit signatures. Signatures must be base64-encoded.  
+   - Canonicalize payloads deterministically (stable JSON ordering) before signing. The Kernel code must mirror the canonicalization used by verifiers.
+
+4. **Audit chain**
+   - Each `audit_event` includes: `prev_hash`, `hash` (SHA-256), `signature`, `signer_id`, `ts`.  
+   - `hash` = SHA-256(JSON({eventType,payload,prevHash,ts})). `ts` is ISO-8601.  
+   - Verify chain by re-computing each hash, verifying the prev_hash linkage, and verifying each signature with published public key.
+
+5. **RBAC & Authentication**
+   - Human access: OIDC (SSO). Validate tokens server-side; map claims to roles.  
+   - Service access: mTLS (preferred) or short-lived OAuth tokens. Map service cert/tokens to roles.  
+   - Canonical roles: `SuperAdmin`, `DivisionLead`, `Operator`, `Auditor`. Enforce with middleware in Kernel for critical endpoints.
+
+6. **Sentinel (policy engine)**
+   - Sentinel decisions must be consulted for sensitive actions (`allocation`, `manifest.update`, `upgrade.apply`).  
+   - Every decision recorded as an `audit_event` with policyId and rationale.
+
+7. **Secrets & CI**
+   - Secrets (DB credentials, KMS credentials, deploy tokens) must be stored in a secrets manager (Vault, Fly secrets, GitHub secrets).  
+   - CI must enforce `REQUIRE_KMS=true` for production pushes or fail the build (see `kernel/ci/require_kms_check.sh`).
 
 ---
 
-## 5) KMS / HSM & signing
-- **Primary rule**: signing keys (Ed25519) are managed in KMS/HSM and never leave the HSM in plaintext.  
-- Key hierarchy:
-  - **Root signing key**: stored in HSM, highly restricted, multi-person access controls (used only for bootstrapping / recovery).  
-  - **Kernel signer keys**: day-to-day manifest signing keys in KMS with strict IAM policies.  
-  - **Service signing keys**: scoped keys for services/agents where necessary (prefer short-lived).  
-- **Signing process**:
-  - Kernel builds canonical manifest JSON, requests signing from KMS/HSM, receives signature, stores ManifestSignature record (signerId, signature, ts) and emits an audit event linking to the signature.
-- **Key identifiers**: keys must use stable `signer_id` values (e.g., `kernel-signer-1`) so signatures are traceable.
+## 4. Key rotation & compromise procedure (short)
+**Rotation (planned):**
+1. Create new key in KMS: `kernel-signer-v2`. Obtain public key.  
+2. Deploy Kernel in staging to reference `kernel-signer-v2` as an alternate signer (optional).  
+3. Emit signed audit event `signer.rotation.requested` including `oldSignerId` and `newSignerId`.  
+4. Obtain approvals (multi-sig if required) — record approval audit events.  
+5. Mark `kernel-signer-v2` as primary in KMS (atomic switch). Emit `signer.rotation.applied` audit event signed by new key.  
+6. Keep old key active for overlap period (e.g., 7 days) for verification, then retire in KMS.
+
+**Compromise (urgent):**
+1. Immediately disable compromised key in KMS (or mark as compromised).  
+2. Create a new emergency key (KMS), set `SIGNER_ID` to emergency key for Kernel in staging, verify signing.  
+3. Emit `signer.compromise` audit event, including timeline and affected manifests.  
+4. Rotate all affected signing identities with the rotation workflow above.  
+5. Perform forensic audit on the audit chain, publish findings, and notify stakeholders.
 
 ---
 
-## 6) Key rotation & compromise procedure
-- **Rotation cadence**: automatic rotation every 90 days for signer keys; emergency rotation whenever compromise is suspected.  
-- **Rotation process**:
-  1. Generate new key in KMS/HSM.  
-  2. Update Kernel signer mapping to include both old and new keys for a short overlap window.  
-  3. Re-sign any pending manifests if required and record new ManifestSignature entries.  
-  4. Publish rotation event to audit bus.
-- **Compromise response**:
-  - Immediately revoke key in KMS/HSM; issue emergency SentinelNet block for any signed actions by compromised signer.  
-  - Run audit query to locate impacted manifests and replay verification.  
-  - Initiate multi-sig recovery to re-establish trust and rotate dependent keys.
+## 5. Multisig / Upgrade workflow (3-of-5, brief)
+- Upgrades to Kernel governance objects (e.g., new signer, security policy changes) require **3 distinct approvals**:
+  1. Create an **upgrade manifest** describing the change. Signer(s) cannot self-approve.  
+  2. Collect 3 approval audit events, each with a valid signature from an approved approver identity.  
+  3. Kernel validates distinct signers and signatures and then applies upgrade, emitting `upgrade.applied` audit event.  
+  4. Emergency apply: allowed with explicit post-hoc ratification and additional audit entries.
 
 ---
 
-## 7) Multi-sig upgrade policy (brief)
-- Kernel-level code or manifest upgrades that change the Kernel core or governance must be approved by **3-of-5** approvers.  
-- Approver roles: SuperAdmin (Ryan) + 4 appointed Division Leads / Security Engineer / Technical Lead.  
-- **Artifacts to sign**: upgrade manifest (with patch hash), rationale, and timestamp. Each approver records a signed approval event.  
-- Once quorum reached, Kernel applies the upgrade and emits a signed audit event with the list of approvers and signatures.  
-- Rollback requires another multi-sig flow and a signed rollback manifest.
+## 6. Verification & tests (must exist)
+- Unit tests for:
+  - `canonicalizePayload` stability and equivalence across language clients.
+  - `computeHash` and audit chaining correctness.
+  - `appendAuditEvent` transactional behavior (rollbacks on error).
+- Integration tests:
+  - Create a manifest → sign → persist → verify signature with public key.
+  - Create N audit events and run chain verification tool.
+- Operational test:
+  - Rotate a key in staging and verify old/new signatures and overlap.
 
 ---
 
-## 8) SentinelNet integration
-- SentinelNet receives copies of API requests and audit events (or a summarized webhook) and evaluates active policy rules.  
-- On policy violation options:
-  - **Block** (reject request and return policy error).  
-  - **Quarantine** (permit action but isolate resources and mark for manual review).  
-  - **Remediate** (auto-run a pre-approved remediation such as revoke cert or reduce allocation).  
-- All SentinelNet decisions are recorded as audit events and include the policy id, decision, confidence, and rationale.
+## 7. Operational rules (runbook snippets)
+- **Pre-deploy checklist (Security)**
+  - KMS endpoint reachable from deploy environment.  
+  - Public key for `SIGNER_ID` available to auditors.  
+  - `REQUIRE_KMS=true` set in CI and `KMS_ENDPOINT` present in production secrets.
+
+- **If audit verification fails**
+  - Do not accept new writes; escalate to Security Engineer; restore DB snapshot if tampering is suspected; run chain replay from last known-good head.
+
+- **Retention**
+  - Audit events: retain raw events for 7 years (or org policy). Use WORM/append-only storage for long-term retention if required.
 
 ---
 
-## 9) Audit & logging
-- All critical actions produce AuditEvent entries (prevHash, hash, signature). Audit events are append-only and stored in a durable sink (S3/Postgres) and streamed via Kafka.  
-- Audit access: read-only for Auditors; SuperAdmin can request exports and cryptographic proofs.  
-- Event retention: primary copy retained for N years (policy), secondary immutable snapshot archived in cold storage with verifiable hashes.  
-- Log integrity: periodic verification job to validate the hash chain and signatures.
+## 8. Sign-off / approval
+- Security Engineer sign-off required before enabling production KMS or setting `REQUIRE_KMS=true` on protected branches.  
+- Final approver (Ryan — SuperAdmin) signs off on production readiness.
 
 ---
 
-## 10) Secrets & environment management
-- Use Vault or cloud secret manager as source of truth. Do not store secrets in code or git.  
-- CI/CD pipelines fetch secrets dynamically and inject ephemeral credentials.  
-- Access to secrets must be logged and limited to approved service accounts.
+## 9. Short FAQ
+**Q:** Can we use ephemeral local signing in prod?  
+**A:** No. Only for local dev or CI test runs. Production must use KMS/HSM.
+
+**Q:** How do we verify a signature?  
+**A:** Use Ed25519 verification against canonicalized payload. Examples/tests must be included in verification tooling.
 
 ---
 
-## 11) Incident response & governance
-- Define an incident playbook: detection → triage → contain → eradicate → recover → post-mortem. SecurityEngineer leads and notifies SuperAdmin + Legal when required.  
-- All incident actions (key revocation, node isolation, code rollback) must be recorded as signed audit events.  
-- Post-incident, update SentinelNet rules if the incident exposes policy gaps.
-
----
-
-## 12) Compliance & third-party audits
-- Produce signed, verifiable audit exports for external auditors.  
-- Quarterly security reviews and annual external pentests.  
-- Maintain evidence for key rotation, signer access, and audit log integrity.
-
----
-
-## Acceptance criteria (for this doc)
-- RBAC roles & enforcement model documented.  
-- OIDC/SSO + mTLS patterns defined.  
-- KMS/HSM signing rules, signer_id convention, and rotation/compromise procedures described.  
-- Brief multi-sig upgrade policy outlined.  
-- SentinelNet roles and expected reactions documented.  
-- Emergency key revocation and recovery flow present.
-
+Acceptance criteria (one-line):
+- Security Engineer confirms KMS contract, key rotation, and audit verification tests; Ryan signs off; `REQUIRE_KMS` enforced in CI for production.
 

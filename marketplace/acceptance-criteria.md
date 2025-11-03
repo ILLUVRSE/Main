@@ -1,4 +1,3 @@
-```markdown
 # Marketplace & Delivery — Acceptance Criteria
 
 > **Scope**: This file defines the testable conditions required to accept the **Marketplace & Delivery** module. It mirrors the acceptance section in `marketplace-spec.md` and converts it into a checklist with verifiable artifacts.

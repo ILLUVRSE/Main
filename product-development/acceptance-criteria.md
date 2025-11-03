@@ -1,4 +1,3 @@
-```markdown
 # Product & Development — Acceptance Criteria
 
 > **Scope**: Defines the verifiable conditions for accepting the **Product & Development** module. Derived from the acceptance section of `product-development-spec.md`.

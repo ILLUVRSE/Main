@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# Ensure workflow has permission to post checks/statuses
+permissions:
+  contents: read
+  checks: write
+  statuses: write
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -59,4 +65,6 @@ jobs:
           DEFAULT_WORKING_DIRECTORY: .
           # This repo runs the linter only for markdown to avoid requiring language tooling
           RUN_LOCAL: false
+          # Provide the built-in token explicitly so Super-Linter can post multiple status/check updates
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

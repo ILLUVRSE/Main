@@ -1,0 +1,107 @@
+name: Deploy — main -> Fly/Registry
+
+# Deploys built container to Fly (preferred) or to registry + Fly.
+# Runs only on pushes to main and enforces REQUIRE_KMS via kernel/ci/require_kms_check.sh.
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Fly (or image push + fly deploy)
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      NODE_ENV: production
+      PORT: 3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure REQUIRE_KMS for main (fail early)
+        run: |
+          chmod +x kernel/ci/require_kms_check.sh
+          # REQUIRE_KMS enforced for main pushes; script fails if REQUIRE_KMS=true and KMS_ENDPOINT unset.
+          REQUIRE_KMS=true KMS_ENDPOINT="${{ secrets.KMS_ENDPOINT || '' }}" kernel/ci/require_kms_check.sh
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t illuvrse-kernel:${{ github.sha }} -f kernel/Dockerfile kernel
+
+      - name: Optionally push image to registry (DockerHub)
+        if: secrets.DOCKERHUB_REPO && secrets.DOCKERHUB_USERNAME && secrets.DOCKERHUB_PASSWORD
+        env:
+          DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+        run: |
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          docker tag illuvrse-kernel:${{ github.sha }} "${DOCKERHUB_REPO}:${{ github.sha }}"
+          docker push "${DOCKERHUB_REPO}:${{ github.sha }}"
+
+      - name: Install flyctl
+        run: |
+          curl -L https://fly.io/install.sh | sh
+          echo "## Add flyctl to PATH"
+          echo "$HOME/.fly/bin" >> $GITHUB_PATH
+
+      - name: Fly deploy (using pushed image if available, else remote-only build)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO || '' }}
+        run: |
+          # If we pushed an image to DOCKERHUB_REPO, deploy that image; otherwise let fly build from repo (remote-only).
+          if [[ -n "$DOCKERHUB_REPO" ]]; then
+            echo "Deploying using pushed image: ${DOCKERHUB_REPO}:${GITHUB_SHA}"
+            flyctl deploy --config fly.toml --image "${DOCKERHUB_REPO}:${GITHUB_SHA}" --remote-only
+          else
+            echo "Deploying using fly remote build from repository"
+            flyctl deploy --config fly.toml --remote-only
+          fi
+
+      - name: Post-deploy readiness check
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          # If flyctl provides an app name in fly.toml, use it; otherwise operator must set it in fly.toml.
+          APP=$(awk -F '=' '/^app/ {gsub(/"| /, "", $2); print $2; exit}' fly.toml || true)
+          if [[ -z "$APP" ]]; then
+            echo "No app found in fly.toml; skipping hostname readiness check."
+            exit 0
+          fi
+          # Wait for the app to become healthy via flyctl
+          for i in $(seq 1 20); do
+            echo "Checking app health: attempt $i"
+            # Try fetching /health from app proxy
+            HOST=$(flyctl status -a "$APP" --json | jq -r '.[0].name' 2>/dev/null || true)
+            if [[ -n "$HOST" ]]; then
+              if curl -sSf "https://${HOST}/health" | jq -e '.status=="ok"' >/dev/null 2>&1; then
+                echo "App reported healthy at https://${HOST}/health"
+                exit 0
+              fi
+            fi
+            sleep 6
+          done
+          echo "App did not report healthy within timeout" && exit 1
+
+# Acceptance criteria:
+# - This workflow fails early if REQUIRE_KMS=true and KMS_ENDPOINT secret is not present (require_kms_check.sh enforces).
+# - Image is built and pushed when DockerHub secrets are present; flyctl deploy runs afterwards.
+# - If no registry push, flyctl deploy runs remote-only build from repository.
+# - After deploy, a basic readiness probe attempts to hit /health on the Fly app and fails the job if not healthy.
+#
+# Secrets required for production deploy:
+# - FLY_API_TOKEN (required for flyctl operations)
+# - KMS_ENDPOINT (required when REQUIRE_KMS=true)
+# - Optionally DOCKERHUB_USERNAME / DOCKERHUB_PASSWORD / DOCKERHUB_REPO to push images
+#
+# Operational notes:
+# - Ensure fly.toml contains the "app" name or the readiness probe will skip host health checks.
+# - DO NOT COMMIT secrets into the repo. Use GitHub Actions secrets or host secret managers.
+

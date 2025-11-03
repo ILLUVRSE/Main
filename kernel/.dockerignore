@@ -1,0 +1,38 @@
+# kernel/.dockerignore — keep local artifacts and secrets out of the image
+
+# Node, build artifacts
+node_modules
+dist
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+.pnpm-debug.log
+
+# Local runtime / secrets
+.env
+.env.local
+db.json
+keys.json
+keys/
+*.key
+*.pem
+
+# Local DB / runtime data
+pgdata
+postgres-data
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Tests / coverage
+coverage
+tmp
+*.log
+
+# Git
+.git
+

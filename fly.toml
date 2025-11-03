@@ -1,0 +1,72 @@
+# fly.toml - Fly.io app configuration for ILLUVRSE Kernel
+# IMPORTANT:
+# - Replace `app` name with a unique name (or let `fly launch` create one).
+# - This config assumes you will build the image from the repo using the Dockerfile at kernel/Dockerfile.
+# - Manage secrets via: `fly secrets set POSTGRES_URL=... KMS_ENDPOINT=... SIGNER_ID=...`
+#
+# Quick deploy:
+#   1. Install flyctl: https://fly.io/docs/hands-on/install-flyctl/
+#   2. Login: flyctl auth login
+#   3. Create app (interactive): flyctl launch --name illuvrse-kernel --region iad --no-deploy
+#   4. Deploy: flyctl deploy --config fly.toml
+#   5. Set secrets: flyctl secrets set POSTGRES_URL="..." KMS_ENDPOINT="..." SIGNER_ID="kernel-signer-1"
+#
+# Notes:
+# - The app exposes HTTP on port 80/443 and routes traffic to the service's internal_port (3000).
+# - Health check / tcp_check pings the container port directly. You can extend with an HTTP check to /health if desired.
+
+app = "illuvrse-kernel"
+primary_region = "iad"
+
+[build]
+  # Use the kernel/Dockerfile in the repository root context.
+  dockerfile = "kernel/Dockerfile"
+  context = "."
+
+# Define machines and resources here if you prefer fly machines; default is fine for small apps.
+
+[env]
+  # Do NOT set secrets here. Use fly secrets instead:
+  # POSTGRES_URL = "postgresql://..."
+  # KMS_ENDPOINT = "https://kms.example/sign"
+  NODE_ENV = "production"
+  PORT = "3000"
+
+[experimental]
+  auto_rollback = true
+
+[[services]]
+  internal_port = 3000
+  protocol = "tcp"
+
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 100
+    hard_limit = 200
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls","http"]
+    port = 443
+
+  # TCP health check against internal port
+  [[services.tcp_checks]]
+    grace_period = "10s"
+    interval = 10000
+    timeout = 2000
+    restart_limit = 0
+    port = 3000
+
+  # Optional HTTP check (uncomment if you prefer HTTP probe)
+  # [[services.http_checks]]
+  #   interval = 10000
+  #   timeout = 2000
+  #   grace_period = "10s"
+  #   method = "GET"
+  #   path = "/health"
+  #   protocol = "http"
+  #   port = 3000
+

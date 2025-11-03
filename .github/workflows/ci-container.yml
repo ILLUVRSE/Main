@@ -79,8 +79,8 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         working-directory: kernel
         run: |
-          chmod +x kernel/ci/require_kms_check.sh
-          kernel/ci/require_kms_check.sh
+          chmod +x ci/require_kms_check.sh
+          ./ci/require_kms_check.sh
         env:
           REQUIRE_KMS: 'true'
           KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT }}

@@ -1,156 +1,124 @@
-# Kernel — Production Deployment Runbook (concise, no fluff)
+# Kernel — Production Deployment & Runbook
 
-Purpose
--------
-Clear, actionable steps to deploy the ILLUVRSE Kernel as a production container and bring it live. This runbook assumes you will run the Kernel as a long-running container (Docker) on a host like Fly.io / Render / DigitalOcean / ECS. It does **not** advise running on Vercel for production.
+## Purpose
 
-Always: **DO NOT COMMIT SECRETS**. Use host secret management (Fly secrets, Render secrets, GitHub Actions secrets, Vault).
+This document describes production deployment patterns, operational
+runbooks, and the minimal requirements to operate Kernel in production.
+Follow these notes precisely; production differs from local dev.
 
-Prereqs
--------
-- Code on `main` contains:
-  - `kernel/dist` (built JS), `kernel/Dockerfile`, `kernel/entrypoint.sh`, `kernel/sql/migrations/*`.
-  - `kernel/PRODUCTION.md`, `kernel/env.prod.sample`.
-- An accessible managed Postgres instance (hosted, TLS enabled).
-- A production KMS / signing proxy that implements the signing contract (Ed25519).
-- Fly/Render/AWS account and CLI (`flyctl`, `render` or `aws` CLI + deploy tool).
-- CI credentials (container registry or Fly API token) in CI secrets.
+## High-level architecture
 
-Required production environment variables (examples)
----------------------------------------------------
-Set these as secrets on the host and in CI. Do NOT store plaintext in repo.
+- API layer (stateless) behind a load balancer.  
+- Policy/Enforcement: SentinelNet cluster enforcing policies synchronously
+  for critical paths.  
+- Persistent store: managed Postgres with WAL backups and PITR.  
+- Reasoning/Vector store: scalable vector database with replicas.  
+- Async workers: for audit processing, replay, and remediation.  
+- Observability: Prometheus, Grafana, distributed tracing, structured logs.
 
-- `POSTGRES_URL`
-  Example: `postgresql://user:password@db.prod.example:5432/illuvrse?sslmode=require`
+## Infrastructure and provider choices
 
-- `KMS_ENDPOINT`
-  Example: `https://kms.internal/sign` (must support manifest sign and signData endpoints used by `signingProxy`)
+- Prefer managed services for Postgres, object storage, and KMS/HSM.  
+- Kubernetes is the reference platform for stateless services; use
+  auto-scaling groups for worker pools.  
+- Use private networking and mTLS between internal services.
 
-- `SIGNER_ID`
-  KMS key identifier (string). Example: `kernel-signer-1`
+## Deployment patterns
 
-- `REQUIRE_KMS=true`
-  Enforced in CI for prod pushes.
+- Blue/green or canary rollouts for API and SentinelNet.  
+- Immutable container images built in CI. Images are signed in CI and
+  must verify signature on deploy.  
+- Use feature flags for rollout control and metrics gating.
 
-- `NODE_ENV=production`, `PORT=3000`, `LOG_LEVEL=info`
+## Synchronous check design
 
-Host-specific secrets (examples)
-- `FLY_API_TOKEN` or `DOCKERHUB_*` (for CI deploy)
-- `SENTRY_DSN` (optional)
+- Synchronous checks must return within the configured SLO (e.g., 200ms
+  p95). For high-latency checks, return a fallback decision and emit a
+  `policyCheck` with `simMode=true` if configured.  
+- Fail-open is allowed only for simulated policies; otherwise fail-closed.
 
-High-level deployment steps (one-shot)
--------------------------------------
-1. **Build & test locally**
-   - From `ILLUVRSE/Main/kernel`:
-     ```bash
-     npm ci
-     npm run build
-     ./scripts/run-migrations.sh   # against dev/test DB
-     docker build -t illuvrse-kernel:local -f kernel/Dockerfile kernel
-     docker run --rm -e POSTGRES_URL=... -p 3000:3000 illuvrse-kernel:local
-     curl http://localhost:3000/health
-     ./test/integration/e2e.sh
-     ```
-   - Fix issues until e2e passes.
+## Asynchronous and streaming evaluation
 
-2. **Provision production Postgres**
-   - Use a managed DB (Supabase, RDS, ElephantSQL, DigitalOcean Managed DB). Enable TLS and network controls.
-   - Create DB `illuvrse` and a service account for the Kernel with least privilege.
+- Workers consume audit events and run retrospective policy checks.  
+- Streaming consumers must checkpoint offsets and support replay.  
+- Scale consumers independently; use backpressure and batching.
 
-3. **Set host secrets**
-   - Example Fly.io:
-     ```bash
-     flyctl secrets set POSTGRES_URL="postgresql://..." KMS_ENDPOINT="https://kms..." SIGNER_ID="kernel-signer-1"
-     ```
-   - Or in Render / DO / GitHub Actions secrets for CI.
+## Policy Registry and rollout
 
-4. **Migrate production DB**
-   - Run migrations once using CI job or run directly from a safe admin host:
-     ```bash
-     psql "$POSTGRES_URL" -f kernel/sql/migrations/001_init.sql
-## or run the compiled runner on the container host:
-     docker run --rm -e POSTGRES_URL="$POSTGRES_URL" illuvrse-kernel:local node ./dist/db/index.js
-     ```
+- Policies versioned and stored in Policy Registry. Each policy has a
+  lifecycle: draft → test → canary → active → deprecated.  
+- Canary: a small percentage of traffic or simulated runs compare
+  current behavior vs. expected impact. Rollout only if metrics pass.
 
-5. **Deploy container**
-   - **Fly.io (recommended quick flow):**
-     ```bash
-     flyctl auth login
-     flyctl apps create illuvrse-kernel --org <org> --region iad
-     flyctl secrets set POSTGRES_URL="$POSTGRES_URL" KMS_ENDPOINT="$KMS_ENDPOINT" SIGNER_ID="$SIGNER_ID"
-     flyctl deploy --config fly.toml
-     flyctl logs --app illuvrse-kernel   # watch startup
-     ```
-   - **Render / DO / ECS**: create a Web Service pointing to the Dockerfile, set env vars via UI, deploy.
-   - Validate health: `curl -sS https://<app-host>/health`
+## Remediation and enforcement
 
-6. **Smoke test production**
-   - Run the same smoke tests as local but target the production domain:
-     ```bash
-     POSTGRES_URL="$POSTGRES_URL" PORT=3000 ./kernel/test/integration/e2e.sh
-     ```
-   - Verify `audit_events` and `manifest_signatures` contain production rows.
+- Remediations must be idempotent and must log `remediation` events.  
+- High-risk remediation requires multi-sig approval or human-in-loop.  
+- Remediation runbooks must exist and be automated where safe.
 
-Security & operations checklist (must pass)
--------------------------------------------
-- [ ] **KMS in place**: `KMS_ENDPOINT` points to a production KMS signed by your security team. No local ephemeral keys in prod.
-- [ ] **Signing verification**: Verifier can validate Ed25519 signatures returned by `/kernel/sign` using the public key from KMS. Run verification test vector.
-- [ ] **Audit chain**: Chain integrity check passes end-to-end (create 10 audit events, verify `prev_hash` links and signature validation).
-- [ ] **RBAC**: Critical endpoints enforce roles:
-  - `POST /kernel/division`: `DivisionLead | SuperAdmin`
-  - `POST /kernel/sign`: `SuperAdmin | Service`
-  - `GET /kernel/audit/{id}`: `Auditor | SuperAdmin`
-  - `POST /kernel/allocate`: `Operator | DivisionLead | SuperAdmin`
-- [ ] **Sentinel policy**: `enforcePolicyOrThrow` integrated for manifests & allocations; policy decisions recorded in audit logs.
-- [ ] **Secrets**: No secrets in repo; secrets exist only in host secret manager.
-- [ ] **Backups**: Postgres backups configured (daily snapshot with 30/90-day retention).
-- [ ] **Monitoring & alerting**: Metrics exported (sign ops/sec, audit latency, request p95/p99), alerts on key errors.
-- [ ] **CI gating**: Merging to `main` requires CI green and `REQUIRE_KMS` enforced for production.
+## Explainability and evidence
 
-Key rotation & compromise (summary)
------------------------------------
-- Keys are hosted in KMS/HSM. Rotate keys via KMS rotation API.
-- Rotation workflow (short):
-  1. Create new key in KMS (`key-v2`), publish public key.
-  2. Update `SIGNER_ID` to reference `key-v2` in a staging Kernel, sign a rotation audit event with both old and new signer IDs.
-  3. Emit audit `upgrade.applied` once 3-of-5 multisig checklist passes.
-  4. Retire old key in KMS after overlap period. Document exact steps in `kernel/security-governance.md`.
+- Every `policyCheck` must include `rationale` and `evidence` pointers.  
+- Expose an explain endpoint:
 
-Rollback plan
--------------
-- Keep DB migrations backward-compatible when possible. For risky migrations:
-  - Deploy schema change behind feature flag, or
-  - Use write-forward pattern (create new table, backfill, switch reads).
-- On catastrophic failure, roll back to previous container image and restore DB snapshot.
+GET /sentinel/explain/{policyCheckId}
 
-Troubleshooting quick hits
---------------------------
-- **Server never starts**: Check host logs, confirm `POSTGRES_URL` reachable and `KMS_ENDPOINT` if `REQUIRE_KMS=true`.
-- **Migration fails**: inspect SQL line, run migration locally against a copy of prod DB, fix idempotency.
-- **Audit chain missing fields**: verify `audit_events` columns exist and `appendAuditEvent` uses UUID ids (no prefix).
-- **Signatures invalid**: retrieve public key from KMS and verify Ed25519 signature of canonicalized payload.
+Return structured evidence and rule evaluation path.
 
-Appendix: Minimal commands
----------------------------
-```bash
-## Build + run image locally (dev)
-docker build -t illuvrse-kernel:local -f kernel/Dockerfile kernel
-## ensure DB running locally
-docker run -d --name pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=illuvrse -p 5432:5432 postgres:15
-## run migrations (host psql or inside container)
-docker run --rm -e POSTGRES_URL="postgresql://postgres:postgres@host.docker.internal:5432/illuvrse" illuvrse-kernel:local node ./dist/db/index.js
-## run container
-docker run --rm -e POSTGRES_URL="postgresql://postgres:postgres@host.docker.internal:5432/illuvrse" -e KMS_ENDPOINT="" -p 3000:3000 illuvrse-kernel:local
-## health
-curl http://localhost:3000/health
+## CI/CD and testing
 
-Acceptance criteria (short)
+- CI produces signed artifacts and container images.  
+- Release pipeline runs integration tests, security scans, and
+  performance smoke tests.  
+- Production deployments require green checks and signed approval.
 
-curl https://<prod-host>/health → {"status":"ok","ts":"..."}
+## Scaling and performance
 
-E2E smoke tests pass against prod host.
+- Autoscale API pods based on request latency and queue lengths.  
+- For reasoning graph, partitioning/sharding is required for scale.  
+- Benchmarks: target 99th-percentile latencies, capacity planning in
+  runbooks.
 
-Audit events and manifest_signatures appear and verify with KMS public key.
+## Security and signing
 
-Security checklist signed by Ryan (SuperAdmin) and Security Engineer.
+- All internal traffic must use mTLS and RBAC.  
+- Production signing uses KMS/HSM. Do not use local keys in prod.  
+- Keys: rotate on schedule and record rotation events in audit logs.
 
+## Backups, disaster recovery, and replay
+
+- Postgres PITR and daily snapshots.  
+- Object store replication across regions.  
+- Replay tooling for audit events with deterministic ordering.
+
+## Runbooks and playbooks
+
+- Health check failure:  
+  1. Check pods and node statuses.  
+  2. Check DB connectivity and WAL lag.  
+  3. Roll back if needed or scale pods.
+
+- Audit integrity alert: verify `audit_events` tail and run replay test.  
+- Key compromise: rotate keys, revoke old keys, and replay signed
+  manifests for verification.
+
+## Acceptance criteria for production deployment (minimal)
+
+- Signed container images and signed deployment artifacts.  
+- KMS-backed production signing enabled and tested.  
+- DR plan in place and tested (restore within RTO, RPO met).  
+- Observability: metrics, traces, and alerting on SLOs.  
+- Canary/rollout gating with automated rollback.
+
+## Operational notes and cost controls
+
+- Limit high-cardinality metrics; use sampling for traces.  
+- Use spot/scale-down for non-critical worker types.  
+- Tagging and cost center allocation required for all resources.
+
+## Final notes
+
+- Do not store production secrets in source control. Use environment
+  injection and secrets managers.  
+- Update this runbook with every operational change and sign-off by
+  Security and Ops owners.

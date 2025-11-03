@@ -5,7 +5,7 @@ Follow the steps **one file at a time** (we're already following that workflow).
 
 ---
 
-## Prereqs (you already have most files)
+# # Prereqs (you already have most files)
 - `kernel/openapi.yaml`, `kernel/data-models.md`, `kernel/acceptance-criteria.md` exist in the repo (these are the contract and doc sources).
 - Files created so far: `src/server.ts`, `src/db/index.ts`, `src/signingProxy.ts`, `src/auditStore.ts`, `src/rbac.ts`, `src/models.ts`, `src/types.ts`, `src/sentinelClient.ts`, `sql/migrations/001_init.sql`, `package.json`, `tsconfig.json`, `env.sample`, `docker-compose.yml`, `.gitignore`.
 
@@ -13,7 +13,7 @@ If any of those are missing, stop and create them now (one file at a time). Donâ
 
 ---
 
-## Environment (local dev)
+# # Environment (local dev)
 1. Copy env sample:
    ```bash
    cp kernel/env.sample kernel/.env

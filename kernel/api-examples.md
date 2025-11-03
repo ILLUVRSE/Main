@@ -4,10 +4,10 @@ Purpose: a handful of concise, readable request/response examples that show how 
 
 ---
 
-## 1) Create / Update a DivisionManifest
+# # 1) Create / Update a DivisionManifest
 **Intent:** register a division or update its manifest.
 
-**Endpoint:** `POST /kernel/division`  
+**Endpoint:** `POST /kernel/division`
 **Request payload (JSON):**
 ```json
 {

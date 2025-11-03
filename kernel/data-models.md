@@ -1,11 +1,11 @@
 # Kernel — Canonical Data Models
 
-Purpose: concise, unambiguous definitions of the core models the Kernel and surrounding systems use.  
+Purpose: concise, unambiguous definitions of the core models the Kernel and surrounding systems use.
 API surfaces use **camelCase**. Database column names use **snake_case**. Persisted manifests and audit records are versioned and immutable where noted.
 
 ---
 
-## 1) DivisionManifest
+# # 1) DivisionManifest
 **Intent:** authoritative description of a Division (goals, budget, KPIs, policies).
 
 Fields (API / meaning / DB type):

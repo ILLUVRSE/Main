@@ -5,7 +5,7 @@ API surfaces use **camelCase**. Database column names use **snake_case**. Persis
 
 ---
 
-# # 1) DivisionManifest
+## # 1) DivisionManifest
 **Intent:** authoritative description of a Division (goals, budget, KPIs, policies).
 
 Fields (API / meaning / DB type):

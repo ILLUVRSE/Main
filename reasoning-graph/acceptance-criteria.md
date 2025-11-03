@@ -4,7 +4,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 1) API & contract
+## # 1) API & contract
 - **Endpoints implemented:** `POST /reason/node`, `POST /reason/edge`, `GET /reason/node/{id}`, `GET /reason/trace/{id}`, `POST /reason/snapshot`, `GET /reason/snapshot/{id}`, `POST /reason/query`, `POST /reason/annotate/{id}`, `GET /reason/export/{id}` exist and match the spec.
 - **Auth enforced:** All write endpoints accept requests only from Kernel (mTLS + RBAC). Read endpoints enforce RBAC and PII redaction per SentinelNet policy.
 
@@ -12,7 +12,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 2) Node & edge creation → audit
+## # 2) Node & edge creation → audit
 - **Audit linkage:** Every created node/edge emits an AuditEvent linking the node/edge id, payload hash, signerId (when applicable), and `manifestSignatureId`.
 - **Append-only behavior:** Nodes and edges are append-only; corrections are created as new nodes linked to originals.
 
@@ -20,7 +20,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 3) Trace queries & traversal correctness
+## # 3) Trace queries & traversal correctness
 - **Trace retrieval works:** `GET /reason/trace/{id}` returns ordered, annotated traces with ancestors/descendants per requested direction and depth.
 - **Cycle handling:** Traversal detects cycles and avoids infinite loops; cycles are annotated in the returned trace.
 - **Performance:** Small-to-medium traces return within SLO (e.g., p95 < 200ms).
@@ -29,7 +29,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 4) Snapshot creation, canonicalization & signing
+## # 4) Snapshot creation, canonicalization & signing
 - **Canonicalization defined & stable:** Canonical JSON algorithm is documented and deterministic across runtimes.
 - **Snapshot hashing & signing:** Snapshot process computes SHA-256, obtains an Ed25519 signature via KMS/HSM, stores snapshot in S3, and emits an audit event linking hash + signature.
 - **Verification tool:** A verification utility validates snapshot hash/signature and confirms stored snapshot matches canonical form.
@@ -38,7 +38,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 5) Provenance & integration
+## # 5) Provenance & integration
 - **Provenance links:** Nodes/edges referencing decisions, evaluations, or policies include `manifestSignatureId` or `auditEventId` proving authorization.
 - **Integration tested:** Eval Engine, Agent Manager, and SentinelNet can produce/consume nodes and edges: scores → recommendations → decisions → policyChecks flow recorded in graph.
 
@@ -46,7 +46,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 6) PII handling & SentinelNet enforcement
+## # 6) PII handling & SentinelNet enforcement
 - **PII redaction:** Traces returned to unauthorized viewers are redacted according to SentinelNet policies.
 - **Pre-write checks:** SentinelNet rejects nodes containing prohibited content; such rejections produce `policyCheck` nodes.
 
@@ -54,7 +54,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 7) Snapshot export & auditor workflows
+## # 7) Snapshot export & auditor workflows
 - **Human-readable exports:** `GET /reason/export/{id}?format=human` produces a readable trace/snapshot for auditors including signature metadata.
 - **Canonical export for verification:** `format=canonical` returns canonical JSON necessary for cryptographic verification.
 
@@ -62,7 +62,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 8) Durability, backup & restore
+## # 8) Durability, backup & restore
 - **Durable storage:** Snapshots and exports stored in S3 with versioning and object lock for audit buckets.
 - **Restore & replay:** Ability to rebuild graph metadata from audit events and snapshots verified in a restore drill.
 
@@ -70,7 +70,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 9) Observability & SLOs
+## # 9) Observability & SLOs
 - **Metrics:** request rate, trace latency (p50/p95/p99), snapshot creation latency, signature latency, error rate, and queue/backlog metrics exported.
 - **Tracing:** end-to-end traces propagated and visible (canonicalization, hash, signature, S3 write spans).
 - **Alerts:** set for snapshot/signature failures, trace latency, and graph DB connectivity.
@@ -79,7 +79,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 10) Tests & automation
+## # 10) Tests & automation
 - **Unit tests:** canonicalization, hash/signature verification, cycle detection.
 - **Integration tests:** create node/edge → trace → snapshot → sign → export.
 - **Property/determinism tests:** canonicalization must produce identical output across language runtimes and repeated runs.
@@ -89,7 +89,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 11) Performance & scale
+## # 11) Performance & scale
 - **Small-trace SLO:** trace queries for traces under configured depth return under p95 threshold (e.g., <200ms).
 - **Snapshot capability:** snapshot process for small-to-medium subgraphs completes within defined median time (documented).
 - **Scaling plan:** sharding or caching strategy documented for large graphs.
@@ -98,7 +98,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 12) Security & governance
+## # 12) Security & governance
 - **mTLS + RBAC:** Kernel-only writes; read access limited per role.
 - **Signer/key handling:** Snapshot signing uses KMS/HSM keys; keys are not stored in cluster secrets.
 - **Audit events:** All important actions (node/edge creation, snapshot, signature) emit AuditEvents and are verifiable.
@@ -107,7 +107,7 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # 13) Documentation & sign-off
+## # 13) Documentation & sign-off
 - **Docs present:** `reasoning-graph-spec.md`, `deployment.md`, `README.md`, and this acceptance criteria file exist.
 - **Sign-off:** Security Engineer and Ryan sign off; record sign-off as an audit event.
 
@@ -115,7 +115,6 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-# # Final acceptance statement
+## # Final acceptance statement
 The Reasoning Graph is accepted when all above criteria pass in staging (or prod-equivalent) environment, the test suite is green, canonicalization and signature verification succeed, integrations work end-to-end, and formal sign-off by Ryan and the Security Engineer is recorded.
-
 

@@ -4,7 +4,7 @@ Purpose: practical, operational instructions for deploying the Memory Layer (Pos
 
 ---
 
-# # 1) High-level architecture
+## # 1) High-level architecture
 - **Postgres** — authoritative relational store (divisions, agents, memory_nodes metadata, manifests, audit pointers).
 - **Vector DB** — Milvus/Pinecone/Weaviate for storing embeddings and performing nearest-neighbor search.
 - **Object Storage (S3)** — artifacts, model binaries, audit archives, embedding snapshots. Enable versioning + object lock for audit buckets.
@@ -18,7 +18,7 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 2) Required infra & recommended providers
+## # 2) Required infra & recommended providers
 - **Kubernetes cluster** (for API, workers).
 - **Postgres** (managed: RDS/Cloud SQL/AzureDB) with replicas and PITR support.
 - **Vector DB**: Pinecone (hosted) or self-hosted Milvus on K8s (use operator). Choose Pinecone for fast bootstrap.
@@ -30,7 +30,7 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 3) Kubernetes deployment patterns
+## # 3) Kubernetes deployment patterns
 - **Namespace**: `illuvrse-memory` per environment.
 - **Helm chart**: include Deployments for API + workers, ConfigMaps, Secrets (sourced from Vault), HorizontalPodAutoscaler, Service, and NetworkPolicy.
 - **Stateful vs stateless**: Memory API/workers are stateless; Postgres is managed or stateful set with backups; Vector DB may be stateful and requires proper storage class.
@@ -39,7 +39,7 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 4) Networking & security
+## # 4) Networking & security
 - **mTLS & service auth**: Kernel calls Memory API via mTLS; validate CN and map to service identity. Use service mesh or sidecar if needed.
 - **Network policies**: deny-all default; explicitly allow API → Postgres, API → Vector DB, API → S3, workers → embedding model endpoint.
 - **Encryption**: TLS for all in-transit connections; enable at-rest encryption for Postgres, Vector DB, and S3.
@@ -48,7 +48,7 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 5) Embedding pipeline & workers
+## # 5) Embedding pipeline & workers
 - **Queue-driven design**: Producers (API or agents) enqueue documents; embedding workers consume batches, preprocess, call embedding model, and write vectors to Vector DB and metadata to Postgres.
 - **Batching**: batch small items to improve throughput; tune batch size to model throughput and latency.
 - **Model selection & versioning**: record embedding model name + version in metadata. Re-embedding jobs should be able to target a specific model version.
@@ -57,13 +57,13 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 6) Data consistency & joins
+## # 6) Data consistency & joins
 - **Write ordering**: ensure the write pattern either (A) write Postgres metadata first with placeholder embeddingId then update after vector write, or (B) perform atomic-like pattern: insert metadata only after vector write returns id. Design for eventual consistency and provide a short-lived "pending" state.
 - **Materialized view**: create materialized views for common joins (vector hits + title/owner/snippet) to speed up search results. Refresh intervals depend on freshness requirements.
 
 ---
 
-# # 7) Backups, snapshots & replay
+## # 7) Backups, snapshots & replay
 - **Postgres**: enable daily snapshots + WAL archiving for PITR. Test restores regularly.
 - **Vector DB**: use provider snapshot/export. Save snapshots to S3 with checksums. For Milvus, snapshot and export index files. For Pinecone, export embeddings to S3 or database.
 - **Audit & artifacts**: write daily compressed archives of audit topic to S3; preserve for legal retention.
@@ -71,14 +71,14 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 8) Retention, TTL & legal-hold
+## # 8) Retention, TTL & legal-hold
 - **Default TTL**: configurable (e.g., 365 days) for non-audit memory nodes. Implement soft-delete by default.
 - **Legal hold**: items under legal hold are excluded from TTL deletion; mark with `legalHold: true`.
 - **PII controls**: set `piiFlags` on nodes; enforce access restrictions (SentinelNet and Memory API checks) and redact on reads when required.
 
 ---
 
-# # 9) Observability & SLOs
+## # 9) Observability & SLOs
 - **Metrics**: ingestion rate, vector write latency, search latency (p95), queue depth, worker errors, storage utilization.
 - **Tracing**: propagate traces through API → queue → worker → Vector DB → Postgres.
 - **Logs**: structured logs (traceId, memoryNodeId, caller). Ship to central logging.
@@ -87,7 +87,7 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 10) Testing & validation
+## # 10) Testing & validation
 - **Integration tests**: ingest sample documents, ensure vectors written and semantic search returns expected hits.
 - **Chaos tests**: simulate Vector DB unavailability and verify backpressure and DLQ behavior.
 - **Restore drills**: regularly restore from Postgres backup and vector snapshot to ensure recoverability.
@@ -95,28 +95,28 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 11) Scaling & capacity planning
+## # 11) Scaling & capacity planning
 - **Horizontal scale**: autoscale API and workers by CPU/queue depth. Vector DB scaling depends on provider (automatic in Pinecone; manual shards with Milvus).
 - **Sharding**: partition vectors by namespace/tenant for multi-tenancy. Use logical shards to isolate heavy workloads.
 - **Storage**: plan S3 capacity and lifecycle rules for artifacts and archived snapshots.
 
 ---
 
-# # 12) CI/CD & migrations
+## # 12) CI/CD & migrations
 - **Pipelines**: lint, unit tests, build container, integration tests in ephemeral env, push image, deploy to staging, run acceptance tests, then promote to prod (GitOps/ArgoCD recommended).
 - **DB migrations**: run migrations as pre-deploy job. Use backward-compatible migrations where possible. Document breaking changes.
 - **Vector DB upgrades**: test upgrade path on staging; snapshot before any upgrade.
 
 ---
 
-# # 13) Access & audit
+## # 13) Access & audit
 - **Audit events**: every create/update/delete must emit Kernel audit event (link to manifestSignatureId).
 - **Access logs**: record who accessed what artifacts/memory nodes and include in audit exports for compliance.
 - **Proof exports**: support canonical export that includes Postgres records, vector metadata, artifact checksums, and head hash.
 
 ---
 
-# # 14) Acceptance criteria (deployment)
+## # 14) Acceptance criteria (deployment)
 - Memory API deployed and healthy in staging with Postgres + Vector DB + S3 connected.
 - Embedding pipeline ingests sample docs and semantic search returns expected results.
 - Backups for Postgres and vector snapshots exist and a restore drill succeeds.
@@ -126,7 +126,7 @@ Audit events → Kafka → S3 archive + Postgres index
 
 ---
 
-# # 15) Operational runbooks (must exist)
+## # 15) Operational runbooks (must exist)
 - Vector DB degraded or full runbook.
 - Postgres failover & restore runbook.
 - DLQ management and embedding retry runbook.

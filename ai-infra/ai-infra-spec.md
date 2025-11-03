@@ -1,11 +1,11 @@
 # AI & Infrastructure — Specification
 
-# # Purpose
+## # Purpose
 Provide a production-grade AI infrastructure stack for ILLUVRSE: model registry, training/fine-tuning pipelines, artifact & dataset lineage, model serving, drift detection, reproducible retraining, cost-aware compute orchestration, and ModelOps. This system enables safe, auditable, and repeatable model lifecycle management at scale under Kernel governance.
 
 ---
 
-# # Core responsibilities
+## # Core responsibilities
 - Model registry and metadata (versions, lineage, metrics, signatures).
 - Dataset lineage and provenance tracking (sources, transformations, checksums).
 - Training/fine-tune orchestration (submit, schedule, run, monitor, artifactize).
@@ -19,7 +19,7 @@ Provide a production-grade AI infrastructure stack for ILLUVRSE: model registry,
 
 ---
 
-# # Minimal public interfaces (intents)
+## # Minimal public interfaces (intents)
 These are service-level intents (Kernel-authenticated / mTLS):
 
 ## # Model registry & metadata
@@ -52,7 +52,7 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Canonical data models (short)
+## # Canonical data models (short)
 
 ## # ModelRegistryEntry
 - `modelId`, `family`, `version`, `codeRef`, `artifactId`, `metrics` (eval results), `createdAt`, `createdBy`, `status` (`draft|staging|prod|deprecated`), `signerId`, `signature`, `lineage` (dataset refs, parent models), `provenance`.
@@ -68,7 +68,7 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Training & fine-tune pipeline (principles)
+## # Training & fine-tune pipeline (principles)
 - **Reproducibility first:** every run stores codeRef, environment (container image digest), dependency versions, random seed, exact dataset checksums, hyperparams, and compute configuration.
 - **Snapshot artifacts:** checkpoints, final model, logs, and evaluation artifacts stored in S3 with checksum and registered artifactId.
 - **Immutable runs:** training jobs produce immutable records; corrections are new jobs.
@@ -77,7 +77,7 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Model serving & ops
+## # Model serving & ops
 - **Serving primitives:** containerized model servers (TF, PyTorch, Triton, custom runtimes) behind autoscaling proxies.
 - **A/B & shadowing:** support A/B routing and shadow traffic to new models for evaluation.
 - **SLOs & health:** latency SLOs, request tracing, per-model metrics (p95, error rate), and request-level provenance (model version, signer).
@@ -86,7 +86,7 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Drift detection & model governance
+## # Drift detection & model governance
 - **Continuous monitoring:** track input distribution, output distribution, performance degradation, and fairness metrics; compute drift scores.
 - **Alerting:** automatic alerts when drift exceed thresholds; create `retrain` suggestions or quarantines.
 - **Explainability traces:** link evaluation and drift findings to Reasoning Graph for auditability and root-cause analysis.
@@ -94,7 +94,7 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Compute orchestration & cost control
+## # Compute orchestration & cost control
 - **Compute pools:** define pools (gpu-us-east, tpu-europe, cpu-highmem) with quotas and cost rates. Integrate with Resource Allocator to request and charge GPU hours.
 - **Scheduler:** integrate K8s + Ray (or similar) for distributed training; use spot instances for cost savings with checkpointing.
 - **Preemption & checkpointing:** support periodic checkpointing and graceful restart on preemption.
@@ -102,14 +102,14 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Dataset & artifact governance
+## # Dataset & artifact governance
 - **Lineage & licensing:** dataset registration includes license and usage restrictions; SentinelNet blocks usage of restricted datasets.
 - **PII & safety:** datasets flagged for PII trigger additional checks and require approval before training. Preprocessing pipelines record escrows of raw PII and produce sanitized derivatives.
 - **Retention:** datasets and artifacts retain per policy; old artifacts archived with proofs.
 
 ---
 
-# # Security, signing & provenance
+## # Security, signing & provenance
 - **Model signing:** production model promotions require signature (Ed25519) after successful checks. Signatures stored as ManifestSignature linked to model registry.
 - **Provenance:** every model, dataset, and deployment record includes provenance and audit linkage.
 - **Watermarking:** apply model watermarking where relevant (to prove model origin and discourage misuse).
@@ -117,7 +117,7 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Integration & automation
+## # Integration & automation
 - **Kernel:** gate promotions, record ManifestSignature links, produce audit events, and handle multisig for high-risk promotions.
 - **SentinelNet:** pre-train, pre-promotion, and runtime policy checks (PII, export control, safety).
 - **Reasoning Graph & Memory Layer:** store evaluation traces, explainability artifacts, and dataset references for audit.
@@ -126,14 +126,14 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Observability & testing
+## # Observability & testing
 - **Metrics:** training job durations, GPU utilization, model serving latency/error, drift scores, retrain frequency, cost per model.
 - **Tracing & logs:** end-to-end trace for training job (submit → run → artifact → promote) and serving requests.
 - **Testing:** unit tests for canonicalization and lineage; integration for full train → evaluate → deploy → canary → promote flows; chaos tests for preemption and node failures.
 
 ---
 
-# # Acceptance criteria (minimal)
+## # Acceptance criteria (minimal)
 - **Reproducible runs:** submit a training job and verify that the recorded run (codeRef, env, datasets, seed) produces the same artifact when re-run with same inputs.
 - **Model registry:** register a model, store artifact, record lineage, and retrieve metadata and signature.
 - **Secure promotion:** model promotion to `prod` requires successful evaluation, SentinelNet clearance, and a ManifestSignature; blocked promotions are rejected.
@@ -145,7 +145,7 @@ These are service-level intents (Kernel-authenticated / mTLS):
 
 ---
 
-# # Example flow (short)
+## # Example flow (short)
 1. Data engineer registers `dataset:v1` with lineage and checksums.
 2. ML engineer submits `train` job pointing at `dataset:v1` and `codeRef` (`git@...#commit-sha`) requesting `2xA100` in `gpu-us-east`.
 3. Scheduler provisions GPUs via Resource Allocator, SentinelNet approves, and training runs using Ray; periodic checkpoints stored in S3.

@@ -5,7 +5,7 @@ Follow the steps **one file at a time** (we're already following that workflow).
 
 ---
 
-# # Prereqs (you already have most files)
+## # Prereqs (you already have most files)
 - `kernel/openapi.yaml`, `kernel/data-models.md`, `kernel/acceptance-criteria.md` exist in the repo (these are the contract and doc sources).
 - Files created so far: `src/server.ts`, `src/db/index.ts`, `src/signingProxy.ts`, `src/auditStore.ts`, `src/rbac.ts`, `src/models.ts`, `src/types.ts`, `src/sentinelClient.ts`, `sql/migrations/001_init.sql`, `package.json`, `tsconfig.json`, `env.sample`, `docker-compose.yml`, `.gitignore`.
 
@@ -13,7 +13,7 @@ If any of those are missing, stop and create them now (one file at a time). Donâ
 
 ---
 
-# # Environment (local dev)
+## # Environment (local dev)
 1. Copy env sample:
    ```bash
    cp kernel/env.sample kernel/.env
@@ -26,35 +26,35 @@ Start local infra
 
 From ILLUVRSE/Main:
 
-# enter repo
+## enter repo
 cd ~/ILLUVRSE/Main
 
-# start Postgres (and pgadmin if desired)
+## start Postgres (and pgadmin if desired)
 docker compose -f kernel/docker-compose.yml up -d db
-# optional: docker compose -f kernel/docker-compose.yml up -d
+## optional: docker compose -f kernel/docker-compose.yml up -d
 
-# wait for postgres to be ready (psql or wait loop)
-# you can use the migration runner which waits for DB (see db/index.ts)
+## wait for postgres to be ready (psql or wait loop)
+## you can use the migration runner which waits for DB (see db/index.ts)
 
 Install and migrate
 
 cd kernel
 npm install
-# Run migrations using the included script which calls psql against POSTGRES_URL
-# Ensure POSTGRES_URL env var is set (or set in kernel/.env and load it)
+## Run migrations using the included script which calls psql against POSTGRES_URL
+## Ensure POSTGRES_URL env var is set (or set in kernel/.env and load it)
 export POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/illuvrse
 npm run migrate
-# Or use the embedded migration runner:
-# node -r ts-node/register src/db/index.ts
+## Or use the embedded migration runner:
+## node -r ts-node/register src/db/index.ts
 
 Notes:
 
 The migration is idempotent. You should be able to run it repeatedly without harm. If you run into issues, inspect kernel/sql/migrations/001_init.sql.
 
 Run the server (dev)
-# dev (live reload)
+## dev (live reload)
 npm run dev
-# or build & run
+## or build & run
 npm run build
 npm start
 
@@ -83,7 +83,6 @@ Create (upsert) a Division:
 curl -X POST -H "Content-Type: application/json" \
   -d '{"id":"dvg-test-1","name":"Test Division","goals":["ship"],"budget":1000,"currency":"USD","kpis":["k1"],"policies":[]}' \
   http://localhost:3000/kernel/division | jq
-
 
 Fetch division:
 

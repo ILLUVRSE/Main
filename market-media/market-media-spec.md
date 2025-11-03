@@ -1,11 +1,11 @@
 # Market & Media — Specification
 
-# # Purpose
+## # Purpose
 Operate audience growth, content production, and distribution for ILLUVRSE. Run marketing campaigns, content pipelines, SEO/social/media, analytics, and creator programs — all governed, auditable, and integrated with Kernel, Marketplace, and Product teams. Provide mechanisms to plan, execute, measure, and optimize growth channels and creative assets.
 
 ---
 
-# # Core responsibilities
+## # Core responsibilities
 - Content production pipeline: plan, create, review, publish, and archive articles, videos, social posts, and assets.
 - Campaign orchestration: design and run multiplatform campaigns (organic + paid), manage budgets, creatives, audiences, and measurement.
 - Creator/partner programs: onboard creators, manage assets, royalties, and distribution agreements.
@@ -17,7 +17,7 @@ Operate audience growth, content production, and distribution for ILLUVRSE. Run 
 
 ---
 
-# # Minimal public APIs (intents)
+## # Minimal public APIs (intents)
 These endpoints are internally consumed by Product, Marketplace, Kernel, and external publishing hooks:
 
 - `POST /media/asset` — register/upload a media asset (metadata, owner, license, tags). Returns `assetId`.
@@ -35,7 +35,7 @@ These endpoints are internally consumed by Product, Marketplace, Kernel, and ext
 
 ---
 
-# # Canonical models (short)
+## # Canonical models (short)
 
 ## # MediaAsset
 - `assetId`, `title`, `ownerId`, `type` (`image|video|article|audio`), `tags`, `licenseId`, `status` (`draft|review|approved|published|retired`), `metadata`, `createdAt`.
@@ -51,7 +51,7 @@ These endpoints are internally consumed by Product, Marketplace, Kernel, and ext
 
 ---
 
-# # Processes & rules
+## # Processes & rules
 
 ## # Content production
 - Create → Review → Legal/Compliance check (SentinelNet/legal as needed) → Sign-off → Publish → Distribute.
@@ -77,7 +77,7 @@ These endpoints are internally consumed by Product, Marketplace, Kernel, and ext
 
 ---
 
-# # Integrations & tooling
+## # Integrations & tooling
 - **Kernel:** audit events, multisig budget approvals, and manifest signing for published bundles or campaign budgets.
 - **SentinelNet:** pre-publish content scanning for copyright/PII/brand compliance and real-time moderation.
 - **Memory Layer:** store transcripts, scripts, and produced content metadata for search and reuse.
@@ -87,14 +87,14 @@ These endpoints are internally consumed by Product, Marketplace, Kernel, and ext
 
 ---
 
-# # SEO, publication & moderation
+## # SEO, publication & moderation
 - Generate canonical pages with correct OG tags, structured data, and sitemaps. Submit sitemaps to search engines via automated processes.
 - Integrate moderation pipeline: automated checks (SentinelNet) + human moderation workflow (CommandPad) for appeals and overrides.
 - Maintain publication schedule and ensure expired content or license expirations trigger takedown or review.
 
 ---
 
-# # Metrics & success criteria
+## # Metrics & success criteria
 - **Acquisition metrics:** impressions, clicks, CTR, conversions, CAC.
 - **Activation metrics:** activation rate resulting from campaigns or content.
 - **Engagement:** session duration, pages per session, return visits.
@@ -103,14 +103,14 @@ These endpoints are internally consumed by Product, Marketplace, Kernel, and ext
 
 ---
 
-# # Safety & compliance
+## # Safety & compliance
 - Use SentinelNet to scan content for PII, copyright, brand violations, and policy compliance. Block or quarantine flagged content until review.
 - Licensing and rights must be validated before publication; Marketplace listings must include license metadata.
 - Regional restrictions: enforce geoblocking and content restrictions per jurisdiction.
 
 ---
 
-# # Acceptance criteria (minimal)
+## # Acceptance criteria (minimal)
 - Media asset registration and publishing flow works: upload asset → legal/compliance checks → approve → publish to channel with audit event.
 - Campaign lifecycle works end-to-end: create → allocate budget (via Kernel) → start → collect metrics → stop → reconcile spend with Finance.
 - Analytics ingestion works and campaign attribution is consistent and queryable.
@@ -120,7 +120,7 @@ These endpoints are internally consumed by Product, Marketplace, Kernel, and ext
 
 ---
 
-# # Operational notes
+## # Operational notes
 - Keep content and campaign templates to speed repeatable launches.
 - Automate as much of legal/compliance checking as safe — use SentinelNet and then human review for edge cases.
 - Create dashboards for campaign owners and finance for spend reconciliation.

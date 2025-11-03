@@ -4,7 +4,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 1) High-level deployment architecture
+## # 1) High-level deployment architecture
 - Deploy Agent Manager as a Kubernetes-native service (K8s cluster per region or environment).
 - Provide a Helm chart (or Kustomize) for deploying the service, CRDs (if any), RBAC, and defaults.
 - Use a dedicated namespace: `illuvrse-agent-manager` (or shard by division/region).
@@ -13,7 +13,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 2) Infra components required
+## # 2) Infra components required
 - **Kubernetes cluster** (K8s >= 1.24 recommended). Multi-AZ for resiliency.
 - **Postgres** (managed RDS/AzureDB/GCP Cloud SQL) with replica for HA.
 - **Kafka / Redpanda** for audit/events (single logical cluster with topic `audit-events`). Consider managed Redpanda / Confluent.
@@ -28,7 +28,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 3) Kubernetes deployment patterns
+## # 3) Kubernetes deployment patterns
 - **Helm chart**: package deployment, service, deployment, HPA, ConfigMap, SecretTemplate, ServiceAccount, RBAC, and PodDisruptionBudget. Provide a `values.yaml` for environment overrides.
 - **Replica set & HPA**: default replicas 2; HPA based on CPU/memory and custom metrics (queue depth, provisioning latency).
 - **PodDisruptionBudget**: allow controlled eviction; keep `minAvailable: 1` or `50%` depending on SLA.
@@ -39,7 +39,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 4) Networking & security
+## # 4) Networking & security
 - **mTLS**: all inbound calls from Kernel must use mTLS. Issue service certs from Vault PKI or in-cluster CA. Validate client certs and map CN to service identity.
 - **Network policies**: strict K8s NetworkPolicies limiting egress only to required services (Postgres, Kafka, Vault, S3, AI infra). Deny-all default.
 - **Egress controls**: block internet egress unless required. Any egress must be approved and audited.
@@ -49,7 +49,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 5) Databases & durable storage
+## # 5) Databases & durable storage
 - **Postgres**: run as managed service. Use connection pooling (PgBouncer) and prepared statements. Run migrations via CI job or helm hook. Backups daily, WAL archiving for point-in-time recovery.
 - **Kafka/Redpanda**: configure topic `audit-events` with replication factor >=3. Single-writer per partition; ensure partitioning strategy for ordering guarantees.
 - **S3**: enable object lock and versioning for audit archives. Archive audit topics daily to S3 as a compressed file.
@@ -57,7 +57,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 6) CI/CD & release strategy
+## # 6) CI/CD & release strategy
 - **Repo structure**: `/agent-manager` contains helm chart under `/charts/agent-manager` and Dockerfile under `/images/agent-manager`.
 - **Pipeline stages**:
   1. Lint + unit tests.
@@ -71,13 +71,13 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 7) Migrations & upgrades
+## # 7) Migrations & upgrades
 - Run DB migrations as a pre-deploy job (helm hook/job) with a migration script. Keep migrations backward-compatible where possible.
 - For breaking schema changes, use blue/green or expand-contract migration steps: add new columns, backfill, switch consumers, then drop old columns. Document each breaking change in the upgrade manifest.
 
 ---
 
-# # 8) Observability & SLOs
+## # 8) Observability & SLOs
 - **Metrics**: instrument endpoints and internals: request latency, request rate, sign operations/sec, provisioning latency, active agents, failed starts, heartbeats missing. Export via Prometheus metrics.
 - **Tracing**: use OpenTelemetry or Jaeger to trace provisioning flows end-to-end. Propagate trace IDs through Agent Manager → Kernel → Resource Allocator.
 - **Logs**: structured JSON logs with `agentId`, `requestId`, `traceId`. Ship logs to ELK or hosted logs.
@@ -91,7 +91,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 9) Scaling & capacity planning
+## # 9) Scaling & capacity planning
 - **Horizontal scaling**: scale Agent Manager pods; leader-election for single-writer actions.
 - **Sharding**: consider sharding by division or region for very large fleets.
 - **Resource nodes**: use node pools for different workloads — dedicated nodes for provisioning heavy tasks.
@@ -100,7 +100,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 10) Backups & recovery
+## # 10) Backups & recovery
 - **Postgres**: point-in-time recovery via WAL, daily snapshots. Store backups in a different region.
 - **Kafka**: mirror topics to backup cluster or use tiered storage. Archive audit topic to S3 daily.
 - **S3**: object lock + versioning for immutable storage.
@@ -108,14 +108,14 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 11) Disaster recovery & failover
+## # 11) Disaster recovery & failover
 - **Single-region outage**: have cross-region replicas for Postgres and Kafka if required by RPO/RTO. Document failover steps and automation.
 - **Operational safe mode**: support a “safe mode” where signing and apply operations are suspended and only read operations allowed while integrity rebuilds occur.
 - **Key compromise**: documented in `security-governance.md` — revoke keys, rotate, run verification, and replay.
 
 ---
 
-# # 12) Testing & validation
+## # 12) Testing & validation
 - **Unit & integration tests**: run in CI.
 - **End-to-end**: ephemeral cluster runs that simulate instantiate → provision → run → destroy.
 - **Chaos testing**: simulate node kill, DB failover, Kafka lag, and ensure audit events remain intact.
@@ -123,7 +123,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 13) Operational runbooks (must exist)
+## # 13) Operational runbooks (must exist)
 - Provisioning failure runbook.
 - Heartbeat failure / mass agent failure runbook.
 - Key rotation & compromise runbook.
@@ -132,7 +132,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 14) Acceptance criteria (deployment)
+## # 14) Acceptance criteria (deployment)
 - Helm chart deploys cleanly into a staging cluster.
 - Liveness/readiness pass and health endpoint returns OK.
 - Integration acceptance tests for instantiate→run→destroy complete successfully.
@@ -143,7 +143,7 @@ Purpose: practical, operational instructions for deploying the Agent Manager as 
 
 ---
 
-# # 15) Notes & operational suggestions
+## # 15) Notes & operational suggestions
 - Prefer managed services for Postgres and Kafka to reduce ops burden.
 - Use GitOps (ArgoCD) for cluster promotion to enforce declarative state.
 - Keep secrets centrally in Vault and avoid writing secrets to logs or DB.

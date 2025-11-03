@@ -4,7 +4,7 @@ Purpose: a handful of concise, readable request/response examples that show how 
 
 ---
 
-# # 1) Create / Update a DivisionManifest
+## # 1) Create / Update a DivisionManifest
 **Intent:** register a division or update its manifest.
 
 **Endpoint:** `POST /kernel/division`
@@ -95,8 +95,6 @@ Request payload:
   "timestamp": "2025-01-12T09:00:00Z",
   "source": "sim-runner"
 }
-
-
 
 Response (200):
 {

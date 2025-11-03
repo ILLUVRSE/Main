@@ -4,7 +4,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 1) High-level architecture
+## # 1) High-level architecture
 - **Model Registry Service** — authoritative metadata, lineage, promotions, signatures.
 - **Training Orchestration** — job submission API + scheduler; leverages k8s + Ray (or Kubeflow/Argo/MLFlow) for distributed training/fine-tuning.
 - **Artifact Store** — S3-compatible object storage for checkpoints, model binaries, evaluation artifacts. Enable versioning and object lock for audit buckets.
@@ -16,7 +16,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 2) Infrastructure & provider choices
+## # 2) Infrastructure & provider choices
 - **Kubernetes** (managed recommended) for API servers, workers, and serving pods. Multi-AZ clusters for resilience.
 - **Ray on K8s / Kubeflow / managed ML infra** for distributed training. Choose Ray / Kubeflow for flexibility; use managed services if available.
 - **Postgres** for authoritative metadata (model registry, dataset lineage). Partition large tables.
@@ -29,7 +29,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 3) Kubernetes deployment patterns
+## # 3) Kubernetes deployment patterns
 - **Namespaces:** `ai-infra`, `ai-training`, `ai-serving` (separate namespaces per environment).
 - **Helm charts:** package Model Registry, Training Orchestrator, Scheduler, Serving Controller, and Drift services with `values.yaml`.
 - **Stateful components:** model registry DB and certain job controllers may be stateful; use managed DB for simplicity.
@@ -38,7 +38,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 4) Training orchestration & job patterns
+## # 4) Training orchestration & job patterns
 - **Job submission flow:** client → training API → validate dataset & resources → request allocation via Resource Allocator → schedule job on training cluster.
 - **Scheduler:** use Ray/K8s job pattern for distributed runs. Support spot instances with checkpointing to survive preemption.
 - **Reproducibility:** store codeRef (commit), container image digest, dependency manifest, hyperparams, random seed, dataset checksums, and exact environment. Record all in the training job record.
@@ -47,7 +47,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 5) Serving & ModelOps
+## # 5) Serving & ModelOps
 - **Deployment controller:** deploy model containers or managed runtime (Triton). Record deployment metadata (modelId, version, image digest, resources, canary config).
 - **Canary & A/B:** support traffic splitting and shadowing; monitor key metrics (latency, error-rate, business metrics) and auto-roll back on regressions.
 - **Autoscaling:** scale by request rate and latency; support GPU node pool autoscaling for heavy inference.
@@ -55,21 +55,21 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 6) Signatures, provenance & KMS/HSM
+## # 6) Signatures, provenance & KMS/HSM
 - **Signing proxy:** implement a signing proxy that interacts with KMS/HSM to sign model promotion artifacts and snapshot hashes. App servers call the proxy over mTLS.
 - **Promotion signing:** production promotions require signed manifest with signerId and stored ManifestSignature. For high-risk models, require multisig.
 - **Provenance:** model registry entries store artifactId, checksum, codeRef, datasetRefs, evaluation metrics, signerId, and signature.
 
 ---
 
-# # 7) SentinelNet & policy gating
+## # 7) SentinelNet & policy gating
 - **Pre-train checks:** SentinelNet evaluates dataset usage and PII flags before allowing training on certain datasets.
 - **Pre-promotion checks:** enforce safety, fairness, export control, and privacy checks through SentinelNet before promoting models to staging/prod.
 - **Runtime enforcement:** monitor serving for violations (PII leakage patterns, unusual inputs) and quarantine or scale down models as required.
 
 ---
 
-# # 8) Cost & resource accounting
+## # 8) Cost & resource accounting
 - **Compute pools & quotas:** define pools (gpu-us-east, cpu-highmem); Resource Allocator tracks capacity and grants reservations.
 - **Cost tracking:** record GPU hours, storage, and egress per job/model and report to Finance for chargeback.
 - **Spot & preemption strategy:** use spot instances to cut costs but implement robust checkpointing; provide fallback to on-demand resources if critical.
@@ -77,14 +77,14 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 9) CI/CD & model reproducibility
+## # 9) CI/CD & model reproducibility
 - **Pipeline:** unit tests + reproducibility tests → build image with locked deps → integration tests (train on synthetic data) → push image → deploy to staging.
 - **Model CI:** for model code changes, run a reproducibility and evaluation pipeline verifying that metrics match expectations.
 - **Promotion pipeline:** automated evaluation → SentinelNet checks → manual sign-off/multisig if required → promotion and signed manifest.
 
 ---
 
-# # 10) Observability & SLOs
+## # 10) Observability & SLOs
 - **Metrics:** training job duration, GPU utilization, checkpoint frequency, model serving latency and error rates, drift scores, retrain frequency, and cost per model.
 - **Tracing:** link traces from request → model serving → evaluation → reasoning. Capture request IDs, model version, and signer.
 - **Alerts:** training failures, checkpoint upload failures, excessive drift, performance regression in canary, or cost overruns.
@@ -92,7 +92,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 11) Backups, snapshots & replay
+## # 11) Backups, snapshots & replay
 - **Artifact backups:** store model artifacts and checkpoints in S3 with versioning and checksum.
 - **Dataset snapshots:** snapshot datasets used for training; store checksums and codeRefs.
 - **Reproducibility replay:** provide tooling to re-run jobs deterministically using recorded provenance; verify output artifact checksums.
@@ -100,7 +100,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 12) Testing & validation
+## # 12) Testing & validation
 - **Unit tests:** for canonicalization, artifact checksum verification, and lineage handling.
 - **Integration tests:** train → upload artifact → register model → promote → deploy → canary → rollback scenarios.
 - **Determinism tests:** repeat a small training job and verify artifact checksum equality (or acceptable divergence documented).
@@ -108,7 +108,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 13) Runbooks (must exist)
+## # 13) Runbooks (must exist)
 - Training job failure & retry runbook.
 - Checkpoint restoration & re-run job runbook.
 - Signature/KMS/HSM failure & key rotation runbook.
@@ -118,7 +118,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 14) Security & governance
+## # 14) Security & governance
 - **mTLS & RBAC:** all service-to-service communications use mTLS; human access via OIDC/SSO with 2FA.
 - **Secrets:** Vault for secrets; never write secrets to logs or persistent storage.
 - **PII protections:** datasets flagged as PII require approvals and additional controls; SentinelNet gates PII usage.
@@ -126,7 +126,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 15) Acceptance criteria (deployment)
+## # 15) Acceptance criteria (deployment)
 - **Training reproducibility:** submit a representative training job; re-run and verify artifact integrity or documented acceptable variance.
 - **Model registry:** register, sign, promote, and retrieve model metadata and signature.
 - **Serving & canary:** deploy a model, run a canary test, and auto-rollback on injected regressions.
@@ -138,7 +138,7 @@ Purpose: operational, production-ready guidance for deploying the AI & Infrastru
 
 ---
 
-# # 16) Operational notes & cost controls
+## # 16) Operational notes & cost controls
 - Use managed services where possible (managed k8s, managed object storage, managed HSM) to reduce ops burden.
 - Enforce quotas and approvals for expensive resources (GPUs). Require approval for very large retrains.
 - Start with a conservative autoscaling policy and tune with real traffic.

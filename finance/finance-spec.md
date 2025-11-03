@@ -1,11 +1,11 @@
 # Finance & Billing — Specification
 
-# # Purpose
+## # Purpose
 Finance & Billing provides an auditable, production-grade financial engine for ILLUVRSE: double-entry ledgers, invoicing, payments, refunds, escrow, royalties/payouts, tax/VAT handling, and exportable audit packages. It guarantees accounting correctness, cryptographic audibility of financial events, and integration with Kernel audit and multisig governance for high-risk flows.
 
 ---
 
-# # Core responsibilities
+## # Core responsibilities
 - Maintain a double-entry ledger (immutable, append-only journal) that records debits and credits for every financial event.
 - Create and manage invoice lifecycle: drafted → issued → paid → fulfilled → closed (or refunded/voided).
 - Integrate with payment processors (Stripe) for payments and refunds; handle payment confirmation webhooks securely.
@@ -17,7 +17,7 @@ Finance & Billing provides an auditable, production-grade financial engine for I
 
 ---
 
-# # Minimal public APIs (intents)
+## # Minimal public APIs (intents)
 These endpoints are Kernel/Marketplace/Finance-facing (all Kernel-authenticated where applicable):
 
 - `POST /finance/invoice` — create/issue an invoice. Payload: buyer, line_items, tax, currency, due_date, terms, related_manifest. Returns `invoiceId`.
@@ -36,7 +36,7 @@ These endpoints are Kernel/Marketplace/Finance-facing (all Kernel-authenticated 
 
 ---
 
-# # Canonical data models (short)
+## # Canonical data models (short)
 
 ## # LedgerEntry (JournalEntry)
 - `id` — uuid
@@ -63,14 +63,14 @@ These endpoints are Kernel/Marketplace/Finance-facing (all Kernel-authenticated 
 
 ---
 
-# # Double-entry principles & ledger integrity
+## # Double-entry principles & ledger integrity
 - Every financial transaction posts a JournalEntry with balanced debits and credits. JournalEntries are append-only and immutable once posted (corrections are new reversing entries).
 - Ledger entries are hashed and signed. The ledger supports a head hash chain for immutability (similar to audit events) to enable cryptographic verification for auditors.
 - Currency handling: ledger entries should record native currency and base accounting currency (platform currency), along with FX rate and timestamp. The balancing check occurs in base currency or with explicit FX handling.
 
 ---
 
-# # Invoice lifecycle
+## # Invoice lifecycle
 1. **Draft** — invoice created but not yet issued.
 2. **Issued** — invoice visible to buyer; invoice signature + audit event generated.
 3. **Paid (pending)** — payment intent or provider webhook indicates payment received; finance records payment.
@@ -82,7 +82,7 @@ Revenue recognition must follow chosen policy (e.g., on delivery or over time) a
 
 ---
 
-# # Royalties, splits & payouts
+## # Royalties, splits & payouts
 - Define `royalty_rule` on SKU or contract: percentage splits among participants, platform fee, and reserved holdbacks.
 - On sale: marketplace triggers finance to create payable accruals (deferred revenue) and pending payout line items for owners.
 - Payout run: scheduled or on-demand, Finance generates payout files, executes transfers via PSP or bank rails, and emits `payout.run` audit events.
@@ -90,34 +90,34 @@ Revenue recognition must follow chosen policy (e.g., on delivery or over time) a
 
 ---
 
-# # Escrow & conditional settlements
+## # Escrow & conditional settlements
 - Escrow allows funds to be locked until conditions met (delivery, QA, acceptance). Escrow creation posts `Escrow` record and corresponding ledger reservation.
 - Release requires verification of condition (via Kernel audit event or multisig ratification) and emits ledger entries moving funds from escrow to payable and then to payout upon schedule.
 
 ---
 
-# # Tax & compliance
+## # Tax & compliance
 - Tax engine calculates tax per line item based on jurisdiction rules and buyer location (VAT/GST). Must store tax evidences (buyer address, VAT ID) for audit.
 - Produce tax returns and evidence packages per jurisdiction and period: `GET /finance/tax/return/{period}`.
 - Ensure transactional records include tax amounts and supporting data; support OSS/VOEC flows where applicable.
 
 ---
 
-# # Auditability & proofs
+## # Auditability & proofs
 - Finance must produce cryptographically verifiable audit packages: canonicalized journal segment + head hash + signature(s).
 - Support `GET /finance/verify` to request a signed proof for a given date range or sequence of journal entries. Proofs include public key metadata to verify signatures.
 - Exports for auditors include invoice PDFs, signed journal entries, payment confirmations, and settlement/payout files.
 
 ---
 
-# # Security & governance
+## # Security & governance
 - Sensitive operations (large payouts, escrow release > threshold) require multisig approval via Kernel multisig workflow.
 - All finance endpoints require mTLS + RBAC. Human UI operations require SSO/OIDC with 2FA.
 - Keys for signing ledger entries and audit proofs must be managed in KMS/HSM and rotated per policy. Access to signing keys logged and limited.
 
 ---
 
-# # Integrations
+## # Integrations
 - **Marketplace** — invoices and order settlements.
 - **Kernel** — manifest signatures, audit events, multisig gating.
 - **Payment provider (Stripe)** — payment intents, webhooks, refunds.
@@ -126,20 +126,20 @@ Revenue recognition must follow chosen policy (e.g., on delivery or over time) a
 
 ---
 
-# # Error handling & reconciliation
+## # Error handling & reconciliation
 - Provide reconciliation tools and APIs to reconcile payments, payouts, and ledger balances.
 - Implement idempotency for webhook processing and guard against double-posting.
 - Support manual adjustments with required audit justification and ledger corrections (reversing entries).
 
 ---
 
-# # Reporting & dashboards
+## # Reporting & dashboards
 - Provide financial dashboards: AR/AP, deferred revenue, realized revenue, outstanding invoices, payout liabilities, VAT owed, and cash position.
 - Exportable reports for CFO/Finance and auditors.
 
 ---
 
-# # Deployment & infra notes (brief)
+## # Deployment & infra notes (brief)
 - Run Finance as a secure, isolated service with strict network controls and dedicated DB.
 - Use managed Postgres and ensure encryption at rest and in transit.
 - Backups: frequent snapshots and PITR for Postgres; ledger integrity verification job.
@@ -147,7 +147,7 @@ Revenue recognition must follow chosen policy (e.g., on delivery or over time) a
 
 ---
 
-# # Acceptance criteria (minimal)
+## # Acceptance criteria (minimal)
 - Double-entry ledger implemented: every transaction posts balanced journal entries and can be verified.
 - Invoice lifecycle implemented end-to-end: create → issue → payment → fulfill → close.
 - Payment integration: record payment webhooks idempotently and post ledger entries accordingly.
@@ -161,7 +161,7 @@ Revenue recognition must follow chosen policy (e.g., on delivery or over time) a
 
 ---
 
-# # Example flow (short)
+## # Example flow (short)
 1. Marketplace creates `invoice` for order `order-123` → Finance records invoice `inv-001` and emits `invoice.issued` audit event.
 2. Buyer pays via Stripe; webhook calls `POST /finance/payment` with providerRef. Finance records payment, posts journal entries (debit cash, credit deferred revenue), emits `payment.received` audit event.
 3. Marketplace calls `POST /finance/fulfill` once delivery confirmed. Finance recognizes revenue (moves deferred revenue → sales revenue) and creates accruals for royalties.

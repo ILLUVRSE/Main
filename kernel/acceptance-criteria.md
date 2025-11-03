@@ -4,7 +4,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 1) API surface & contract
+## # 1) API surface & contract
 - **Endpoints implemented:** The kernel exposes the documented endpoints (division, agent, agent state, eval, allocate, sign, audit, reason, security/status).
 - **Schema matches spec:** Request and response shapes follow `openapi.yaml` and `data-models.md`. Schema validation rejects malformed requests with `400`.
 - **Idempotency:** Mutation endpoints accept an idempotency key header to avoid duplicate events.
@@ -13,7 +13,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 2) RBAC & Authentication
+## # 2) RBAC & Authentication
 - **RBAC enforced:** Each endpoint enforces role checks. SuperAdmin, DivisionLead, Operator, Auditor have the appropriate rights.
 - **Human auth via OIDC:** Interactive flows require SSO/OIDC.
 - **Service auth via mTLS:** Services authenticate with mTLS certs and are mapped to service roles.
@@ -22,7 +22,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 3) Manifest signing & key management
+## # 3) Manifest signing & key management
 - **Signing works:** Kernel produces `ManifestSignature` records for manifests and returns them on `POST /kernel/sign`. Signatures are Ed25519 and verifiable with the public key.
 - **KMS/HSM usage described:** Signing keys referenced by `signerId` and not stored in plaintext in repo.
 - **Key rotation procedure present:** A documented rotation flow exists and rotation events are auditable.
@@ -31,7 +31,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 4) Audit log integrity
+## # 4) Audit log integrity
 - **Append-only events:** Audit events are generated for every critical change and stored append-only.
 - **Hash chain & signatures:** Each `AuditEvent` includes `prevHash`, `hash`, and `signature`. Chain verification succeeds end-to-end.
 - **Export/proof tool:** A verification tool or documented process can validate chain integrity and produce a head hash proof.
@@ -40,7 +40,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 5) Multi-sig upgrade workflow
+## # 5) Multi-sig upgrade workflow
 - **3-of-5 enforced:** Kernel accepts approval records, validates signatures, and only applies upgrades with 3 distinct valid approvals.
 - **Upgrade artifacts stored:** Upgrade manifest, approvals, and applied record are in the upgrade registry and emitted as audit events.
 - **Emergency flow:** Emergency apply and retroactive ratification logic works as documented.
@@ -49,7 +49,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 6) SentinelNet policy integration
+## # 6) SentinelNet policy integration
 - **Policy checks enforced:** SentinelNet can block or quarantine requests; Kernel respects SentinelNet responses for allocations and critical actions.
 - **Policy decisions audited:** Every SentinelNet decision emits an audit event with policy id and rationale.
 
@@ -57,7 +57,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 7) Eval ingestion & scoring hook
+## # 7) Eval ingestion & scoring hook
 - **Eval accepted:** Kernel stores EvalReports and exposes them to the Eval Engine.
 - **Agent score updated:** Submitting evals updates agent’s computed or cached score as per the model in `data-models.md`.
 
@@ -65,7 +65,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 8) Reasoning trace retrieval
+## # 8) Reasoning trace retrieval
 - **Trace accessible:** `GET /kernel/reason/{node}` returns a readable trace with steps and timestamps.
 - **PII redaction:** Sensitive data is redacted per SentinelNet rules before returning traces to UI.
 
@@ -73,7 +73,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 9) Storage & durability
+## # 9) Storage & durability
 - **Durable sink for audit:** Audit events are persisted to a durable storage and archived (S3 or equivalent).
 - **DB schema present:** Postgres schema matches `data-models.md` and includes required indexes.
 - **Embeddings stored in vector DB:** MemoryNode references exist and vector DB contains embeddings.
@@ -82,7 +82,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 10) Tests & automation
+## # 10) Tests & automation
 - **Unit tests:** Core modules (signature validation, audit chaining, multisig validator) have unit tests with at least 80% coverage.
 - **Integration tests:** End-to-end tests for: create division → sign → spawn agent → submit eval → allocation.
 - **Security tests:** Static analysis and a basic DAST scan performed; secrets are not checked into repo.
@@ -91,7 +91,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 11) Operational & monitoring checks
+## # 11) Operational & monitoring checks
 - **Health endpoint:** `/health` returns ok and timestamp.
 - **Metrics & logs:** Kernel exports Prometheus metrics for p95/p99 latency, request rate, error rate, sign operations/sec.
 - **Alerting:** SLO breaches and key rotation failures trigger alerts.
@@ -100,7 +100,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 12) Compliance & docs
+## # 12) Compliance & docs
 - **Documentation present:** `kernel-api-spec.md`, `openapi.yaml`, `data-models.md`, `security-governance.md`, `audit-log-spec.md`, `multisig-workflow.md`, `api-examples.md`, and this acceptance criteria file are present in the `kernel` folder.
 - **Sign-off:** Ryan (SuperAdmin) and Security Engineer must sign off on the module before it’s considered live.
 
@@ -108,7 +108,7 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # 13) Performance & scale baseline
+## # 13) Performance & scale baseline
 - **Latency:** API p95 < 200ms for core read endpoints under baseline load.
 - **Throughput:** Audit event pipeline can sustain X events/sec (define X during implementation).
 - **Scaling:** Document how to scale Kafka partitions, DB replicas, and vector DB shards.
@@ -117,7 +117,6 @@ Purpose: clear, testable checks that prove the Kernel API & Governance module is
 
 ---
 
-# # Final acceptance statement
+## # Final acceptance statement
 The Kernel API & Governance module is accepted when all above checks pass, automated tests are green, audit integrity verified, and Ryan + Security Engineer formally approve. At that point, downstream modules (Agent Manager, Memory Layer, Eval Engine) may be implemented against the Kernel contract.
-
 

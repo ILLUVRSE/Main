@@ -1,11 +1,11 @@
 # Business & Product Development — Specification
 
-# # Purpose
+## # Purpose
 Incubate, validate, and launch new AI-native products and startups inside ILLUVRSE. Run repeatable discovery → build → measure → scale cycles, own product-market fit, acquisition experiments, early monetization, and handoff to operations. Provide APIs and artifacts to Kernel, Market & Media, Finance, and AI infra so incubation is auditable, measurable, and governed.
 
 ---
 
-# # Core responsibilities
+## # Core responsibilities
 - Idea pipeline: capture, score and prioritize product blueprints and hypotheses.
 - Discovery & research: run customer interviews, prototypes, usability tests, and capture evidence (notes, recordings, metrics).
 - Roadmaps & sprints: own a repeatable delivery cadence, milestones, and go/no-go gates.
@@ -17,7 +17,7 @@ Incubate, validate, and launch new AI-native products and startups inside ILLUVR
 
 ---
 
-# # Minimal external interfaces (intents)
+## # Minimal external interfaces (intents)
 These are services and data that other modules consume (or that Product calls):
 
 - `POST /product/idea` — submit an idea/blueprint (title, hypothesis, owner, expected impact, budget).
@@ -34,7 +34,7 @@ These are services and data that other modules consume (or that Product calls):
 
 ---
 
-# # Canonical models (short)
+## # Canonical models (short)
 
 ## # ProductIdea
 - `id`, `title`, `owner`, `description`, `hypothesis`, `targetMetric`, `targetValue`, `estimatedBudget`, `status` (`backlog|discovery|mvp|scale|retired`), `score`, `createdAt`.
@@ -50,7 +50,7 @@ These are services and data that other modules consume (or that Product calls):
 
 ---
 
-# # Processes & rules
+## # Processes & rules
 
 ## # Idea-to-MVP flow
 1. Capture Idea → score (manual + automated model) → decide discovery.
@@ -69,7 +69,7 @@ These are services and data that other modules consume (or that Product calls):
 
 ---
 
-# # Integrations & tooling
+## # Integrations & tooling
 - **Kernel**: register manifests, request allocations, sign critical documents, and write audit events.
 - **Memory Layer**: store research artifacts, user interviews, and evidence docs with embeddings for search.
 - **Reasoning Graph**: record decision rationales and traces for major go/no-go decisions.
@@ -80,21 +80,21 @@ These are services and data that other modules consume (or that Product calls):
 
 ---
 
-# # Metrics & success criteria
+## # Metrics & success criteria
 - **Leading metrics:** experiment lift (A/B delta), activation rate, conversion rate from acquisition to activation.
 - **Outcome metrics:** retention (7d, 30d), activation % (first valuable action), CAC, payback period, MRR/ARPU where relevant.
 - **Operational metrics:** experiment velocity (experiments/month), feature cycle time, time to first measurable result.
 
 ---
 
-# # Safety & compliance
+## # Safety & compliance
 - Products that process PII must have data handling plans, SentinelNet checks, and legal approvals.
 - Budget or resource requests triggering high-risk flows must go through multisig and SentinelNet.
 - Product teams must follow legal & compliance checklist (terms of service, privacy policy, data residency).
 
 ---
 
-# # Acceptance criteria (minimal)
+## # Acceptance criteria (minimal)
 - Idea registration → discovery → MVP cycles can be recorded end-to-end with evidence stored in Memory Layer and audit events emitted.
 - Experiments start/stop and results stored; A/B experiment analysis and conclusion recorded.
 - MVP launch triggers measurement plan instrumentation; funnel metrics are captured and accessible.
@@ -104,14 +104,14 @@ These are services and data that other modules consume (or that Product calls):
 
 ---
 
-# # Operational notes & team roles
+## # Operational notes & team roles
 - Typical roles: ProductManager (vision), GrowthHacker (acquisition experiments), TechnicalLead (MVP), UXResearcher (interviews), DataAnalyst (experiment analysis).
 - Keep sprint cadence short and experiments fast; do small bets frequently.
 - Record every hypothesis, experiment, and decision in Memory Layer and Reasoning Graph.
 
 ---
 
-# # Example flow (short)
+## # Example flow (short)
 1. Submit idea “Auto-onboarding for creators” with hypothesis: increase 7d activation by 20% for new creators.
 2. Run discovery interviews, create prototype, store transcripts in Memory Layer.
 3. Launch MVP to a 5% cohort with instrumentation.

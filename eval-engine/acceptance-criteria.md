@@ -4,7 +4,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 1) API & contract
+## # 1) API & contract
 - **Endpoints implemented:** `/eval/submit`, `/eval/agent/{id}/score`, `/eval/scoreboard`, `/eval/promote`, `/eval/retrain`, `/alloc/request`, `/alloc/{id}`, `/alloc/approve`, `/alloc/reject`, `/alloc/pools`, `/alloc/preempt`.
 - **Auth & RBAC:** Kernel-authenticated (mTLS) calls succeed; unauthenticated or insufficient-role calls are rejected (`401`/`403`).
 
@@ -12,7 +12,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 2) Eval ingestion & persistence
+## # 2) Eval ingestion & persistence
 - **Eval accepted:** `POST /eval/submit` accepts valid EvalReports and persists them.
 - **Idempotency:** Duplicate submissions with same idempotency key do not create duplicates.
 - **Backpressure behavior:** If ingestion backlog grows, API returns accepted/queued and metrics reflect queue depth.
@@ -21,7 +21,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 3) Scoring correctness & explainability
+## # 3) Scoring correctness & explainability
 - **Score computation:** Scores computed per configured windows (e.g., 1h/24h/7d) and normalization rules.
 - **Component breakdown:** Every score exposes a breakdown of component contributions and confidence.
 - **Deterministic output:** Given synthetic inputs, scores and breakdowns match expected values.
@@ -30,7 +30,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 4) Promotion & recommendation flow
+## # 4) Promotion & recommendation flow
 - **Promotion events:** Eval emits PromotionEvents when thresholds/conditions are met (with rationale & confidence).
 - **Hysteresis:** Promotions require sustained condition over configured windows to prevent thrashing.
 - **Reasoning recorded:** Promotion recommendations are recorded to the Reasoning Graph and linked with AuditEvents.
@@ -39,7 +39,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 5) Resource allocation lifecycle
+## # 5) Resource allocation lifecycle
 - **Request → approval → apply:** Allocations follow `requested → pending → approved/applied` lifecycle.
 - **Transactional apply:** Allocation apply is transactional: reservation → infra request → confirm → audit. Rollbacks restore accounting on failure.
 - **Status reporting:** `GET /alloc/{id}` returns accurate status and timestamps.
@@ -48,7 +48,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 6) SentinelNet policy enforcement
+## # 6) SentinelNet policy enforcement
 - **Policy checks required:** All allocation applies and critical promotions run SentinelNet checks.
 - **Policy outcomes audited:** SentinelNet decisions (allow/deny/quarantine) are logged as AuditEvents with `policyId` and rationale.
 
@@ -56,7 +56,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 7) Finance & budget integration
+## # 7) Finance & budget integration
 - **Budget gating:** Capital allocations consult Finance; allocations that exceed budget are rejected or sent for escalation.
 - **Ledger reconciliation:** Allocation `applied` states produce ledger entries (or mock confirmations) before finalization for capital flows.
 
@@ -64,7 +64,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 8) Retrain orchestration
+## # 8) Retrain orchestration
 - **Retrain job lifecycle:** `POST /eval/retrain` creates retrain jobs with proper queueing and status transitions.
 - **Resource booking:** Retrain jobs request GPU hours from Resource Allocator and respect quotas/budget.
 - **Result ingestion:** Retrain results (metrics) are captured and used by Eval to propose model promotions.
@@ -73,7 +73,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 9) Canary & rollback behavior
+## # 9) Canary & rollback behavior
 - **Canary promotion:** Promotions can be applied in canary mode (limited allocation) and monitored before full apply.
 - **Auto-rollback:** If post-apply metrics or canary checks fail, Eval triggers demotion/preemption and Resource Allocator reclaims resources.
 
@@ -81,7 +81,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 10) Auditability & signatures
+## # 10) Auditability & signatures
 - **Audit events emitted:** PromotionEvents, AllocationRecords, RetrainJobs, and key decisions produce AuditEvents with `hash`, `prevHash`, and `signature`.
 - **Verifiable chain:** Audit chain verification succeeds on emitted events.
 - **Manifest linkage:** Promotion/allocation actions reference ManifestSignature or Upgrade artifacts when applicable.
@@ -90,7 +90,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 11) Observability, metrics & alerts
+## # 11) Observability, metrics & alerts
 - **Metrics present:** eval ingestion rate, scoring latency, promotion rate, allocation request latency, allocation success rate, retrain queue length, preemption events.
 - **Tracing:** End-to-end tracing from eval submit to allocation apply with trace IDs.
 - **Alerts:** Alert on excessive promotion rates, allocation failures, retrain queue growth, and scoring pipeline backfill needs.
@@ -99,7 +99,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 12) Resilience, scaling & replay
+## # 12) Resilience, scaling & replay
 - **Scaling:** Workers autoscale based on queue depth and throughput; leader election prevents race conditions.
 - **Replay:** Ability to replay EvalReports from Kafka/archive and recompute scores idempotently.
 - **Backfills:** Support deterministic backfill of scores from archived telemetry.
@@ -108,7 +108,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 13) Security & secrets
+## # 13) Security & secrets
 - **mTLS & RBAC:** Kernel-only mTLS for orchestrated calls; RBAC enforced for sensitive actions.
 - **Secrets:** Secrets stored in Vault; no secrets in repo or logs.
 - **Key management:** Allocation and promotion signatures use KMS/HSM where required.
@@ -117,7 +117,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 14) Tests & automation
+## # 14) Tests & automation
 - **Unit tests:** Coverage for scoring logic, hysteresis, normalization, and allocation reconciliation.
 - **Integration tests:** End-to-end tests for Eval submit → score → promotion → allocation → apply → audit.
 - **Chaos tests:** Simulate Kafka lag, Postgres failover, and worker crashes; confirm safe behavior and audit integrity.
@@ -126,7 +126,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # 15) Documentation & sign-off
+## # 15) Documentation & sign-off
 - **Docs present:** `eval-engine-spec.md`, `deployment.md`, `README.md`, and this acceptance criteria file are present.
 - **Sign-off:** Security Engineer and Ryan sign off before declaring the module live; record sign-off as an AuditEvent.
 
@@ -134,7 +134,6 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ---
 
-# # Final acceptance statement
+## # Final acceptance statement
 The Eval Engine & Resource Allocator module is accepted when all above criteria pass in a staging environment, automated tests are green, audit integrity is verified, SentinelNet policy checks function, Finance gates work for capital allocations, and formal sign-off by Ryan and the Security Engineer is recorded.
-
 

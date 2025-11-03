@@ -68,7 +68,7 @@ High-level deployment steps (one-shot)
    - Run migrations once using CI job or run directly from a safe admin host:
      ```bash
      psql "$POSTGRES_URL" -f kernel/sql/migrations/001_init.sql
-     # or run the compiled runner on the container host:
+## or run the compiled runner on the container host:
      docker run --rm -e POSTGRES_URL="$POSTGRES_URL" illuvrse-kernel:local node ./dist/db/index.js
      ```
 
@@ -133,15 +133,15 @@ Troubleshooting quick hits
 Appendix: Minimal commands
 ---------------------------
 ```bash
-# Build + run image locally (dev)
+## Build + run image locally (dev)
 docker build -t illuvrse-kernel:local -f kernel/Dockerfile kernel
-# ensure DB running locally
+## ensure DB running locally
 docker run -d --name pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=illuvrse -p 5432:5432 postgres:15
-# run migrations (host psql or inside container)
+## run migrations (host psql or inside container)
 docker run --rm -e POSTGRES_URL="postgresql://postgres:postgres@host.docker.internal:5432/illuvrse" illuvrse-kernel:local node ./dist/db/index.js
-# run container
+## run container
 docker run --rm -e POSTGRES_URL="postgresql://postgres:postgres@host.docker.internal:5432/illuvrse" -e KMS_ENDPOINT="" -p 3000:3000 illuvrse-kernel:local
-# health
+## health
 curl http://localhost:3000/health
 
 Acceptance criteria (short)

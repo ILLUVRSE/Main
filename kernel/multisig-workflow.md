@@ -4,12 +4,12 @@ Purpose: define the concrete, auditable process for approving and applying Kerne
 
 ---
 
-# # Summary (one line)
+## # Summary (one line)
 Kernel core upgrades require **3-of-5** signed approvals from designated approvers; the workflow produces a single signed upgrade artifact and an immutable audit record before any change is applied.
 
 ---
 
-# # Approver set
+## # Approver set
 - **Primary approver pool (5 total)**: SuperAdmin (Ryan) + 4 appointed approvers drawn from Division Leads / Security Engineer / Technical Lead.
 - Approver identities are fixed in the Kernel Key Registry and resolved to signer IDs (e.g., `ryan`, `sec-eng`, `tech-lead`, `divlead-1`, `divlead-2`).
 
@@ -17,7 +17,7 @@ Kernel core upgrades require **3-of-5** signed approvals from designated approve
 
 ---
 
-# # Artifacts to be produced for every upgrade
+## # Artifacts to be produced for every upgrade
 1. **Upgrade Manifest** (required): JSON object describing:
    - `upgradeId` (uuid)
    - `type` (`code|manifest|policy|rollback`)
@@ -35,7 +35,7 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-# # Normal approval flow (step-by-step)
+## # Normal approval flow (step-by-step)
 1. **Prepare upgrade**: Requestor (Technical Lead or Operator) creates the Upgrade Manifest and uploads code/patch to a secure artifact store; compute `patchHash`. This is recorded as a draft upgrade event on the audit bus.
 2. **Run automated checks**: CI runs unit tests, integration tests, security scans, and canary simulations as required by `preconditions`. CI posts test results to the draft upgrade event. If tests fail, the upgrade is paused.
 3. **Request approvals**: Requestor uses CommandPad to submit the Upgrade Manifest for approval. The Kernel issues a `pending-approval` upgrade event. All approvers are notified.
@@ -47,13 +47,13 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-# # Rollback flow
+## # Rollback flow
 - **Rollback is also a multi-sig upgrade**: create a `type: rollback` Upgrade Manifest referencing `target` (previous version) plus `reason`. The same 3-of-5 approval flow applies.
 - **Emergency rollback**: if severe failure detected, SecurityEngineer or SuperAdmin may trigger an emergency rollback procedure (see Emergency section). Emergency rollback still requires signed audit events; if possible the system collects approvals retroactively and records the rationale.
 
 ---
 
-# # Emergency (break-glass) path
+## # Emergency (break-glass) path
 - **Who can trigger**: SuperAdmin (Ryan) or SecurityEngineer.
 - **What happens**:
   1. Trigger emergency apply via CommandPad — Kernel records `emergency=true` on the upgrade manifest.
@@ -66,7 +66,7 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-# # Verification & validation rules
+## # Verification & validation rules
 - Kernel verifies:
   - Each Approval Record signature against `approverId` public key.
   - `patchHash` matches artifact.
@@ -76,21 +76,21 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-# # Storage & audit
+## # Storage & audit
 - Store Upgrade Manifests, Approval Records, and AppliedUpgradeRecord in the upgrade registry (immutable).
 - Emit audit events for each state transition: `upgrade.created`, `approval.submitted`, `upgrade.quorum_reached`, `upgrade.applied`, `upgrade.completed`, `upgrade.rejected`, `upgrade.rollback`.
 - All artifacts and audit events are chained and signed per the Audit Log Spec.
 
 ---
 
-# # UI / CommandPad interaction (brief)
+## # UI / CommandPad interaction (brief)
 - CommandPad shows pending upgrades, their artifacts, test results, and approval buttons.
 - Approvers may view diffs or download artifacts; approval is a signed action in the UI (or via CLI) that submits the Approval Record.
 - The UI forbids approving if SentinelNet flags a policy violation; approver can add notes or request further tests.
 
 ---
 
-# # Tests & automation
+## # Tests & automation
 - Unit tests for signature validation, quorum building, and hash verification.
 - Integration tests simulate full approval flows: normal apply, rejection, and rollback.
 - Chaos test: simulate lost approvals, unavailable approvers, and ensure system waits and does not apply partial upgrades.
@@ -98,7 +98,7 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-# # Edge cases & rules
+## # Edge cases & rules
 - **Stale approvals**: Approval Records older than a configured TTL (e.g., 14 days) are invalid — approvers must re-approve.
 - **Approver unavailability**: If an approver leaves, reconfigure the approver pool and reassign; re-approval of any pending upgrades may be required.
 - **Partial approvals**: Only a complete quorum (3 valid approvals) allows apply. Two approvals do nothing.
@@ -107,7 +107,7 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-# # Acceptance criteria
+## # Acceptance criteria
 - Workflow documented and implemented in Kernel UI and API.
 - Kernel verifies signatures and rejects invalid approvals.
 - System enforces 3-of-5 quorum strictly.
@@ -117,7 +117,7 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-# # Example (short)
+## # Example (short)
 1. `upgrade-42` created (manifest + patchHash).
 2. CI passes. `approval` from `ryan`, `divlead-1`, `sec-eng`.
 3. Kernel validates signatures, SentinelNet OK → applies upgrade and emits `upgrade.applied`.

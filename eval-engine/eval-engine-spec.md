@@ -1,13 +1,13 @@
 # Eval Engine & Resource Allocator — Specification
 
-# # Purpose
+## # Purpose
 The Eval Engine continuously scores agents, divisions, and products; issues promotion/demotion recommendations; and provides the metrics and signals the Resource Allocator uses to assign compute and capital. The Resource Allocator is the enforcement/execution component that applies allocations based on Eval recommendations, policy, and budget.
 
 This document covers both pieces together because they are tightly coupled: Eval produces signals, Resource Allocator executes them under governance.
 
 ---
 
-# # Core responsibilities
+## # Core responsibilities
 
 ## # Eval Engine
 - Ingest EvalReports and telemetry (metrics, logs, experiment results).
@@ -29,7 +29,7 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Minimal public interfaces (intents)
+## # Minimal public interfaces (intents)
 
 ## # Eval Engine APIs (Kernel-authenticated)
 - `POST /eval/submit` — ingest EvalReport (agentId, metricSet, timestamp, source).
@@ -51,7 +51,7 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Canonical data models (short)
+## # Canonical data models (short)
 
 ## # EvalReport
 - `id`, `agentId`, `metricSet` (json), `timestamp`, `source`, `window` (optional), `tags`.
@@ -70,7 +70,7 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Scoring & decision rules (principles)
+## # Scoring & decision rules (principles)
 - **Configurable score composition:** scores are weighted aggregates of normalized metrics (e.g., success rate, latency, cost-efficiency). Weights are configurable per division and time-window.
 - **Normalization & windows:** normalize metrics to comparable scales; compute sliding-window aggregates (e.g., last 1h, 24h, 7d).
 - **Confidence & variance:** provide confidence intervals; low-confidence results require manual review before major allocations.
@@ -80,7 +80,7 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Promotion & allocation flow (typical)
+## # Promotion & allocation flow (typical)
 1. **Eval ingest:** Eval reports flow in via `/eval/submit`.
 2. **Score compute:** Eval Engine recomputes agent/division scores and updates scoreboard.
 3. **Recommendation:** If score passes promotion criteria, Eval emits a PromotionEvent (rationale + confidence) and records it to Reasoning Graph and Audit.
@@ -91,7 +91,7 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Integration & governance
+## # Integration & governance
 - **Kernel as gatekeeper:** Kernel validates RBAC and records audit events for all promotions and allocations.
 - **SentinelNet policy enforcement:** Any allocation must pass SentinelNet checks. SentinelNet may block, quarantine, or require manual multi-sig approval.
 - **Reasoning Graph:** Every promotion, allocation, and retrain job writes nodes/traces for explainability.
@@ -99,14 +99,14 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Audit & immutability
+## # Audit & immutability
 - Every PromotionEvent, RetrainJob, and AllocationRecord is recorded as an AuditEvent (hash + signature).
 - Promotion decisions and allocation changes must be verifiable via audit chain.
 - RetrainJob results (metrics) and promotion outcomes are kept for model evaluation and A/B analysis.
 
 ---
 
-# # Safety & guardrails
+## # Safety & guardrails
 - **Budget caps:** enforce per-division and global caps; requests exceeding cap are rejected or sent for escalation.
 - **Quota & pool limits:** pools have hard limits (e.g., GPUs available). Requests beyond capacity return pending or rejected.
 - **Hysteresis:** require sustained signals for promotions; protect against oscillations.
@@ -115,28 +115,28 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Retraining & self-improvement
+## # Retraining & self-improvement
 - **Retrain jobs:** Eval Engine can propose RetrainJob with dataset refs derived from traces and high-performing examples.
 - **Approval & resource request:** retrain jobs require resource reservations (GPU hours) via Resource Allocator and may require budget approval.
 - **Promotion of models:** When retrain results are positive, Eval proposes model promotion events recorded in Reasoning Graph and signed via Kernel.
 
 ---
 
-# # Observability & metrics
+## # Observability & metrics
 - **Metrics to export:** eval ingestion rate, scoring latency, promotion events/sec, allocation request latency, allocation success rate, preemption events, retrain job queue length.
 - **Traces:** propagate request IDs and trace IDs through Eval → Allocator → Kernel → SentinelNet for full debugging.
 - **Dashboards:** score distributions, top movers, allocation failures by policy id, retrain job health.
 
 ---
 
-# # Deployment & infra notes (brief)
+## # Deployment & infra notes (brief)
 - Eval Engine: stateless compute nodes + persistent Postgres for state and Redis for short-term caches + Kafka for event ingestion. Retrain jobs run on AI infra GPU pools.
 - Resource Allocator: service that interacts with infra controllers (Kubernetes, cluster APIs) to request/adjust compute and with Finance for capital. Use transactional patterns for apply steps.
 - Prefer running Eval Engine as scalable workers with autoscaling based on ingestion queue depth.
 
 ---
 
-# # Testing & acceptance criteria (minimal)
+## # Testing & acceptance criteria (minimal)
 - **Eval ingestion:** `POST /eval/submit` accepts reports and updates scoreboard.
 - **Score correctness:** compute scores for synthetic inputs and verify expected outputs & component breakdown.
 - **Promotion path:** Eval emits PromotionEvent when threshold met; Resource Allocator applies allocation when policy allows.
@@ -147,14 +147,14 @@ This document covers both pieces together because they are tightly coupled: Eval
 
 ---
 
-# # Security & compliance
+## # Security & compliance
 - RBAC and mTLS for all interactions. Kernel must gate sensitive operations.
 - Budget and finance checks for capital allocations; sensitive allocation actions require multi-sig per governance.
 - Auditability and signed records for every promotion/allocation event.
 
 ---
 
-# # Example flow (short)
+## # Example flow (short)
 1. Agent `A` yields strong metrics; Eval computes score 0.92.
 2. Eval emits `PromotionEvent(agent=A, action=promote, confidence=0.9)`.
 3. Resource Allocator receives request and checks pool `gpus-us-east`. SentinelNet approves. Finance confirms budget. Allocation applied: `+1 GPU`. Audit events emitted.

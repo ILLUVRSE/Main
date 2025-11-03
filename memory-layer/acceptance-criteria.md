@@ -4,7 +4,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 1) Schema & storage
+## # 1) Schema & storage
 - **Postgres schema implemented:** `memory_nodes`, `artifact`, and required indexes exist and match `memory-layer-spec.md`.
 - **Vector DB connectivity:** Vector DB endpoint reachable and configured; test index exists for `kernel-memory` namespace.
 - **S3 artifact storage:** Artifact bucket available with versioning and object lock enabled for audit buckets.
@@ -13,7 +13,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 2) Embedding pipeline
+## # 2) Embedding pipeline
 - **End-to-end ingestion:** Ingest a sample document; a `MemoryNode` row is created in Postgres and a corresponding vector exists in the Vector DB with the same `embeddingId`.
 - **Model version recorded:** Embedding metadata records the model name/version used.
 - **Idempotency:** Re-ingesting the same content with same checksum does not create duplicate entries.
@@ -22,7 +22,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 3) Semantic search
+## # 3) Semantic search
 - **Top-K search works:** A semantic search with a test query returns expected relevant `memory_node.id`s and scores.
 - **Filters applied:** Searches with metadata filters (owner, tags, date range) correctly limit results before/after scoring.
 - **Hybrid scoring supported:** If hybrid mode is configured, combine semantic score with recency/importance and return predictable ordering.
@@ -31,7 +31,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 4) Provenance & artifacts
+## # 4) Provenance & artifacts
 - **Artifact metadata stored:** Put an artifact to S3 and ensure `artifact` record in Postgres contains checksum, path, owner, and `manifestSignatureId`.
 - **Provenance link:** MemoryNode references artifact or manifestSignatureId where appropriate.
 - **Signed audit event:** The write operation produces an audit event linking to the manifest signature and artifact.
@@ -40,7 +40,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 5) Retention, TTL & legal-hold
+## # 5) Retention, TTL & legal-hold
 - **Default TTL enforced:** MemoryNodes older than TTL are soft-deleted or flagged for deletion per policy.
 - **Legal hold respected:** Items under legal hold are excluded from TTL deletion.
 - **Soft-delete semantics:** Soft-deleted nodes are not returned in normal queries but retained for legal/forensic workflows.
@@ -49,7 +49,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 6) Security & PII controls
+## # 6) Security & PII controls
 - **TLS & encryption:** All in-transit connections use TLS; at-rest encryption enabled.
 - **RBAC enforced:** Only authorized callers (Kernel/authorized services) can create/read nodes according to roles.
 - **PII redaction:** Items flagged with `piiFlags` are restricted; read attempts by unauthorized callers fail or the data is redacted per SentinelNet policy.
@@ -58,7 +58,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 7) Audit & immutability
+## # 7) Audit & immutability
 - **Audit events emitted:** Every create/update/delete/embedding operation emits an AuditEvent with `manifestSignatureId`, `caller`, and provenance.
 - **Hash/signature verifiable:** Audit events include `hash`, `prevHash`, and `signature` and pass verification.
 - **Archive to S3:** Audit events are archived daily to S3 with immutability enabled.
@@ -67,7 +67,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 8) Backup & recovery
+## # 8) Backup & recovery
 - **Postgres backup tested:** PITR or snapshot restore test succeeds for a recent backup.
 - **Vector DB snapshot & restore:** Vector DB snapshot/export and restore tested on a staging cluster.
 - **Replay works:** Replaying archived audit events plus artifacts allows rebuilding the Postgres metadata and re-ingesting vectors.
@@ -76,7 +76,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 9) Observability & SLOs
+## # 9) Observability & SLOs
 - **Metrics present:** Ingestion rate, vector write latency, search latency (p95), queue depth, and worker error rate are exported.
 - **Tracing & logs:** End-to-end tracing (API → worker → Vector DB/Postgres) works and logs include `memoryNodeId` and `traceId`.
 - **SLO targets defined:** Documented SLOs (e.g., search p95 < 200ms) with alerts configured.
@@ -85,7 +85,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 10) Performance & scale
+## # 10) Performance & scale
 - **Throughput validated:** Embedding pipeline can sustain target ingestion rate (documented).
 - **Search scale validated:** Vector DB returns top-K within SLO at expected dataset size.
 - **Autoscaling behavior:** Workers and API scale under load without data loss and with acceptable latency.
@@ -94,7 +94,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 11) Tests & automation
+## # 11) Tests & automation
 - **Unit tests:** Core logic (canonicalization, checksum, idempotency) covered by unit tests.
 - **Integration tests:** Ingest → vector store → search, and backup/restore integration tests exist and pass.
 - **Chaos tests:** Simulate Vector DB outage and confirm DLQ/backpressure behavior and recovery.
@@ -103,7 +103,7 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # 12) Documentation & sign-off
+## # 12) Documentation & sign-off
 - **Docs present:** `memory-layer-spec.md`, `deployment.md`, `README.md`, `acceptance-criteria.md` are present and up-to-date.
 - **Security review:** Security Engineer signs off on encryption, PII handling, and Vault/KMS integration.
 - **Final approver:** Ryan signs off as SuperAdmin.
@@ -112,7 +112,6 @@ Purpose: a short, testable checklist proving the Memory Layer is correct, secure
 
 ---
 
-# # Final acceptance statement
+## # Final acceptance statement
 Memory Layer is accepted when all above criteria pass in the target environment (staging/production as applicable), automated tests are green, backups and restore drills succeed, audit integrity verified, and formal sign-off by Ryan and the Security Engineer is recorded.
-
 

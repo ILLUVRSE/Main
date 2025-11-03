@@ -4,7 +4,7 @@ Purpose: operational, implementation-ready guidance for deploying the Reasoning 
 
 ---
 
-# # 1) High-level deployment architecture
+## # 1) High-level deployment architecture
 - **Reasoning Graph Service** — stateless API/backend that accepts Kernel-authorized writes (nodes/edges), computes traces, stores metadata, and coordinates snapshot signing.
 - **Storage layer**:
   - **Graph store** — graph database (Neo4j, JanusGraph, or DGraph) **OR** Postgres with adjacency/materialized views for smaller scale.
@@ -22,7 +22,7 @@ Audit events → Kafka → S3 + Postgres
 
 ---
 
-# # 2) Recommended infra & providers
+## # 2) Recommended infra & providers
 - **Kubernetes** — deploy service as K8s Deployments in `illuvrse-reasoning` namespace. Use Helm for templating.
 - **Graph DB** — choose based on scale:
   - Small-to-medium: **Postgres with adjacency tables** + materialized views (cheaper, easier ops).
@@ -37,7 +37,7 @@ Audit events → Kafka → S3 + Postgres
 
 ---
 
-# # 3) Kubernetes deployment patterns
+## # 3) Kubernetes deployment patterns
 - **Helm chart**: include Deployment, Service, ConfigMap, Secret templates, HPA, PodDisruptionBudget, and RBAC.
 - **Replica config**: default replicas 2; use HPA based on CPU and custom metrics (request queue depth).
 - **Leader election**: implement leader election (K8s Lease) for operations that must be single-writer (snapshot creation & signing orchestration).
@@ -45,7 +45,7 @@ Audit events → Kafka → S3 + Postgres
 
 ---
 
-# # 4) Graph storage & canonicalization
+## # 4) Graph storage & canonicalization
 - **Choice**:
   - If using graph DB (Neo4j/JanusGraph): store nodes/edges natively; keep node payloads small and store heavy payloads in S3. Use indices for `type`, `author`, `createdAt`, `tags`.
   - If using Postgres: store `reason_nodes`, `reason_edges`, and maintain adjacency tables; precompute adjacency lists or materialized views for traversal performance.
@@ -54,7 +54,7 @@ Audit events → Kafka → S3 + Postgres
 
 ---
 
-# # 5) Signing & snapshot workflow
+## # 5) Signing & snapshot workflow
 1. Kernel or Reasoning service requests a snapshot (or snapshot triggered by event).
 2. Service builds canonical JSON for the snapshot and computes SHA-256 hash.
 3. The service requests a signature from KMS/HSM or a signing proxy (service must be authorized via mTLS + role).
@@ -65,7 +65,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 6) Security & access control
+## # 6) Security & access control
 - **mTLS**: Kernel must authenticate to Reasoning Graph via mTLS; reject non-mTLS writes. Map client CN to identity and apply RBAC.
 - **RBAC**: Kernel-authorized writes only. CommandPad/Command flows that write require elevated authorization via Kernel.
 - **PII & SentinelNet**: Call SentinelNet as a pre-write hook for nodes containing potential PII or sensitive payloads. If SentinelNet denies, record `policyCheck` node with rationale.
@@ -74,7 +74,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 7) Backups, DR & replay
+## # 7) Backups, DR & replay
 - **Graph DB**: schedule snapshots/backups per provider guidance. Store backups to S3 with versioning. Test restore procedures regularly.
 - **Postgres**: enable PITR, daily snapshots, and cross-region replication if required.
 - **Snapshots**: snapshots stored in S3 are retained per retention policy and serve as auditable checkpoints for rebuilds.
@@ -82,7 +82,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 8) Observability & SLOs
+## # 8) Observability & SLOs
 - **Metrics**: request rate, request latency (p50/p95/p99), snapshot creation latency, signature latency, traversal time (trace query p95).
 - **Tracing**: propagate trace ids from Kernel through Reasoning Graph; include spans for canonicalization, hash, signature, and S3 write.
 - **Alerts**: snapshot failures, signature errors from KMS, high traversal latency, graph DB connectivity issues, audit pipeline lag.
@@ -90,7 +90,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 9) Scaling & performance
+## # 9) Scaling & performance
 - **Hot traces**: cache frequently requested traces or precompute materialized subgraphs for heavy queries.
 - **Sharding**: partition graphs by root or by division for large scale. Use tenant namespaces to isolate workloads.
 - **Pagination & cursoring**: deep traversals must support depth limits, pagination, and cursor-based traversal to avoid expensive full-graph operations.
@@ -98,7 +98,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 10) CI/CD & release strategy
+## # 10) CI/CD & release strategy
 - **Pipeline**: lint + unit tests + integration tests (graph operations, canonicalization, signature flow) → build image → scan (Trivy/Snyk) → push → deploy to staging.
 - **Acceptance tests**: run snapshot creation + verification, trace queries, SentinelNet rejection tests.
 - **Canary release**: roll out to a small percentage of traffic; validate snapshot/verify flows before full rollout.
@@ -106,7 +106,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 11) Testing & validation
+## # 11) Testing & validation
 - **Unit tests**: canonicalization, hash/signature verification, cycle detection in traversal.
 - **Integration tests**: full create-node → create-edge → trace query → snapshot → sign → export flow.
 - **Property tests**: verify canonical JSON determinism across language runtimes.
@@ -114,7 +114,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 12) Runbooks (must exist)
+## # 12) Runbooks (must exist)
 - Snapshot creation failure: troubleshoot canonicalization errors, KMS signing failures, or S3 upload errors.
 - Graph DB degraded: failover steps, restore from snapshot, validate hash chain, and resume operations.
 - Key compromise: emergency revoke, halt signing, replay verification, and rotate keys (see security-governance).
@@ -122,7 +122,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 13) Acceptance criteria (deployment)
+## # 13) Acceptance criteria (deployment)
 - Reasoning Graph service deploys to staging and `GET /health` returns ok.
 - Node and edge writes succeed only from Kernel (mTLS); unauthorized writes rejected.
 - Trace queries return expected ordered traces with correct metadata under test workload.
@@ -133,7 +133,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ---
 
-# # 14) Operational notes
+## # 14) Operational notes
 - Prefer managed graph DB where possible to reduce ops burden.
 - Keep payloads small in the graph; large content belongs in S3 with a pointer in the node.
 - Canonicalization must be implemented consistently across services. Document the exact algorithm and provide reference code.

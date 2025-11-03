@@ -6,7 +6,7 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 1. Scope & goals
+## # 1. Scope & goals
 - Ensure **all manifests and audit events are signed** by a KMS/HSM-backed key (Ed25519).
 - Ensure **audit chain integrity** (hash chaining + signatures).
 - Protect signing keys in KMS/HSM; **never store plaintext private keys** in repository or images.
@@ -14,7 +14,7 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 2. Key concepts & actors
+## # 2. Key concepts & actors
 - **KMS / Signing Proxy** — network service that performs signing operations. The Kernel calls `sign` and `signData`.
 - **SignerId** — logical identifier for the signing key used by Kernel (e.g., `kernel-signer-1`).
 - **Security Engineer** — approver for KMS/HSM configuration, public key distribution and rotation.
@@ -22,7 +22,7 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 3. Production requirements (must-have)
+## # 3. Production requirements (must-have)
 1. **KMS/HSM for signing**
    - All production signing operations (manifests, audit hashes) **must** use a KMS/HSM.
    - The Kernel uses `KMS_ENDPOINT` and `SIGNER_ID`. Do **not** fall back to ephemeral keys in prod.
@@ -56,7 +56,7 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 4. Key rotation & compromise procedure (short)
+## # 4. Key rotation & compromise procedure (short)
 **Rotation (planned):**
 1. Create new key in KMS: `kernel-signer-v2`. Obtain public key.
 2. Deploy Kernel in staging to reference `kernel-signer-v2` as an alternate signer (optional).
@@ -74,7 +74,7 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 5. Multisig / Upgrade workflow (3-of-5, brief)
+## # 5. Multisig / Upgrade workflow (3-of-5, brief)
 - Upgrades to Kernel governance objects (e.g., new signer, security policy changes) require **3 distinct approvals**:
   1. Create an **upgrade manifest** describing the change. Signer(s) cannot self-approve.
   2. Collect 3 approval audit events, each with a valid signature from an approved approver identity.
@@ -83,7 +83,7 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 6. Verification & tests (must exist)
+## # 6. Verification & tests (must exist)
 - Unit tests for:
   - `canonicalizePayload` stability and equivalence across language clients.
   - `computeHash` and audit chaining correctness.
@@ -96,7 +96,7 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 7. Operational rules (runbook snippets)
+## # 7. Operational rules (runbook snippets)
 - **Pre-deploy checklist (Security)**
   - KMS endpoint reachable from deploy environment.
   - Public key for `SIGNER_ID` available to auditors.
@@ -110,13 +110,13 @@ Security sign-off and to guide ops runbooks.
 
 ---
 
-# # 8. Sign-off / approval
+## # 8. Sign-off / approval
 - Security Engineer sign-off required before enabling production KMS or setting `REQUIRE_KMS=true` on protected branches.
 - Final approver (Ryan — SuperAdmin) signs off on production readiness.
 
 ---
 
-# # 9. Short FAQ
+## # 9. Short FAQ
 **Q:** Can we use ephemeral local signing in prod?
 **A:** No. Only for local dev or CI test runs. Production must use KMS/HSM.
 

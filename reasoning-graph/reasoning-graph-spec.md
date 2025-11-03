@@ -1,13 +1,13 @@
 # Reasoning Graph — Specification
 
-# # Purpose
+## # Purpose
 The Reasoning Graph is the explainable, versioned causal/decision graph used by the Kernel to record how decisions were made, why allocations happened, and how agent recommendations propagated. It stores nodes (events, decisions, hypotheses), edges (causal links), and traces that can be queried for provenance, auditing, and human inspection.
 
 The graph is NOT a replace-for-log; it complements the Audit Log by providing higher-level causal structure and human-readable reasoning traces.
 
 ---
 
-# # Core responsibilities
+## # Core responsibilities
 - Store versioned nodes and edges representing reasoning artifacts (decisions, scores, rules applied, agent recommendations).
 - Provide queryable reasoning traces for a node (ancestors, descendants, causal path).
 - Record provenance: all graph updates link to ManifestSignature and AuditEvent entries.
@@ -18,7 +18,7 @@ The graph is NOT a replace-for-log; it complements the Audit Log by providing hi
 
 ---
 
-# # Concepts & models (short)
+## # Concepts & models (short)
 
 ## # ReasonNode
 - `id` — uuid.
@@ -47,7 +47,7 @@ The graph is NOT a replace-for-log; it complements the Audit Log by providing hi
 
 ---
 
-# # Minimal public API (intents)
+## # Minimal public API (intents)
 These are what Kernel and UIs call (implement as service endpoints):
 
 - `POST /reason/node` — create a new ReasonNode (Kernel-authorized only). Body contains node fields. Returns `nodeId` and `auditEventId`.
@@ -64,14 +64,14 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ---
 
-# # Provenance, signing & immutability
+## # Provenance, signing & immutability
 - Every node and snapshot record must include links (`manifestSignatureId` or `auditEventId`) that prove authorization.
 - Graph snapshots used for decisions must be hashed (canonicalized JSON → SHA-256) and signed by Kernel signer (store `signatureId`).
 - Updates are append-only: node creation and edge creation are append operations. If correction is needed, create a new node marked as `correction` and link it to the original. All corrections are auditable.
 
 ---
 
-# # Query & trace semantics
+## # Query & trace semantics
 - Traces are **causal**: they show the chain of influence (e.g., observation → score → recommendation → decision → action).
 - Queries support depth-limited traversal, breadth-first or depth-first ordering, and thresholds on `weight` or `confidence`.
 - Traces must include human-friendly annotations: who wrote what, confidence, timestamp, and rationale text.
@@ -79,7 +79,7 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ---
 
-# # Integration points
+## # Integration points
 - **Eval Engine:** writes score nodes and recommendations; reasoning graph links scores → promote/demote decisions.
 - **Agent Manager:** writes recommendations from agents as `recommendation` nodes and receives `decision` nodes that drive lifecycle actions.
 - **SentinelNet:** records `policyCheck` nodes showing policy input, decision, and rationale. SentinelNet decisions must be linked to reason nodes for explainability.
@@ -88,14 +88,14 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ---
 
-# # Versioning & experiments
+## # Versioning & experiments
 - Support graph snapshots for experiments: create snapshot IDs, run alternate reasoning (branch), and record differences. Snapshots are first-class (signed, hashed).
 - Nodes include `version` so systems can run comparisons between reasoning produced by different model versions or policy sets.
 - Allow tagging of nodes/edges with experiment or canary labels for later filtering.
 
 ---
 
-# # Security & access control
+## # Security & access control
 - Reads: many traces are readable by auditors and Division Leads, but PII-sensitive payloads must be redacted per SentinelNet.
 - Writes: only Kernel or authorized services can create nodes/edges. CommandPad annotations require elevated permissions.
 - Signing: snapshots and important decision nodes must be signed; signer identity recorded.
@@ -103,7 +103,7 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ---
 
-# # Storage & implementation notes
+## # Storage & implementation notes
 - **Store hybrid:** authoritative node/edge metadata in Postgres (or graph DB), heavy payloads in S3 (if large). For high-performance traversals, use a graph database (Neo4j, JanusGraph) or a combination (Postgres + materialized edges).
 - **Indexing:** index by `createdAt`, `author`, `type`, `tags`, and `confidence`. Precompute adjacency lists for fast traversal.
 - **Canonicalization:** define canonical JSON for snapshots to ensure consistent hashing across systems. Include canonicalization reference in Audit spec.
@@ -111,14 +111,14 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ---
 
-# # Safety & governance
+## # Safety & governance
 - SentinelNet policies can prevent creation of nodes/edges that would violate governance (e.g., secret leakage). All policy denials produce `policyCheck` nodes describing the block.
 - Human override must be explicit and recorded: CommandPad "override" creates an annotated node and requires multi-sig if changing governance-critical nodes.
 - Rate-limit automated node creation to avoid graph floods; enforce quotas per agent/service.
 
 ---
 
-# # Acceptance criteria (minimal)
+## # Acceptance criteria (minimal)
 - API endpoints exist and accept/reject writes only from Kernel (mTLS + RBAC).
 - Node creation results in an AuditEvent linking node id to an audit record.
 - Trace queries return ordered, annotated traces and handle cycles safely.
@@ -129,7 +129,7 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ---
 
-# # Example flow (short)
+## # Example flow (short)
 1. Eval Engine writes `score` node for `agent-abc123` with payload `{score:0.82, model:"eval-v1"}`.
 2. Eval emits `recommendation` node: `{recommend: "promote", reason:"score>0.8", confidence:0.9}` and links `score -> recommendation`.
 3. Resource Allocator decision writes `decision` node `{action:"allocate extra gpus", reason:"roi positive"}` and links `recommendation -> decision`.

@@ -1,11 +1,11 @@
 # Capital & Investments — Specification
 
-# # Purpose
+## # Purpose
 Manage internal and external funding operations: sourcing deals, underwriting, portfolio management, allocations, exits, and automated capital flows. Provide auditable, policy-driven investment operations that integrate with Kernel for governance, SentinelNet for compliance, and Finance for ledgering.
 
 ---
 
-# # Core responsibilities
+## # Core responsibilities
 - Deal sourcing & intake: ingest opportunities, track provenance and documents.
 - Underwriting & evaluation: run quantitative/qualitative scoring, risk models, and produce investment memos.
 - Allocation & execution: allocate capital to internal divisions, projects, and external deals; enforce budgetary rules and multisig approvals.
@@ -16,7 +16,7 @@ Manage internal and external funding operations: sourcing deals, underwriting, p
 
 ---
 
-# # Minimal public APIs (intents)
+## # Minimal public APIs (intents)
 All calls Kernel-authenticated (mTLS) or via the Capital UI with RBAC.
 
 - `POST /capital/deals` — register a sourced deal (metadata, docs, source).
@@ -33,7 +33,7 @@ All calls Kernel-authenticated (mTLS) or via the Capital UI with RBAC.
 
 ---
 
-# # Canonical data models (short)
+## # Canonical data models (short)
 
 ## # Deal
 - `dealId`, `name`, `source`, `stage` (`sourced|underwriting|approved|funded|exited`), `documents[]` (docIds), `valuation`, `proposedAmount`, `currency`, `kpis`, `createdAt`, `metadata`.
@@ -52,7 +52,7 @@ All calls Kernel-authenticated (mTLS) or via the Capital UI with RBAC.
 
 ---
 
-# # Processes & rules
+## # Processes & rules
 
 ## # Deal lifecycle
 1. Source → register with docs → initial screening.
@@ -80,20 +80,20 @@ All calls Kernel-authenticated (mTLS) or via the Capital UI with RBAC.
 
 ---
 
-# # Compliance & KYC
+## # Compliance & KYC
 - External deals require KYC/AML checks; integrate third-party KYC providers and store evidence refs (not raw PII).
 - Sanctions screening for counterparties and counterpart entity validation.
 - All compliance checks logged and produce `policyCheck` entries via SentinelNet when applicable.
 
 ---
 
-# # Audit & immutability
+## # Audit & immutability
 - All deal records, underwriting, approvals, allocations, and exits are immutable records appended to the audit bus.
 - Allocation approvals and applied allocations include ManifestSignature references and are cryptographically verifiable.
 
 ---
 
-# # Integration points
+## # Integration points
 - **Kernel**: multisig flows, manifest signing, and audit bus.
 - **Finance**: ledger entries for allocations, escrow, fees, payouts, and reconciliation.
 - **SentinelNet**: compliance checks (KYC/AML/sanctions) and policy enforcement.
@@ -102,7 +102,7 @@ All calls Kernel-authenticated (mTLS) or via the Capital UI with RBAC.
 
 ---
 
-# # Acceptance criteria (minimal)
+## # Acceptance criteria (minimal)
 - Deal registration and underwriting flows implemented; UnderwriteRecord stored with evidence.
 - Allocation request → multisig approval → apply flow works and produces Finance ledger entries.
 - SentinelNet blocks non-compliant allocations (simulate KYC/sanctions fail).
@@ -113,7 +113,7 @@ All calls Kernel-authenticated (mTLS) or via the Capital UI with RBAC.
 
 ---
 
-# # Security & governance
+## # Security & governance
 - KYC evidence stored as pointer refs; PII handled per legal requirements (redaction and restricted access).
 - High-value actions require multisig and Finance confirmation.
 - All actions auditable and signed (ManifestSignature where relevant).
@@ -121,7 +121,7 @@ All calls Kernel-authenticated (mTLS) or via the Capital UI with RBAC.
 
 ---
 
-# # Example flow (short)
+## # Example flow (short)
 1. Deal `crypto-startup` registered with documents.
 2. UnderwriteRecord indicates `score=0.78`, `recommend: invest`, `risk: medium`.
 3. Allocation requested for $2M. SentinelNet runs sanctions/KYC checks — pass.

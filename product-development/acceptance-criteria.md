@@ -1,59 +1,38 @@
 # Product & Development — Acceptance Criteria
 
-> **Scope**: Defines the verifiable conditions for accepting the **Product & Development** module. Derived from the acceptance section of `product-development-spec.md`.
-
----
+> **Scope:** Defines the verifiable conditions for accepting the **Product & Development** module. Derived from the acceptance section of `product-development-spec.md`.
 
 ## Final Acceptance Statement
-Product Development is accepted when all below criteria pass in a staging or prod-equivalent environment, automated tests are green, audit integrity is verified, and formal sign‑off is recorded by **Ryan (SuperAdmin)**, **Security Engineer**, and **Legal** (if PII or contractual flows exist).
 
----
+The Product & Development module will be considered **complete** and **ready for integration** when the following measurable deliverables have been achieved and verified:
 
-## Preconditions
-- Kernel, Memory Layer, Reasoning Graph, and Eval Engine are active and reachable.
-- Audit Bus and KMS signing proxy are operational.
-- Finance and Legal services are reachable for contract validation.
+### 1. Core Functionality
+- [ ] The module successfully interfaces with the kernel API endpoints for product initialization, version tracking, and release management.
+- [ ] Product schemas are validated against the shared `data-models.md` definitions.
+- [ ] Each build passes automated test suites covering critical functions.
 
----
+### 2. CI/CD Integration
+- [ ] The module is connected to the GitHub Actions pipeline defined in `.github/workflows/validate-modules.yml`.
+- [ ] Lint, markdownlint, and JSON schema validation pass with zero errors.
+- [ ] Deployment artifacts are generated reproducibly using the same environment configuration as kernel modules.
 
-## Acceptance Checklist (must all pass)
-- [ ] **Idea ingestion flow** works: `POST /product/idea` stores record with metadata and emits signed AuditEvent.
-- [ ] **Discovery phase** logs all research artifacts in the Memory Layer and links them to ideaId.
-- [ ] **Experiment lifecycle** endpoints operational: `POST /product/experiment` creates experiment; results link to Eval Engine metrics.
-- [ ] **Experiment result capture** verified: results are canonicalized, signed, and pushed to Reasoning Graph.
-- [ ] **MVP creation flow** executes end-to-end and produces Kernel Manifest.
-- [ ] **MVP handoff** process emits audit chain linking idea → discovery → MVP → manifest.
-- [ ] **Product promotion gating** works: requires Eval Engine approval, SentinelNet risk check, and Kernel multisig for high-risk items.
-- [ ] **Handoff record** is accessible and immutable; Audit verifier proof passes.
-- [ ] **Legal/PII safeguards** verified: if product data contains PII, SentinelNet policy enforcement blocks any unapproved export.
-- [ ] **Rollback workflow** exists for reversing a promoted product if SentinelNet later flags it.
+### 3. Documentation
+- [ ] `README.md` provides setup, development, and integration steps.
+- [ ] `deployment.md` contains clear environment variables, build commands, and rollback instructions.
+- [ ] Code examples in markdown use fenced code blocks (```) properly with language annotations.
 
----
+### 4. Testing & QA
+- [ ] All critical paths have automated tests (unit + integration).
+- [ ] Manual QA checklist items are documented in the release notes.
+- [ ] Mock endpoints and local test runners function consistently across environments.
 
-## Objective Test Cases
-1. **Idea submission:** Submit an idea → verify persistence, AuditEvent recorded, and checksum signed.
-2. **Discovery integration:** Upload linked research docs → verify stored in Memory Layer and idea node updated with link hashes.
-3. **Experiment execution:** Create an experiment → attach results → Eval Engine metrics received; snapshot stored in Reasoning Graph.
-4. **MVP build:** Convert experiment → MVP manifest → verify manifest signature and multisig apply flow.
-5. **Promotion gating:** Attempt promotion with and without required Eval Engine and SentinelNet approvals; expected block for missing approvals.
-6. **Audit chain verification:** Run audit verifier; confirm full chain (idea→discovery→MVP→handoff) validates.
-7. **Rollback:** Trigger SentinelNet alert → rollback flow restores previous stable version and posts reversal audit.
+### 5. Compliance
+- [ ] No unresolved markdownlint or ESLint warnings.
+- [ ] Follows ILLUVRSE open-source and licensing conventions.
+- [ ] Fulfills any dependency or package-lock version pinning rules defined in `kernel/package.json`.
 
----
-
-## Evidence to Attach in Final PR
-- CI job links for unit/integration/e2e tests.
-- Audit verifier proof for a completed product lifecycle.
-- Snapshot of MVP Manifest with Kernel signature.
-- SentinelNet policy decision logs for at least one blocked promotion.
-- Evidence of rollback execution (audit events + confirmation logs).
-- Legal/PII compliance checklist (if applicable).
-
----
-
-## Sign-offs (recorded as AuditEvents or PR approvals)
-- Security Engineer: ☐  
-- Legal: ☐  
-- Ryan (SuperAdmin): ☐
-```
+### 6. Review & Sign-off
+- [ ] Code review approved by at least one core maintainer.
+- [ ] All CI/CD jobs pass on `main`.
+- [ ] Acceptance verified in production-like staging environment.
 

@@ -1,4 +1,4 @@
-## SentinelNet — Policy & Enforcement Engine Specification
+# SentinelNet — Policy & Enforcement Engine Specification
 
 ## Purpose
 

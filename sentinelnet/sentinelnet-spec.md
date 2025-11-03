@@ -1,3 +1,5 @@
+## SentinelNet — Policy & Enforcement Engine Specification
+
 ## Purpose
 
 SentinelNet is the real-time policy engine and autonomous enforcement

@@ -37,10 +37,28 @@ jobs:
       NODE_ENV: test
       PORT: 3000
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CI_PAT: ${{ secrets.CI_PAT }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Debug: token presence
+        run: |
+          # does not print any secret values — only presence
+          if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+            echo "GITHUB_TOKEN present"
+          else
+            echo "GITHUB_TOKEN missing"
+          fi
+          if [[ -n "${CI_PAT:-}" ]]; then
+            echo "CI_PAT present"
+          else
+            echo "CI_PAT missing"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_PAT: ${{ secrets.CI_PAT }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

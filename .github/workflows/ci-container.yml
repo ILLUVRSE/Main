@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  checks: write
+  statuses: write
 
 jobs:
   ci:
@@ -34,6 +36,7 @@ jobs:
       POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/illuvrse
       NODE_ENV: test
       PORT: 3000
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
@@ -165,13 +168,4 @@ jobs:
           curl -L https://fly.io/install.sh | sh
           export PATH="$HOME/.fly/bin:$PATH"
           flyctl deploy --config fly.toml --remote-only
-
-# Acceptance criteria (short)
-# - build-image runs only after ci job succeeds (needs/if configured).
-# - Enforce REQUIRE_KMS uses the repository secret KMS_ENDPOINT when pushing to main and fails CI when missing.
-# - Docker image build step executes successfully and optional registry push runs only when Docker Hub secrets are present.
-#
-# Operational notes:
-# - Add required secrets in GitHub: KMS_ENDPOINT, DOCKERHUB_USERNAME, DOCKERHUB_PASSWORD, DOCKERHUB_REPO, FLY_API_TOKEN as needed.
-# - If you want build-image to run for PRs as well, alter the if: condition appropriately.
 

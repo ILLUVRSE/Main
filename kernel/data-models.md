@@ -1,263 +1,501 @@
 # Kernel — Canonical Data Models
 
-Purpose: concise, unambiguous definitions of the core models the Kernel and surrounding systems use.
-API surfaces use **camelCase**. Database column names use **snake_case**. Persisted manifests and audit records are versioned and immutable where noted.
+This document lists the canonical models for the Kernel (minimal, precise, DB hints, required fields,
+and examples). Keep these authoritative. Implementations must match these field names and types.
+All timestamps are ISO 8601 strings unless otherwise noted.
 
 ---
 
-## # 1) DivisionManifest
-**Intent:** authoritative description of a Division (goals, budget, KPIs, policies).
+## Conventions
 
-Fields (API / meaning / DB type):
-- `id` — string (UUID); primary identifier. (postgres: uuid PK)
-- `name` — string; human-friendly name. (varchar)
-- `goals` — array[string]; top-level goals. (postgres: jsonb)
-- `budget` — number; budget amount (principal currency managed elsewhere). (numeric)
-- `currency` — string; ISO currency code, e.g., "USD". (varchar)
-- `kpis` — array[string]; KPI identifiers or short descriptions. (jsonb)
-- `policies` — array[string]; policy IDs that apply. (jsonb)
-- `metadata` — object; free-form JSON for extra info (owner, tags). (jsonb)
-- `status` — string enum: `active|paused|retired`. (varchar)
-- `version` — string; manifest semantic version. (varchar)
-- `createdAt`, `updatedAt` — timestamps. (timestamp with tz)
-- `manifestSignatureId` — string (fk to ManifestSignature) — link to signature/audit record.
+* API shapes: `camelCase`.
+* Postgres/DB types: use `snake_case` for table/column names.
+* UUID = `uuid` / `text` with `CHECK` if not using native uuid.
+* Timestamps = `timestamptz` (stored in UTC).
+* Binary blobs: store in S3; DB stores pointers/paths and checksums.
+* All *write* operations that affect provenance must emit an `AuditEvent` and include `manifestSignatureId` where applicable.
+* Signatures: Ed25519 strings produced by KMS/HSM. Signer referenced by `signer_id` (string).
 
-**Notes:** manifests are versioned and treated as append-only for auditability. Updates create a new version with a new signature/audit record.
+---
 
-Example:
+## 1) DivisionManifest
+
+**Purpose:** Administrative bundle describing a division (goals, budget, policies).
+
+**API shape**
+
 ```json
 {
-  "id":"dvg-1a2b-3c4d",
-  "name":"Product",
-  "goals":["build MVP","acquire first 10K users"],
-  "budget":100000,
-  "currency":"USD",
-  "kpis":["activationRate","retention30"],
-  "policies":["policy-budget-cap-v1"],
-  "metadata":{"owner":"ryan"},
-  "status":"active",
-  "version":"1.0.0",
-  "createdAt":"2025-01-10T12:00:00Z"
+  "id":"uuid",
+  "name":"string",
+  "goals":["string"],
+  "budget": 1234.56,
+  "kpis":["string"],
+  "policies":["policyId"],
+  "metadata": { "any": "json" }
 }
+```
 
-2) AgentProfile
+**DB (Postgres)**
 
-Intent: runtime record for an agent instance.
+```sql
+CREATE TABLE kernel_division_manifest (
+  id uuid PRIMARY KEY,
+  name text NOT NULL,
+  goals jsonb NOT NULL,
+  budget numeric(18,4),
+  kpis jsonb,
+  policies jsonb,
+  metadata jsonb,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX idx_division_manifest_name ON kernel_division_manifest(name);
+```
 
-Fields:
+**Required fields:** `id`, `name`, `goals`.
 
-id — string (UUID).
+---
 
-templateId — string (optional) — links to AgentTemplate.
+## 2) ManifestSignature
 
-role — string (e.g., "GrowthHacker").
+**Purpose:** A signature record describing a manifest that was signed by Kernel or an authorized signer.
 
-skills — array[string].
+**API shape**
 
-codeRef — string (git URL + ref or image URI).
-
-divisionId — string (fk to DivisionManifest).
-
-state — enum: stopped|running|paused|failed.
-
-score — number (current aggregate performance).
-
-resourceAllocation — object (cpu, gpu, memory).
-
-lastHeartbeat — timestamp.
-
-createdAt, updatedAt — timestamps.
-
-owner — string (team or user).
-Example:
-
+```json
 {
-  "id":"agent-abc123",
-  "templateId":"growth-v1",
-  "role":"GrowthHacker",
-  "skills":["outreach","ads"],
-  "codeRef":"git@github.com:ILLUVRSE/agents.git#growth-v1",
-  "divisionId":"dvg-1a2b-3c4d",
-  "state":"running",
-  "score":0.83,
-  "lastHeartbeat":"2025-01-12T08:30:00Z"
+  "manifestId":"string",
+  "signerId":"string",
+  "signature":"base64-ed25519",
+  "version":"string",
+  "ts":"2025-01-01T00:00:00Z"
 }
+```
 
-Indexes: index on division_id, state, last_heartbeat.
+**DB**
 
-3) EvalReport
+```sql
+CREATE TABLE kernel_manifest_signature (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  manifest_id text NOT NULL,
+  signer_id text NOT NULL,
+  signature text NOT NULL,
+  version text,
+  ts timestamptz NOT NULL
+);
+CREATE INDEX idx_manifest_signature_manifest ON kernel_manifest_signature(manifest_id);
+```
 
-Intent: a single evaluation submission for an agent.
+**Notes:** `manifestId` may refer to division manifests, agent templates, upgrade manifests, etc.
 
-Fields:
+---
 
-id — uuid.
+## 3) AuditEvent
 
-agentId — uuid (fk).
+**Purpose:** Immutable append-only audit event for every critical action (create/update/delete/sign/decide).
 
-metricSet — object (arbitrary key → value; numeric or categorical). (jsonb)
+**API shape**
 
-timestamp — timestamp.
-
-source — string (which system produced it).
-
-computedScore — number (optional cached score).
-
-window — string (optional window/period).
-
-Example:
+```json
 {
-  "id":"eval-001",
-  "agentId":"agent-abc123",
-  "metricSet":{"taskSuccess":0.9,"latencyMs":110},
-  "timestamp":"2025-01-12T09:00:00Z",
-  "source":"sim-runner"
+  "id":"uuid",
+  "type":"string",
+  "payload": { "any": "json" },
+  "ts":"2025-01-01T00:00:00Z",
+  "prevHash":"hex",
+  "hash":"hex",
+  "signature":"base64-ed25519"
 }
+```
 
-Indexes: agent_id + timestamp for fast recent-evals queries.
+**DB**
 
-4) MemoryNode
+```sql
+CREATE TABLE kernel_audit_event (
+  id uuid PRIMARY KEY,
+  type text NOT NULL,
+  payload jsonb NOT NULL,
+  ts timestamptz NOT NULL,
+  prev_hash text,
+  hash text NOT NULL,
+  signature text NOT NULL
+);
+CREATE INDEX idx_audit_event_ts ON kernel_audit_event(ts DESC);
+```
 
-Intent: persistent memory item. Embeddings live in vector store; metadata and trace live in Postgres.
+**Notes**
 
-Fields:
+* `hash` is SHA-256 of canonicalized payload + meta.
+* `prevHash` links chain. Chain verification must be possible offline.
+* Audit events referencing manifests should include `manifestSignatureId` inside payload.
 
-id — uuid.
+---
 
-text — string (optional short blob / content) — stored if small.
+## 4) AgentTemplate
 
-embeddingId — string (id used in vector DB); the full numeric vector is stored in vector DB, not Postgres.
+**Purpose:** Signed template describing agent behavior and runtime requirements.
 
-metadata — jsonb (source, tags, owner, references).
+**API shape**
 
-createdAt — timestamp.
-
-ttl — optional expiry policy.
-
-Storage pattern:
-
-Postgres table memory_nodes holds id, text (nullable), metadata, created_at.
-
-Vector DB stores embedding under embeddingId with metadata containing memory_node_id to join.
-
-5) ManifestSignature
-
-Intent: record that a manifest was signed.
-
-Fields:
-
-id — uuid.
-
-manifestId — string (id of manifest signed).
-
-signerId — string (key identifier).
-
-signature — base64 string.
-
-version — string.
-
-ts — timestamp.
-
-prevHash — optional SHA-256 of previous audit chain entry.
-
-Example:
+```json
 {
-  "id":"sig-01",
-  "manifestId":"dvg-1a2b-3c4d",
-  "signerId":"kernel-signer-1",
-  "signature":"BASE64_SIG",
-  "version":"1.0.0",
-  "ts":"2025-01-10T12:00:10Z"
+  "id":"uuid",
+  "name":"string",
+  "description":"string",
+  "codeRef":"string",
+  "manifest": { "templateCfg": "..." },
+  "resourceLimits": { "cpu": 1.0, "memoryMB": 2048, "gpuCount": 0 },
+  "env": { "KEY":"value" },
+  "signerId":"string",
+  "signature":"base64-ed25519",
+  "version":"string",
+  "createdAt":"timestamp",
+  "createdBy":"string"
+}
+```
+
+**DB**
+
+```sql
+CREATE TABLE agent_template (
+  id uuid PRIMARY KEY,
+  name text NOT NULL,
+  description text,
+  code_ref text NOT NULL,
+  manifest jsonb NOT NULL,
+  resource_limits jsonb,
+  env jsonb,
+  signer_id text,
+  signature text,
+  version text,
+  created_at timestamptz DEFAULT now(),
+  created_by text
+);
+CREATE INDEX idx_agent_template_code_ref ON agent_template(code_ref);
+```
+
+**Required:** `id`, `name`, `codeRef`, `manifest`, `signature`.
+
+---
+
+## 5) AgentInstance (AgentProfile / AgentRecord)
+
+**Purpose:** Runtime representation of a running agent.
+
+**API shape**
+
+```json
+{
+  "id":"uuid",
+  "templateId":"uuid",
+  "role":"string",
+  "divisionId":"uuid",
+  "state":"created|provisioning|provisioned|starting|running|paused|stopping|stopped|failed|destroyed",
+  "codeRef":"string",
+  "resourceAllocation": { "cpu":1.0, "gpu":0, "memoryMB": 2048, "node":"node-id" },
+  "host":"string",
+  "lastHeartbeat":"timestamp",
+  "health": { "liveness":"ok|failed", "readiness":"ok|failed", "lastCheckTs":"timestamp" },
+  "score": 0.0,
+  "logsUrl":"string",
+  "createdAt":"timestamp",
+  "updatedAt":"timestamp",
+  "owner":"string"
+}
+```
+
+**DB**
+
+```sql
+CREATE TABLE agent_instance (
+  id uuid PRIMARY KEY,
+  template_id uuid NOT NULL,
+  role text,
+  division_id uuid,
+  state text NOT NULL,
+  code_ref text,
+  resource_allocation jsonb,
+  host text,
+  last_heartbeat timestamptz,
+  health jsonb,
+  score double precision,
+  logs_url text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  owner text
+);
+CREATE INDEX idx_agent_instance_state ON agent_instance(state);
+CREATE INDEX idx_agent_instance_division ON agent_instance(division_id);
+```
+
+**Notes:** Agent lifecycle transitions must be single-writer per-agent to avoid races.
+
+---
+
+## 6) AgentActionRecord
+
+**Purpose:** Track lifecycle actions requested against an agent (start/stop/restart/destroy/etc).
+
+**API shape**
+
+```json
+{
+  "id":"uuid",
+  "agentId":"uuid",
+  "action":"start|stop|restart|destroy|pause|resume",
+  "requestedBy":"string",
+  "ts":"timestamp",
+  "result":"ok|failed|pending",
+  "notes":"string"
+}
+```
+
+**DB**
+
+```sql
+CREATE TABLE agent_action_record (
+  id uuid PRIMARY KEY,
+  agent_id uuid NOT NULL,
+  action text NOT NULL,
+  requested_by text,
+  ts timestamptz NOT NULL,
+  result text,
+  notes text
+);
+CREATE INDEX idx_agent_action_agent ON agent_action_record(agent_id);
+```
+
+---
+
+## 7) EvalReport
+
+**Purpose:** Reports about agent behavior/metrics used by Eval Engine.
+
+**API shape**
+
+```json
+{
+  "id":"uuid",
+  "agentId":"uuid",
+  "metricSet": { "accuracy": 0.9, "latencyMs": 120 },
+  "timestamp":"timestamp",
+  "metadata": {}
+}
+```
+
+**DB**
+
+```sql
+CREATE TABLE kernel_eval_report (
+  id uuid PRIMARY KEY,
+  agent_id uuid NOT NULL,
+  metric_set jsonb NOT NULL,
+  timestamp timestamptz NOT NULL,
+  metadata jsonb
+);
+CREATE INDEX idx_eval_agent_ts ON kernel_eval_report(agent_id, timestamp DESC);
+```
+
+---
+
+## 8) MemoryNode & Artifact
+
+**MemoryNode** — canonical stored atomic knowledge.
+**Artifact** — large artifact metadata for S3 objects.
+
+**API shapes**
+
+```json
+MemoryNode {
+  "id":"uuid",
+  "embeddingId":"string|null",
+  "metadata":{},
+  "createdAt":"timestamp",
+  "owner":"string",
+  "manifestSignatureId":"uuid|null"
 }
 
-6) AuditEvent
+Artifact {
+  "id":"uuid",
+  "path":"s3://bucket/key",
+  "checksum":"sha256",
+  "owner":"string",
+  "size":12345,
+  "manifestSignatureId":"uuid"
+}
+```
 
-Intent: immutable event on the append-only audit bus.
+**DB**
 
-Fields:
+```sql
+CREATE TABLE memory_node (
+  id uuid PRIMARY KEY,
+  embedding_id text,
+  metadata jsonb,
+  created_at timestamptz DEFAULT now(),
+  owner text,
+  manifest_signature_id uuid
+);
+CREATE INDEX idx_memory_node_embedding ON memory_node(embedding_id);
 
-id — uuid.
+CREATE TABLE artifact (
+  id uuid PRIMARY KEY,
+  path text NOT NULL,
+  checksum text,
+  owner text,
+  size bigint,
+  manifest_signature_id uuid,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX idx_artifact_checksum ON artifact(checksum);
+```
 
-eventType — string (e.g., manifest.update, agent.spawn, allocation).
+**Notes:** Embeddings live in vector DB; `embeddingId` ties MemoryNode row to vector DB entry.
 
-payload — jsonb (event content).
+---
 
-prevHash — text (hex SHA-256 of prior event).
+## 9) AllocationRequest / AllocationRecord
 
-hash — text (SHA-256 of this event payload + prevHash).
+**Purpose:** Request & lifecycle for compute/capital allocations.
 
-signature — base64.
+**API**
 
-signerId — string.
+```json
+AllocationRequest {
+  "id":"uuid",
+  "divisionId":"uuid",
+  "cpu": 1.0,
+  "gpu": 0,
+  "memoryMB": 4096,
+  "requester":"string",
+  "status":"requested|pending|approved|applied|rejected",
+  "createdAt":"timestamp",
+  "appliedAt":"timestamp|null"
+}
+```
 
-ts — timestamp.
+**DB**
 
-Storage: events are stored in append-only storage (Kafka topics + persistent sink in S3/Postgres). Each event must be verifiable via hash chain + signature.
+```sql
+CREATE TABLE allocation_request (
+  id uuid PRIMARY KEY,
+  division_id uuid,
+  cpu double precision,
+  gpu integer,
+  memory_mb integer,
+  requester text,
+  status text,
+  created_at timestamptz DEFAULT now(),
+  applied_at timestamptz
+);
+CREATE INDEX idx_alloc_division ON allocation_request(division_id);
+CREATE INDEX idx_alloc_status ON allocation_request(status);
+```
 
-7) AgentTemplate (optional but recommended)
+---
 
-Intent: versioned template used to instantiate agents.
+## 10) PolicyCheck (SentinelNet)
 
-Fields:
+**Purpose:** Records a policy decision.
 
-id — string.
+**API**
 
-name — string.
+```json
+{
+  "id":"uuid",
+  "policyId":"string",
+  "decision":"allow|deny|quarantine",
+  "rationale":"string",
+  "confidence": 0.95,
+  "evidence": [ "auditEventId", "metricSnapshotId" ],
+  "ts":"timestamp"
+}
+```
 
-manifest — jsonb (template metadata and args).
+**DB**
 
-codeRef — string.
+```sql
+CREATE TABLE policy_check (
+  id uuid PRIMARY KEY,
+  policy_id text,
+  decision text,
+  rationale text,
+  confidence double precision,
+  evidence jsonb,
+  ts timestamptz NOT NULL
+);
+CREATE INDEX idx_policy_check_policy ON policy_check(policy_id);
+```
 
-resourceLimits — object (cpu, gpuCount, memoryMB).
+---
 
-signerId, signature, version, createdAt.
+## 11) ReasonNode / ReasonEdge / Snapshot
 
-8) ResourceAllocation
+**ReasonNode**
 
-Intent: record of compute/capital assignment.
+```json
+{
+  "id":"uuid",
+  "type":"decision|recommendation|evidence|explanation",
+  "payload": {...},
+  "manifestSignatureId":"uuid|null",
+  "ts":"timestamp"
+}
+```
 
-Fields:
+**ReasonEdge**
 
-id — uuid.
+```json
+{ "id":"uuid", "from":"nodeId", "to":"nodeId", "metadata":{} }
+```
 
-entityId — string (agentId/divisionId).
+**Snapshot**
 
-pool — string (compute pool id).
+```json
+{ "id":"uuid", "rootNodeId":"uuid", "hash":"sha256", "signature":"base64-ed25519", "s3Path":"s3://...", "ts":"timestamp" }
+```
 
-delta — number (positive/negative).
+**DB**
 
-reason — string.
+```sql
+CREATE TABLE reason_node (id uuid PRIMARY KEY, type text, payload jsonb, manifest_signature_id uuid, ts timestamptz);
+CREATE TABLE reason_edge (id uuid PRIMARY KEY, from_node uuid, to_node uuid, metadata jsonb);
+CREATE TABLE reason_snapshot (id uuid PRIMARY KEY, root_node uuid, hash text, signature text, s3_path text, ts timestamptz);
+CREATE INDEX idx_reason_node_type ON reason_node(type);
+```
 
-requestedBy — string (actor).
+---
 
-status — enum: pending|applied|rejected.
+## 12) Indexes, constraints & observability hints
 
-ts — timestamp.
+* Add foreign key constraints where appropriate (e.g., `agent_instance.template_id` → `agent_template.id`). If your architecture requires looser coupling, enforce referential integrity in service logic.
+* Partition large tables by time (e.g., `kernel_audit_event` by month) for scale.
+* Add TTL or soft-delete flags for memory nodes as required by retention policies.
+* Emit metrics for writes/reads per model; include `traceId` in audit events for tracing.
 
-Storage & implementation notes
+---
 
-API vs DB: API uses camelCase; DB uses snake_case. Keep a single mapping layer.
+## 13) Example: creating an AuditEvent (canonicalization)
 
-Embeddings: store vectors in a vector DB (Milvus/Pinecone). Keep memory_node.id as authoritative and join via embeddingId.
+1. Canonicalize event payload (deterministic JSON ordering).
+2. Compute `hash = sha256(canonicalPayload)`.
+3. Request KMS to sign `hash` → `signature`.
+4. Persist `AuditEvent` with `prevHash`, `hash`, `signature`.
+5. Emit event to audit sink (Kafka/S3) and confirm archival.
 
-Postgres types: prefer jsonb for flexible fields, uuid for primary keys, numeric for money.
+---
 
-Indexes: create indexes on foreign keys and times: agent_id on evals, division_id on agents, created_at on manifests/audit.
+## Final notes
 
-Immutability & versioning: manifests and audit events are append-only; store previous versions rather than mutating. Use version and created_at for ordering.
+* These shapes are intentionally conservative and minimal. Downstream modules must not invent fields without updating this document.
+* All important manifests and snapshots require a `ManifestSignature`. The Kernel enforces that signed manifests are required for trusted actions (e.g., template registration, promotion, policy activation).
+* Keep this document updated whenever `openapi.yaml` changes. `components/schemas` in `openapi.yaml` must match these model definitions.
 
-Conventions: sign every manifest change; store manifestSignatureId on the manifest record as a pointer to the signature/audit event.
+---
 
-Minimal DB schema mapping (hint)
+## Acceptance (for kernel/data-models.md)
 
-divisions (id uuid PK, name, goals jsonb, budget numeric, currency varchar, kpis jsonb, policies jsonb, metadata jsonb, status varchar, version varchar, manifest_signature_id uuid, created_at, updated_at)
+* `openapi.yaml` `components/schemas` and `kernel/data-models.md` must be consistent (field names/types).
+* Security Engineer should review `ManifestSignature` and `AuditEvent` flows (KMS signing & verification).
+* Implementations must be able to create and verify the audit chain from `AuditEvent` records.
 
-agents (id uuid PK, template_id, role, skills jsonb, code_ref varchar, division_id uuid FK, state varchar, score numeric, last_heartbeat timestamp, created_at, updated_at)
-
-eval_reports (id uuid PK, agent_id uuid FK, metric_set jsonb, timestamp)
-
-memory_nodes (id uuid PK, text text, metadata jsonb, created_at, ttl)
-
-manifest_signatures (id uuid PK, manifest_id varchar, signer_id varchar, signature text, version varchar, ts)
-
-audit_events (id uuid PK, event_type varchar, payload jsonb, prev_hash text, hash text, signature text, signer_id varchar, ts)

@@ -1,0 +1,23 @@
+{
+  "id": "656a2be7-a67e-473f-9d3e-2bd6650c398e",
+  "eventType": "manifest.update",
+  "payload": {
+    "manifest": {
+      "budget": 1000,
+      "goals": [
+        "initial"
+      ],
+      "id": "00000000-0000-0000-0000-000000000001",
+      "kpis": [],
+      "metadata": {},
+      "name": "test-division",
+      "policies": []
+    },
+    "manifestSignatureId": "09ba3758-6902-486d-8c83-8639da22908b"
+  },
+  "prevHash": "2907f95f53492e4cfa5ca23710efd4ea9bb548879d5e140fb7fff0e0c86373ed",
+  "hash": "8f5d21bbb03e66cc1c58e014bf54c7a03c289d015b71af5092aefa8f3908f5ab",
+  "signature": "EnTqR9AWSLIscos4S5Re/Un/v8y7A2ktaY/28+scLsdXEnFowFYQs20Hs+iVeJoU3o4bTud/hfdHiQ1HFQg3Bg==",
+  "signerId": "local-signer-1",
+  "ts": "2025-11-04T02:23:27.642840446Z"
+}

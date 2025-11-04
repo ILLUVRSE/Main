@@ -79,4 +79,3 @@ func RequireAnyRole(roles ...string) func(http.Handler) http.Handler {
 		})
 	}
 }
-

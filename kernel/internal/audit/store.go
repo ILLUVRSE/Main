@@ -34,4 +34,3 @@ func HashBytes(b []byte) []byte {
 func HashHex(b []byte) string {
 	return hex.EncodeToString(HashBytes(b))
 }
-

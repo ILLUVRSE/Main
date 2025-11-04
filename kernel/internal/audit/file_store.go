@@ -121,4 +121,3 @@ func (f *FileStore) GetAuditEvent(ctx context.Context, id string) (*AuditEvent, 
 	}
 	return &ev, nil
 }
-

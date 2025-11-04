@@ -66,11 +66,11 @@ func handleEvalPost(cfg *config.Config, db *sql.DB, s signer.Signer, store audit
 		aev := &audit.AuditEvent{
 			EventType: "eval.submitted",
 			Payload: map[string]interface{}{
-				"evalId":   req.Id,
-				"agentId":  req.AgentId,
+				"evalId":    req.Id,
+				"agentId":   req.AgentId,
 				"metricSet": req.MetricSet,
 				"timestamp": req.Timestamp,
-				"source":   req.Source,
+				"source":    req.Source,
 			},
 			Ts: time.Now().UTC(),
 		}
@@ -112,4 +112,3 @@ func insertEvalToDB(ctx context.Context, db *sql.DB, rp *EvalReport) error {
 	_, err = db.ExecContext(ctx, q, rp.Id, rp.AgentId, payload, rp.Timestamp, rp.Source)
 	return err
 }
-

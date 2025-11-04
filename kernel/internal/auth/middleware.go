@@ -90,4 +90,3 @@ func certCommonName(cert *x509.Certificate) string {
 	}
 	return cert.Subject.CommonName
 }
-

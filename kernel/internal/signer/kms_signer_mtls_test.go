@@ -59,12 +59,12 @@ func TestKMSSignerSign_mTLS(t *testing.T) {
 	// 1) Create CA (RSA)
 	caKey := genRSAKey(t)
 	caTmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(2025),
-		Subject:      pkix.Name{CommonName: "test-ca"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(24 * time.Hour),
-		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		IsCA:         true,
+		SerialNumber:          big.NewInt(2025),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
 	caDER, err := x509.CreateCertificate(crand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
@@ -201,4 +201,3 @@ func TestKMSSignerSign_mTLS(t *testing.T) {
 		t.Fatalf("signature verification failed (mtls)")
 	}
 }
-

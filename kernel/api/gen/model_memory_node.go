@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -19,9 +19,9 @@ var _ MappedNullable = &MemoryNode{}
 
 // MemoryNode struct for MemoryNode
 type MemoryNode struct {
-	Id interface{} `json:"id"`
+	Id          interface{} `json:"id"`
 	EmbeddingId interface{} `json:"embeddingId,omitempty"`
-	Metadata interface{} `json:"metadata,omitempty"`
+	Metadata    interface{} `json:"metadata,omitempty"`
 }
 
 // NewMemoryNode instantiates a new MemoryNode object
@@ -135,7 +135,7 @@ func (o *MemoryNode) SetMetadata(v interface{}) {
 }
 
 func (o MemoryNode) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -191,5 +191,3 @@ func (v *NullableMemoryNode) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

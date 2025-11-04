@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -110,6 +112,99 @@ func main() {
 		Registry: reg,
 	}
 
+	// --- Audit streamer wiring (DB-first durable pipeline) ---
+	var (
+		streamerCancel context.CancelFunc
+	)
+	// Only start streamer when we have Postgres (durable DB) and required infra configured.
+	if db != nil {
+		kafkaBrokersEnv := strings.TrimSpace(os.Getenv("KAFKA_BROKERS"))
+		kafkaTopic := strings.TrimSpace(os.Getenv("KAFKA_TOPIC"))
+		s3Bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+		s3Prefix := strings.TrimSpace(os.Getenv("S3_PREFIX")) // optional
+
+		if kafkaBrokersEnv != "" && kafkaTopic != "" && s3Bucket != "" {
+			// parse brokers
+			rawBrokers := strings.Split(kafkaBrokersEnv, ",")
+			brokers := make([]string, 0, len(rawBrokers))
+			for _, b := range rawBrokers {
+				b = strings.TrimSpace(b)
+				if b != "" {
+					brokers = append(brokers, b)
+				}
+			}
+
+			// create kafka producer
+			kafkaCfg := audit.KafkaProducerConfig{
+				Brokers:     brokers,
+				Topic:       kafkaTopic,
+				MaxAttempts: 3,
+				// WriteTimeout left as zero -> defaults inside constructor
+			}
+			producer, err := audit.NewKafkaProducer(kafkaCfg)
+			if err != nil {
+				log.Fatalf("failed to initialize kafka producer: %v", err)
+			}
+			log.Printf("kafka producer initialized (brokers=%v topic=%s)", brokers, kafkaTopic)
+
+			// create S3 archiver
+			archiver, err := audit.NewS3Archiver(context.Background(), s3Bucket, s3Prefix)
+			if err != nil {
+				// archiver is critical to our durable pipeline; fail-fast so we don't lose events.
+				log.Fatalf("failed to initialize s3 archiver: %v", err)
+			}
+			log.Printf("s3 archiver initialized (bucket=%s prefix=%s)", s3Bucket, s3Prefix)
+
+			// streamer config from env (with defaults)
+			batchSize := 10
+			if v := strings.TrimSpace(os.Getenv("STREAM_BATCH_SIZE")); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					batchSize = n
+				}
+			}
+			maxConcurrency := 5
+			if v := strings.TrimSpace(os.Getenv("STREAM_MAX_CONCURRENCY")); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					maxConcurrency = n
+				}
+			}
+			pollInterval := 3 * time.Second
+			if v := strings.TrimSpace(os.Getenv("STREAM_POLL_INTERVAL_SECONDS")); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					pollInterval = time.Duration(n) * time.Second
+				}
+			}
+
+			// ensure store is PGStore so we can use FetchPendingEventsForStreaming/MarkEventStreamResult
+			pgStore, ok := store.(*audit.PGStore)
+			if !ok {
+				log.Printf("audit store is not Postgres-backed; skipping audit streamer startup")
+			} else {
+				streamerCfg := audit.StreamerConfig{
+					BatchSize:      batchSize,
+					PollInterval:   pollInterval,
+					MaxConcurrency: maxConcurrency,
+				}
+				streamer := audit.NewStreamer(pgStore, producer, archiver, streamerCfg)
+
+				// start streamer in background with cancellable context
+				ctxStr, cancel := context.WithCancel(context.Background())
+				streamerCancel = cancel
+				go func() {
+					if err := streamer.Run(ctxStr); err != nil && err != context.Canceled {
+						log.Printf("[audit.streamer] exited with error: %v", err)
+					}
+					log.Printf("[audit.streamer] background runner stopped")
+				}()
+				log.Printf("audit streamer started (batch=%d concurrency=%d poll=%s)", batchSize, maxConcurrency, pollInterval)
+			}
+		} else {
+			log.Println("audit streamer not started: KAFKA_BROKERS, KAFKA_TOPIC, and S3_BUCKET must be set to enable")
+		}
+	} else {
+		log.Println("no postgres configured; audit streamer disabled (requires durable DB)")
+	}
+
 	// Router and middleware
 	r := chi.NewRouter()
 
@@ -145,14 +240,23 @@ func main() {
 	<-stop
 	log.Println("shutting down server...")
 
+	// First stop accepting new HTTP requests and wait for inflight requests.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown error: %v", err)
 	}
+
+	// Cancel streamer if started and give it a short grace period to finish.
+	if streamerCancel != nil {
+		streamerCancel()
+		// give streamer up to 10s to drain in-flight work; it will also close the producer.
+		shutdownWait := time.NewTimer(10 * time.Second)
+		<-shutdownWait.C
+	}
+
 	if db != nil {
 		_ = db.Close()
 	}
 	log.Println("server stopped")
 }
-

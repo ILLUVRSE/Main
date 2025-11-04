@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -19,12 +19,11 @@ import (
 	"strings"
 )
 
-
 // KernelApiService KernelApi service
 type KernelApiService service
 
 type ApiHealthGetRequest struct {
-	ctx context.Context
+	ctx        context.Context
 	ApiService *KernelApiService
 }
 
@@ -35,24 +34,25 @@ func (r ApiHealthGetRequest) Execute() (*HealthGet200Response, *http.Response, e
 /*
 HealthGet Liveness probe
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @return ApiHealthGetRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiHealthGetRequest
 */
 func (a *KernelApiService) HealthGet(ctx context.Context) ApiHealthGetRequest {
 	return ApiHealthGetRequest{
 		ApiService: a,
-		ctx: ctx,
+		ctx:        ctx,
 	}
 }
 
 // Execute executes the request
-//  @return HealthGet200Response
+//
+//	@return HealthGet200Response
 func (a *KernelApiService) HealthGetExecute(r ApiHealthGetRequest) (*HealthGet200Response, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodGet
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *HealthGet200Response
+		localVarHTTPMethod  = http.MethodGet
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *HealthGet200Response
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.HealthGet")
@@ -121,9 +121,9 @@ func (a *KernelApiService) HealthGetExecute(r ApiHealthGetRequest) (*HealthGet20
 }
 
 type ApiKernelAgentIdStateGetRequest struct {
-	ctx context.Context
+	ctx        context.Context
 	ApiService *KernelApiService
-	id interface{}
+	id         interface{}
 }
 
 func (r ApiKernelAgentIdStateGetRequest) Execute() (*AgentProfile, *http.Response, error) {
@@ -133,26 +133,27 @@ func (r ApiKernelAgentIdStateGetRequest) Execute() (*AgentProfile, *http.Respons
 /*
 KernelAgentIdStateGet Retrieve agent snapshot and recent metrics
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @param id
- @return ApiKernelAgentIdStateGetRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@param id
+	@return ApiKernelAgentIdStateGetRequest
 */
 func (a *KernelApiService) KernelAgentIdStateGet(ctx context.Context, id interface{}) ApiKernelAgentIdStateGetRequest {
 	return ApiKernelAgentIdStateGetRequest{
 		ApiService: a,
-		ctx: ctx,
-		id: id,
+		ctx:        ctx,
+		id:         id,
 	}
 }
 
 // Execute executes the request
-//  @return AgentProfile
+//
+//	@return AgentProfile
 func (a *KernelApiService) KernelAgentIdStateGetExecute(r ApiKernelAgentIdStateGetRequest) (*AgentProfile, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodGet
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *AgentProfile
+		localVarHTTPMethod  = http.MethodGet
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *AgentProfile
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelAgentIdStateGet")
@@ -222,8 +223,8 @@ func (a *KernelApiService) KernelAgentIdStateGetExecute(r ApiKernelAgentIdStateG
 }
 
 type ApiKernelAgentPostRequest struct {
-	ctx context.Context
-	ApiService *KernelApiService
+	ctx                    context.Context
+	ApiService             *KernelApiService
 	kernelAgentPostRequest *KernelAgentPostRequest
 }
 
@@ -239,24 +240,25 @@ func (r ApiKernelAgentPostRequest) Execute() (*KernelAgentPost202Response, *http
 /*
 KernelAgentPost Spawn a new agent from template/manifest
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @return ApiKernelAgentPostRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiKernelAgentPostRequest
 */
 func (a *KernelApiService) KernelAgentPost(ctx context.Context) ApiKernelAgentPostRequest {
 	return ApiKernelAgentPostRequest{
 		ApiService: a,
-		ctx: ctx,
+		ctx:        ctx,
 	}
 }
 
 // Execute executes the request
-//  @return KernelAgentPost202Response
+//
+//	@return KernelAgentPost202Response
 func (a *KernelApiService) KernelAgentPostExecute(r ApiKernelAgentPostRequest) (*KernelAgentPost202Response, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodPost
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *KernelAgentPost202Response
+		localVarHTTPMethod  = http.MethodPost
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *KernelAgentPost202Response
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelAgentPost")
@@ -330,8 +332,8 @@ func (a *KernelApiService) KernelAgentPostExecute(r ApiKernelAgentPostRequest) (
 }
 
 type ApiKernelAllocatePostRequest struct {
-	ctx context.Context
-	ApiService *KernelApiService
+	ctx               context.Context
+	ApiService        *KernelApiService
 	allocationRequest *AllocationRequest
 }
 
@@ -347,24 +349,25 @@ func (r ApiKernelAllocatePostRequest) Execute() (*KernelAllocatePost202Response,
 /*
 KernelAllocatePost Request or assign compute / capital resources
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @return ApiKernelAllocatePostRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiKernelAllocatePostRequest
 */
 func (a *KernelApiService) KernelAllocatePost(ctx context.Context) ApiKernelAllocatePostRequest {
 	return ApiKernelAllocatePostRequest{
 		ApiService: a,
-		ctx: ctx,
+		ctx:        ctx,
 	}
 }
 
 // Execute executes the request
-//  @return KernelAllocatePost202Response
+//
+//	@return KernelAllocatePost202Response
 func (a *KernelApiService) KernelAllocatePostExecute(r ApiKernelAllocatePostRequest) (*KernelAllocatePost202Response, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodPost
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *KernelAllocatePost202Response
+		localVarHTTPMethod  = http.MethodPost
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *KernelAllocatePost202Response
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelAllocatePost")
@@ -438,9 +441,9 @@ func (a *KernelApiService) KernelAllocatePostExecute(r ApiKernelAllocatePostRequ
 }
 
 type ApiKernelAuditIdGetRequest struct {
-	ctx context.Context
+	ctx        context.Context
 	ApiService *KernelApiService
-	id interface{}
+	id         interface{}
 }
 
 func (r ApiKernelAuditIdGetRequest) Execute() (*AuditEvent, *http.Response, error) {
@@ -450,26 +453,27 @@ func (r ApiKernelAuditIdGetRequest) Execute() (*AuditEvent, *http.Response, erro
 /*
 KernelAuditIdGet Fetch a signed audit event
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @param id
- @return ApiKernelAuditIdGetRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@param id
+	@return ApiKernelAuditIdGetRequest
 */
 func (a *KernelApiService) KernelAuditIdGet(ctx context.Context, id interface{}) ApiKernelAuditIdGetRequest {
 	return ApiKernelAuditIdGetRequest{
 		ApiService: a,
-		ctx: ctx,
-		id: id,
+		ctx:        ctx,
+		id:         id,
 	}
 }
 
 // Execute executes the request
-//  @return AuditEvent
+//
+//	@return AuditEvent
 func (a *KernelApiService) KernelAuditIdGetExecute(r ApiKernelAuditIdGetRequest) (*AuditEvent, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodGet
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *AuditEvent
+		localVarHTTPMethod  = http.MethodGet
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *AuditEvent
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelAuditIdGet")
@@ -539,9 +543,9 @@ func (a *KernelApiService) KernelAuditIdGetExecute(r ApiKernelAuditIdGetRequest)
 }
 
 type ApiKernelDivisionIdGetRequest struct {
-	ctx context.Context
+	ctx        context.Context
 	ApiService *KernelApiService
-	id interface{}
+	id         interface{}
 }
 
 func (r ApiKernelDivisionIdGetRequest) Execute() (*DivisionManifest, *http.Response, error) {
@@ -551,26 +555,27 @@ func (r ApiKernelDivisionIdGetRequest) Execute() (*DivisionManifest, *http.Respo
 /*
 KernelDivisionIdGet Fetch a DivisionManifest
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @param id
- @return ApiKernelDivisionIdGetRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@param id
+	@return ApiKernelDivisionIdGetRequest
 */
 func (a *KernelApiService) KernelDivisionIdGet(ctx context.Context, id interface{}) ApiKernelDivisionIdGetRequest {
 	return ApiKernelDivisionIdGetRequest{
 		ApiService: a,
-		ctx: ctx,
-		id: id,
+		ctx:        ctx,
+		id:         id,
 	}
 }
 
 // Execute executes the request
-//  @return DivisionManifest
+//
+//	@return DivisionManifest
 func (a *KernelApiService) KernelDivisionIdGetExecute(r ApiKernelDivisionIdGetRequest) (*DivisionManifest, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodGet
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *DivisionManifest
+		localVarHTTPMethod  = http.MethodGet
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *DivisionManifest
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelDivisionIdGet")
@@ -640,8 +645,8 @@ func (a *KernelApiService) KernelDivisionIdGetExecute(r ApiKernelDivisionIdGetRe
 }
 
 type ApiKernelDivisionPostRequest struct {
-	ctx context.Context
-	ApiService *KernelApiService
+	ctx              context.Context
+	ApiService       *KernelApiService
 	divisionManifest *DivisionManifest
 }
 
@@ -657,24 +662,25 @@ func (r ApiKernelDivisionPostRequest) Execute() (*DivisionManifest, *http.Respon
 /*
 KernelDivisionPost Register or update a DivisionManifest
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @return ApiKernelDivisionPostRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiKernelDivisionPostRequest
 */
 func (a *KernelApiService) KernelDivisionPost(ctx context.Context) ApiKernelDivisionPostRequest {
 	return ApiKernelDivisionPostRequest{
 		ApiService: a,
-		ctx: ctx,
+		ctx:        ctx,
 	}
 }
 
 // Execute executes the request
-//  @return DivisionManifest
+//
+//	@return DivisionManifest
 func (a *KernelApiService) KernelDivisionPostExecute(r ApiKernelDivisionPostRequest) (*DivisionManifest, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodPost
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *DivisionManifest
+		localVarHTTPMethod  = http.MethodPost
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *DivisionManifest
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelDivisionPost")
@@ -739,8 +745,8 @@ func (a *KernelApiService) KernelDivisionPostExecute(r ApiKernelDivisionPostRequ
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-					newErr.model = v
+			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+			newErr.model = v
 			return localVarReturnValue, localVarHTTPResponse, newErr
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
@@ -759,7 +765,7 @@ func (a *KernelApiService) KernelDivisionPostExecute(r ApiKernelDivisionPostRequ
 }
 
 type ApiKernelEvalPostRequest struct {
-	ctx context.Context
+	ctx        context.Context
 	ApiService *KernelApiService
 	evalReport *EvalReport
 }
@@ -776,24 +782,25 @@ func (r ApiKernelEvalPostRequest) Execute() (*KernelEvalPost200Response, *http.R
 /*
 KernelEvalPost Submit an EvalReport
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @return ApiKernelEvalPostRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiKernelEvalPostRequest
 */
 func (a *KernelApiService) KernelEvalPost(ctx context.Context) ApiKernelEvalPostRequest {
 	return ApiKernelEvalPostRequest{
 		ApiService: a,
-		ctx: ctx,
+		ctx:        ctx,
 	}
 }
 
 // Execute executes the request
-//  @return KernelEvalPost200Response
+//
+//	@return KernelEvalPost200Response
 func (a *KernelApiService) KernelEvalPostExecute(r ApiKernelEvalPostRequest) (*KernelEvalPost200Response, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodPost
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *KernelEvalPost200Response
+		localVarHTTPMethod  = http.MethodPost
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *KernelEvalPost200Response
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelEvalPost")
@@ -867,9 +874,9 @@ func (a *KernelApiService) KernelEvalPostExecute(r ApiKernelEvalPostRequest) (*K
 }
 
 type ApiKernelReasonNodeGetRequest struct {
-	ctx context.Context
+	ctx        context.Context
 	ApiService *KernelApiService
-	node interface{}
+	node       interface{}
 }
 
 func (r ApiKernelReasonNodeGetRequest) Execute() (*KernelReasonNodeGet200Response, *http.Response, error) {
@@ -879,26 +886,27 @@ func (r ApiKernelReasonNodeGetRequest) Execute() (*KernelReasonNodeGet200Respons
 /*
 KernelReasonNodeGet Retrieve a reasoning trace for a graph node
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @param node
- @return ApiKernelReasonNodeGetRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@param node
+	@return ApiKernelReasonNodeGetRequest
 */
 func (a *KernelApiService) KernelReasonNodeGet(ctx context.Context, node interface{}) ApiKernelReasonNodeGetRequest {
 	return ApiKernelReasonNodeGetRequest{
 		ApiService: a,
-		ctx: ctx,
-		node: node,
+		ctx:        ctx,
+		node:       node,
 	}
 }
 
 // Execute executes the request
-//  @return KernelReasonNodeGet200Response
+//
+//	@return KernelReasonNodeGet200Response
 func (a *KernelApiService) KernelReasonNodeGetExecute(r ApiKernelReasonNodeGetRequest) (*KernelReasonNodeGet200Response, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodGet
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *KernelReasonNodeGet200Response
+		localVarHTTPMethod  = http.MethodGet
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *KernelReasonNodeGet200Response
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelReasonNodeGet")
@@ -968,8 +976,8 @@ func (a *KernelApiService) KernelReasonNodeGetExecute(r ApiKernelReasonNodeGetRe
 }
 
 type ApiKernelSignPostRequest struct {
-	ctx context.Context
-	ApiService *KernelApiService
+	ctx         context.Context
+	ApiService  *KernelApiService
 	signRequest *SignRequest
 }
 
@@ -985,24 +993,25 @@ func (r ApiKernelSignPostRequest) Execute() (*ManifestSignature, *http.Response,
 /*
 KernelSignPost Request a signature for a manifest
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @return ApiKernelSignPostRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiKernelSignPostRequest
 */
 func (a *KernelApiService) KernelSignPost(ctx context.Context) ApiKernelSignPostRequest {
 	return ApiKernelSignPostRequest{
 		ApiService: a,
-		ctx: ctx,
+		ctx:        ctx,
 	}
 }
 
 // Execute executes the request
-//  @return ManifestSignature
+//
+//	@return ManifestSignature
 func (a *KernelApiService) KernelSignPostExecute(r ApiKernelSignPostRequest) (*ManifestSignature, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodPost
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *ManifestSignature
+		localVarHTTPMethod  = http.MethodPost
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *ManifestSignature
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.KernelSignPost")
@@ -1076,7 +1085,7 @@ func (a *KernelApiService) KernelSignPostExecute(r ApiKernelSignPostRequest) (*M
 }
 
 type ApiReadyGetRequest struct {
-	ctx context.Context
+	ctx        context.Context
 	ApiService *KernelApiService
 }
 
@@ -1087,24 +1096,25 @@ func (r ApiReadyGetRequest) Execute() (*ReadyGet200Response, *http.Response, err
 /*
 ReadyGet Readiness check (DB + KMS if required)
 
- @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
- @return ApiReadyGetRequest
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiReadyGetRequest
 */
 func (a *KernelApiService) ReadyGet(ctx context.Context) ApiReadyGetRequest {
 	return ApiReadyGetRequest{
 		ApiService: a,
-		ctx: ctx,
+		ctx:        ctx,
 	}
 }
 
 // Execute executes the request
-//  @return ReadyGet200Response
+//
+//	@return ReadyGet200Response
 func (a *KernelApiService) ReadyGetExecute(r ApiReadyGetRequest) (*ReadyGet200Response, *http.Response, error) {
 	var (
-		localVarHTTPMethod   = http.MethodGet
-		localVarPostBody     interface{}
-		formFiles            []formFile
-		localVarReturnValue  *ReadyGet200Response
+		localVarHTTPMethod  = http.MethodGet
+		localVarPostBody    interface{}
+		formFiles           []formFile
+		localVarReturnValue *ReadyGet200Response
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "KernelApiService.ReadyGet")
@@ -1164,8 +1174,8 @@ func (a *KernelApiService) ReadyGetExecute(r ApiReadyGetRequest) (*ReadyGet200Re
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-					newErr.model = v
+			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+			newErr.model = v
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
 	}

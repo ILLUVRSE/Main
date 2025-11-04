@@ -11,10 +11,10 @@ package gen
 
 import (
 	"context"
+	openapiclient "github.com/GIT_USER_ID/GIT_REPO_ID"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"
-	openapiclient "github.com/GIT_USER_ID/GIT_REPO_ID"
 )
 
 func Test_gen_KernelApiService(t *testing.T) {
@@ -24,7 +24,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService HealthGet", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		resp, httpRes, err := apiClient.KernelApi.HealthGet(context.Background()).Execute()
 
@@ -36,7 +36,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelAgentIdStateGet", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		var id interface{}
 
@@ -50,7 +50,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelAgentPost", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		resp, httpRes, err := apiClient.KernelApi.KernelAgentPost(context.Background()).Execute()
 
@@ -62,7 +62,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelAllocatePost", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		resp, httpRes, err := apiClient.KernelApi.KernelAllocatePost(context.Background()).Execute()
 
@@ -74,7 +74,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelAuditIdGet", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		var id interface{}
 
@@ -88,7 +88,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelDivisionIdGet", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		var id interface{}
 
@@ -102,7 +102,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelDivisionPost", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		resp, httpRes, err := apiClient.KernelApi.KernelDivisionPost(context.Background()).Execute()
 
@@ -114,7 +114,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelEvalPost", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		resp, httpRes, err := apiClient.KernelApi.KernelEvalPost(context.Background()).Execute()
 
@@ -126,7 +126,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelReasonNodeGet", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		var node interface{}
 
@@ -140,7 +140,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService KernelSignPost", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		resp, httpRes, err := apiClient.KernelApi.KernelSignPost(context.Background()).Execute()
 
@@ -152,7 +152,7 @@ func Test_gen_KernelApiService(t *testing.T) {
 
 	t.Run("Test KernelApiService ReadyGet", func(t *testing.T) {
 
-		t.Skip("skip test")  // remove to run test
+		t.Skip("skip test") // remove to run test
 
 		resp, httpRes, err := apiClient.KernelApi.ReadyGet(context.Background()).Execute()
 

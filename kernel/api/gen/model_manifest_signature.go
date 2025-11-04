@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -20,10 +20,10 @@ var _ MappedNullable = &ManifestSignature{}
 // ManifestSignature struct for ManifestSignature
 type ManifestSignature struct {
 	ManifestId interface{} `json:"manifestId"`
-	SignerId interface{} `json:"signerId"`
-	Signature interface{} `json:"signature"`
-	Version interface{} `json:"version,omitempty"`
-	Ts interface{} `json:"ts,omitempty"`
+	SignerId   interface{} `json:"signerId"`
+	Signature  interface{} `json:"signature"`
+	Version    interface{} `json:"version,omitempty"`
+	Ts         interface{} `json:"ts,omitempty"`
 }
 
 // NewManifestSignature instantiates a new ManifestSignature object
@@ -191,7 +191,7 @@ func (o *ManifestSignature) SetTs(v interface{}) {
 }
 
 func (o ManifestSignature) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -253,5 +253,3 @@ func (v *NullableManifestSignature) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

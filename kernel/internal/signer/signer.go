@@ -51,4 +51,3 @@ func (l *LocalSigner) Sign(hash []byte) ([]byte, string, error) {
 func (l *LocalSigner) PublicKey() []byte {
 	return l.pub
 }
-

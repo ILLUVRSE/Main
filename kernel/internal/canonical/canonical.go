@@ -89,4 +89,3 @@ func encode(buf *bytes.Buffer, v interface{}) error {
 	}
 	return nil
 }
-

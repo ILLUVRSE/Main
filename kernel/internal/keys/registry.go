@@ -19,8 +19,8 @@ type KeyInfo struct {
 // Registry is a small in-memory registry of signer public keys.
 // It is safe for concurrent access.
 type Registry struct {
-	mtx    sync.RWMutex
-	keys   map[string]KeyInfo
+	mtx  sync.RWMutex
+	keys map[string]KeyInfo
 }
 
 // NewRegistry creates an empty Registry.
@@ -77,4 +77,3 @@ func (r *Registry) StatusHandler() http.HandlerFunc {
 		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
-

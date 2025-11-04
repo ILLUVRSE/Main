@@ -16,8 +16,8 @@ import (
 )
 
 // VerifyChain walks the audit_events table in chronological order and verifies:
-//  - hash correctness: hash == SHA256(canonical(payload) || prevHashBytes)
-//  - signature correctness: Ed25519 verify using signer public key from registry
+//   - hash correctness: hash == SHA256(canonical(payload) || prevHashBytes)
+//   - signature correctness: Ed25519 verify using signer public key from registry
 //
 // Returns nil on success or an error describing the first problem encountered.
 func VerifyChain(ctx context.Context, db *sql.DB, reg *keys.Registry) error {
@@ -110,4 +110,3 @@ func VerifyChain(ctx context.Context, db *sql.DB, reg *keys.Registry) error {
 
 	return nil
 }
-

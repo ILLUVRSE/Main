@@ -38,4 +38,3 @@ var ErrNotFound = errors.New("not found")
 func NewUUID() string {
 	return uuid.New().String()
 }
-

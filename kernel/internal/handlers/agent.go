@@ -29,17 +29,17 @@ type AgentRequest struct {
 
 // AgentProfile is a minimal runtime record returned by GET /kernel/agent/{id}/state
 type AgentProfile struct {
-	Id               string                 `json:"id"`
-	TemplateId       string                 `json:"templateId,omitempty"`
-	Role             string                 `json:"role,omitempty"`
-	DivisionId       string                 `json:"divisionId,omitempty"`
-	CodeRef          string                 `json:"codeRef,omitempty"`
-	State            string                 `json:"state,omitempty"`
+	Id                 string                 `json:"id"`
+	TemplateId         string                 `json:"templateId,omitempty"`
+	Role               string                 `json:"role,omitempty"`
+	DivisionId         string                 `json:"divisionId,omitempty"`
+	CodeRef            string                 `json:"codeRef,omitempty"`
+	State              string                 `json:"state,omitempty"`
 	ResourceAllocation map[string]interface{} `json:"resourceAllocation,omitempty"`
-	LastHeartbeat    *time.Time             `json:"lastHeartbeat,omitempty"`
-	CreatedAt        time.Time              `json:"createdAt"`
-	UpdatedAt        time.Time              `json:"updatedAt"`
-	Owner            string                 `json:"owner,omitempty"`
+	LastHeartbeat      *time.Time             `json:"lastHeartbeat,omitempty"`
+	CreatedAt          time.Time              `json:"createdAt"`
+	UpdatedAt          time.Time              `json:"updatedAt"`
+	Owner              string                 `json:"owner,omitempty"`
 }
 
 // POST /kernel/agent
@@ -60,15 +60,15 @@ func handleAgentPost(cfg *config.Config, db *sql.DB, s signer.Signer, store audi
 		agentId := audit.NewUUID()
 		now := time.Now().UTC()
 		profile := &AgentProfile{
-			Id:        agentId,
+			Id:         agentId,
 			TemplateId: req.TemplateId,
 			DivisionId: req.DivisionId,
-			Role:      req.Role,
-			CodeRef:   req.CodeRef,
-			State:     "created",
-			CreatedAt: now,
-			UpdatedAt: now,
-			Owner:     req.Requester,
+			Role:       req.Role,
+			CodeRef:    req.CodeRef,
+			State:      "created",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			Owner:      req.Requester,
 		}
 
 		// persist
@@ -203,4 +203,3 @@ func fetchAgentFromDB(ctx context.Context, db *sql.DB, id string) (*AgentProfile
 	}
 	return &p, nil
 }
-

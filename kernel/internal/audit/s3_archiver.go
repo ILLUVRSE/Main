@@ -22,7 +22,8 @@ type Archiver interface {
 }
 
 // S3Archiver writes canonicalized audit events to S3 paths like:
-//   s3://<bucket>/<prefix>/audit/YYYY/MM/DD/<eventID>.json
+//
+//	s3://<bucket>/<prefix>/audit/YYYY/MM/DD/<eventID>.json
 type S3Archiver struct {
 	bucket   string
 	prefix   string
@@ -55,7 +56,8 @@ func NewS3Archiver(ctx context.Context, bucket string, prefix string) (*S3Archiv
 
 // ArchiveEvent canonicalizes a full event envelope and uploads to S3.
 // The stored object is the canonical JSON of a small envelope:
-//   { id, eventType, payload, prevHash, hash, signature, signerId, ts, metadata }
+//
+//	{ id, eventType, payload, prevHash, hash, signature, signerId, ts, metadata }
 func (s *S3Archiver) ArchiveEvent(ctx context.Context, ev *AuditEvent) error {
 	if ev == nil {
 		return fmt.Errorf("nil event")
@@ -137,4 +139,3 @@ func (s *S3Archiver) ArchiveEventAndReturnKey(ctx context.Context, ev *AuditEven
 	}
 	return objectKey, nil
 }
-

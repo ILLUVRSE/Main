@@ -262,4 +262,3 @@ func ephemeralSign(hash []byte, signerId string) ([]byte, string) {
 	sig := ed25519.Sign(priv, hash)
 	return sig, signerId
 }
-

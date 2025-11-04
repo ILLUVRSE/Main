@@ -71,4 +71,3 @@ func TestCanonicalNumbersAndArrays(t *testing.T) {
 		}
 	}
 }
-

@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ILLUVRSE/Main/kernel/internal/config"
 	"github.com/ILLUVRSE/Main/kernel/internal/audit"
+	"github.com/ILLUVRSE/Main/kernel/internal/config"
 )
 
 // handleReasonGet returns a reasoning trace for a given node.
@@ -68,4 +68,3 @@ func init() {
 	// _ = createSampleTrace("sample-node", map[string]interface{}{"steps": []string{"a","b","c"}, "createdAt": time.Now().UTC()})
 	_ = time.Now() // keep import tidy if sample code commented
 }
-

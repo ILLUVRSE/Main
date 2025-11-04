@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -19,12 +19,12 @@ var _ MappedNullable = &AuditEvent{}
 
 // AuditEvent struct for AuditEvent
 type AuditEvent struct {
-	Id interface{} `json:"id"`
-	Type interface{} `json:"type"`
-	Payload interface{} `json:"payload"`
-	Ts interface{} `json:"ts"`
-	PrevHash interface{} `json:"prevHash,omitempty"`
-	Hash interface{} `json:"hash"`
+	Id        interface{} `json:"id"`
+	Type      interface{} `json:"type"`
+	Payload   interface{} `json:"payload"`
+	Ts        interface{} `json:"ts"`
+	PrevHash  interface{} `json:"prevHash,omitempty"`
+	Hash      interface{} `json:"hash"`
 	Signature interface{} `json:"signature"`
 }
 
@@ -241,7 +241,7 @@ func (o *AuditEvent) SetSignature(v interface{}) {
 }
 
 func (o AuditEvent) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -309,5 +309,3 @@ func (v *NullableAuditEvent) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -19,12 +19,12 @@ var _ MappedNullable = &AllocationRequest{}
 
 // AllocationRequest struct for AllocationRequest
 type AllocationRequest struct {
-	Id interface{} `json:"id"`
+	Id         interface{} `json:"id"`
 	DivisionId interface{} `json:"divisionId"`
-	Cpu interface{} `json:"cpu,omitempty"`
-	Gpu interface{} `json:"gpu,omitempty"`
-	MemoryMB interface{} `json:"memoryMB,omitempty"`
-	Requester interface{} `json:"requester,omitempty"`
+	Cpu        interface{} `json:"cpu,omitempty"`
+	Gpu        interface{} `json:"gpu,omitempty"`
+	MemoryMB   interface{} `json:"memoryMB,omitempty"`
+	Requester  interface{} `json:"requester,omitempty"`
 }
 
 // NewAllocationRequest instantiates a new AllocationRequest object
@@ -231,7 +231,7 @@ func (o *AllocationRequest) SetRequester(v interface{}) {
 }
 
 func (o AllocationRequest) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -296,5 +296,3 @@ func (v *NullableAllocationRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

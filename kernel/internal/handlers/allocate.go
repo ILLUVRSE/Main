@@ -17,14 +17,14 @@ import (
 
 // AllocationRequest is the minimal request model for /kernel/allocate
 type AllocationRequest struct {
-	Id         string `json:"id,omitempty"`
-	DivisionId string `json:"divisionId"`
-	CPU        int    `json:"cpu,omitempty"`
-	GPU        int    `json:"gpu,omitempty"`
-	MemoryMB   int    `json:"memoryMB,omitempty"`
-	Requester  string `json:"requester,omitempty"`
-	Status     string `json:"status,omitempty"` // pending|applied|rejected
-	Reason     string `json:"reason,omitempty"`
+	Id         string    `json:"id,omitempty"`
+	DivisionId string    `json:"divisionId"`
+	CPU        int       `json:"cpu,omitempty"`
+	GPU        int       `json:"gpu,omitempty"`
+	MemoryMB   int       `json:"memoryMB,omitempty"`
+	Requester  string    `json:"requester,omitempty"`
+	Status     string    `json:"status,omitempty"` // pending|applied|rejected
+	Reason     string    `json:"reason,omitempty"`
 	CreatedAt  time.Time `json:"createdAt,omitempty"`
 	UpdatedAt  time.Time `json:"updatedAt,omitempty"`
 }
@@ -130,4 +130,3 @@ func insertAllocationToDB(ctx context.Context, db *sql.DB, a *AllocationRequest)
 	)
 	return err
 }
-

@@ -26,4 +26,3 @@ func TestLocalSigner(t *testing.T) {
 		t.Fatalf("signature verification failed")
 	}
 }
-

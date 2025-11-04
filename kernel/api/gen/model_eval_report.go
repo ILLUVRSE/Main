@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -19,8 +19,8 @@ var _ MappedNullable = &EvalReport{}
 
 // EvalReport struct for EvalReport
 type EvalReport struct {
-	Id interface{} `json:"id"`
-	AgentId interface{} `json:"agentId"`
+	Id        interface{} `json:"id"`
+	AgentId   interface{} `json:"agentId"`
 	MetricSet interface{} `json:"metricSet"`
 	Timestamp interface{} `json:"timestamp,omitempty"`
 }
@@ -157,7 +157,7 @@ func (o *EvalReport) SetTimestamp(v interface{}) {
 }
 
 func (o EvalReport) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -216,5 +216,3 @@ func (v *NullableEvalReport) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

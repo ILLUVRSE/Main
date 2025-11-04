@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -19,11 +19,11 @@ var _ MappedNullable = &DivisionManifest{}
 
 // DivisionManifest struct for DivisionManifest
 type DivisionManifest struct {
-	Id interface{} `json:"id"`
-	Name interface{} `json:"name"`
-	Goals interface{} `json:"goals"`
-	Budget interface{} `json:"budget,omitempty"`
-	Kpis interface{} `json:"kpis,omitempty"`
+	Id       interface{} `json:"id"`
+	Name     interface{} `json:"name"`
+	Goals    interface{} `json:"goals"`
+	Budget   interface{} `json:"budget,omitempty"`
+	Kpis     interface{} `json:"kpis,omitempty"`
 	Policies interface{} `json:"policies,omitempty"`
 	Metadata interface{} `json:"metadata,omitempty"`
 }
@@ -259,7 +259,7 @@ func (o *DivisionManifest) SetMetadata(v interface{}) {
 }
 
 func (o DivisionManifest) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -327,5 +327,3 @@ func (v *NullableDivisionManifest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

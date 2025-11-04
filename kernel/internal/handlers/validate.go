@@ -34,4 +34,3 @@ func BindJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
 	}
 	return nil
 }
-

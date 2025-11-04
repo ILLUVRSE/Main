@@ -73,4 +73,3 @@ func TestKMSSignerSign_Simple(t *testing.T) {
 		t.Fatalf("signature verification failed")
 	}
 }
-

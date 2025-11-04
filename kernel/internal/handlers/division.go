@@ -209,4 +209,3 @@ func fetchDivisionFromDB(ctx context.Context, db *sql.DB, id string) (DivisionMa
 	}
 	return m, nil
 }
-

@@ -110,4 +110,3 @@ func (s *Store) DeleteSigner(ctx context.Context, signerId string) error {
 	_, err := s.db.ExecContext(ctx, q, signerId)
 	return err
 }
-

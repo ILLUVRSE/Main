@@ -1,7 +1,7 @@
 /*
 ILLUVRSE Kernel API
 
-Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval. 
+Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
 
 API version: 1.0.0
 */
@@ -20,7 +20,7 @@ var _ MappedNullable = &HealthGet200Response{}
 // HealthGet200Response struct for HealthGet200Response
 type HealthGet200Response struct {
 	Status interface{} `json:"status,omitempty"`
-	Ts interface{} `json:"ts,omitempty"`
+	Ts     interface{} `json:"ts,omitempty"`
 }
 
 // NewHealthGet200Response instantiates a new HealthGet200Response object
@@ -107,7 +107,7 @@ func (o *HealthGet200Response) SetTs(v interface{}) {
 }
 
 func (o HealthGet200Response) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -160,5 +160,3 @@ func (v *NullableHealthGet200Response) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

@@ -95,4 +95,3 @@ func TestFileStoreAppendGet(t *testing.T) {
 func hexDecode(s string) ([]byte, error) {
 	return hex.DecodeString(s)
 }
-

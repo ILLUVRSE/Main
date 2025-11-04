@@ -10,10 +10,10 @@ import (
 
 // NewTLSConfigFromFiles builds a tls.Config from on-disk PEM files.
 //
-// - serverCertFile/serverKeyFile: server certificate and private key (PEM).
-// - clientCAFile: optional CA bundle (PEM) used to verify client certificates for mTLS.
-// - requireClientCert: if true, ClientAuth is set to RequireAndVerifyClientCert; otherwise
-//   ClientAuth is VerifyClientCertIfGiven (accepts client certs if presented).
+//   - serverCertFile/serverKeyFile: server certificate and private key (PEM).
+//   - clientCAFile: optional CA bundle (PEM) used to verify client certificates for mTLS.
+//   - requireClientCert: if true, ClientAuth is set to RequireAndVerifyClientCert; otherwise
+//     ClientAuth is VerifyClientCertIfGiven (accepts client certs if presented).
 //
 // Returns a configured *tls.Config. Caller may set additional fields (GetCertificate, etc.).
 func NewTLSConfigFromFiles(serverCertFile, serverKeyFile, clientCAFile string, requireClientCert bool) (*tls.Config, error) {
@@ -67,4 +67,3 @@ func NewTLSConfigFromFiles(serverCertFile, serverKeyFile, clientCAFile string, r
 
 	return tlsCfg, nil
 }
-

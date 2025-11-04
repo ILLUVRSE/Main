@@ -374,4 +374,3 @@ func OIDCMiddleware(jwks *JWKSCache, issuer, audience string) func(next http.Han
 		})
 	}
 }
-

@@ -49,4 +49,3 @@ func LoadFromEnv() *Config {
 
 	return cfg
 }
-

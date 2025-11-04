@@ -117,4 +117,3 @@ func TestE2ESignAndAudit_FileStore(t *testing.T) {
 		t.Fatalf("signature verify failed")
 	}
 }
-

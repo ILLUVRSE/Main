@@ -1,0 +1,14 @@
+{
+  "id": "c0cc66a9-dcb0-40c8-b927-d58508989d02",
+  "eventType": "manifest.update",
+  "payload": {
+    "manifest": {
+      "id": "44136fa355b3678a-1762223007"
+    },
+    "manifestSignatureId": "c98b7dad-2a38-4079-9817-fe595b85b75e"
+  },
+  "hash": "2907f95f53492e4cfa5ca23710efd4ea9bb548879d5e140fb7fff0e0c86373ed",
+  "signature": "2H/QkUQx+Hqn+M/csvN6KOUsGE+2ksLTCxEn+1PUlIgfLCZ/eEbGutI5O7Q8tUl2bXPoaPE50ftpbYJFCFGiAw==",
+  "signerId": "local-signer-1",
+  "ts": "2025-11-04T02:23:27.609707233Z"
+}

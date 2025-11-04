@@ -1,0 +1,11 @@
+{
+  "budget": 1000,
+  "goals": [
+    "initial"
+  ],
+  "id": "00000000-0000-0000-0000-000000000001",
+  "kpis": [],
+  "metadata": {},
+  "name": "test-division",
+  "policies": []
+}

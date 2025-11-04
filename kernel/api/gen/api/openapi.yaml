@@ -1,0 +1,465 @@
+openapi: 3.1.0
+info:
+  description: |
+    Canonical Kernel contract for ILLUVRSE — minimal endpoints for division, agent lifecycle, eval ingestion, allocation, signing, audit retrieval, and reasoning trace retrieval.
+  title: ILLUVRSE Kernel API
+  version: 1.0.0
+servers:
+- description: Local dev
+  url: http://localhost:3000
+security:
+- mutualTLS: []
+tags:
+- description: Kernel API endpoints
+  name: kernel
+paths:
+  /health:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_health_get_200_response'
+          description: OK
+      summary: Liveness probe
+      tags:
+      - kernel
+  /ready:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ready_get_200_response'
+          description: ready
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: not ready
+      summary: Readiness check (DB + KMS if required)
+      tags:
+      - kernel
+  /kernel/division:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DivisionManifest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DivisionManifest'
+          description: division stored
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: validation error
+        "401":
+          description: unauthorized
+      security:
+      - mutualTLS: []
+      summary: Register or update a DivisionManifest
+      tags:
+      - kernel
+  /kernel/division/{id}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          format: uuid
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DivisionManifest'
+          description: division
+        "404":
+          description: not found
+      summary: Fetch a DivisionManifest
+      tags:
+      - kernel
+  /kernel/agent:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_kernel_agent_post_request'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_kernel_agent_post_202_response'
+          description: agent instantiation accepted
+        "400":
+          description: validation error
+      security:
+      - mutualTLS: []
+      summary: Spawn a new agent from template/manifest
+      tags:
+      - kernel
+  /kernel/agent/{id}/state:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          format: uuid
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProfile'
+          description: agent state
+        "404":
+          description: not found
+      summary: Retrieve agent snapshot and recent metrics
+      tags:
+      - kernel
+  /kernel/eval:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvalReport'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_kernel_eval_post_200_response'
+          description: eval accepted
+        "400":
+          description: validation error
+      security:
+      - mutualTLS: []
+      summary: Submit an EvalReport
+      tags:
+      - kernel
+  /kernel/allocate:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocationRequest'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_kernel_allocate_post_202_response'
+          description: allocation requested
+        "400":
+          description: validation error
+      security:
+      - mutualTLS: []
+      summary: Request or assign compute / capital resources
+      tags:
+      - kernel
+  /kernel/sign:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManifestSignature'
+          description: signature returned
+        "400":
+          description: validation error
+      security:
+      - mutualTLS: []
+      summary: Request a signature for a manifest
+      tags:
+      - kernel
+  /kernel/audit/{id}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema: {}
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+          description: audit event
+        "404":
+          description: not found
+      summary: Fetch a signed audit event
+      tags:
+      - kernel
+  /kernel/reason/{node}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: node
+        required: true
+        schema: {}
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_kernel_reason__node__get_200_response'
+          description: reasoning trace
+        "404":
+          description: not found
+      summary: Retrieve a reasoning trace for a graph node
+      tags:
+      - kernel
+components:
+  schemas:
+    Error:
+      properties:
+        error: {}
+        details: {}
+      required:
+      - error
+    DivisionManifest:
+      example:
+        metadata: ""
+        name: ""
+        policies: ""
+        id: ""
+        kpis: ""
+        goals: ""
+        budget: ""
+      properties:
+        id:
+          format: uuid
+        name: {}
+        goals:
+          items: {}
+        budget:
+          format: double
+        kpis:
+          items: {}
+        policies:
+          items: {}
+        metadata: {}
+      required:
+      - goals
+      - id
+      - name
+    AgentProfile:
+      example:
+        skills: ""
+        score: ""
+        createdAt: ""
+        role: ""
+        codeRef: ""
+        id: ""
+        state: ""
+      properties:
+        id:
+          format: uuid
+        role: {}
+        skills:
+          items: {}
+        codeRef: {}
+        state:
+          enum:
+          - created
+          - provisioning
+          - provisioned
+          - starting
+          - running
+          - paused
+          - stopping
+          - stopped
+          - failed
+          - destroyed
+        score: {}
+        createdAt:
+          format: date-time
+      required:
+      - id
+      - role
+      - state
+    EvalReport:
+      example:
+        agentId: ""
+        metricSet: ""
+        id: ""
+        timestamp: ""
+      properties:
+        id:
+          format: uuid
+        agentId:
+          format: uuid
+        metricSet: {}
+        timestamp:
+          format: date-time
+      required:
+      - agentId
+      - id
+      - metricSet
+    ManifestSignature:
+      example:
+        signerId: ""
+        signature: ""
+        manifestId: ""
+        version: ""
+        ts: ""
+      properties:
+        manifestId: {}
+        signerId: {}
+        signature: {}
+        version: {}
+        ts:
+          format: date-time
+      required:
+      - manifestId
+      - signature
+      - signerId
+    AuditEvent:
+      example:
+        payload: ""
+        prevHash: ""
+        signature: ""
+        id: ""
+        type: ""
+        hash: ""
+        ts: ""
+      properties:
+        id: {}
+        type: {}
+        payload: {}
+        ts:
+          format: date-time
+        prevHash: {}
+        hash: {}
+        signature: {}
+      required:
+      - hash
+      - id
+      - payload
+      - signature
+      - ts
+      - type
+    MemoryNode:
+      properties:
+        id:
+          format: uuid
+        embeddingId: {}
+        metadata: {}
+      required:
+      - id
+    AllocationRequest:
+      example:
+        requester: ""
+        memoryMB: ""
+        cpu: ""
+        id: ""
+        divisionId: ""
+        gpu: ""
+      properties:
+        id:
+          format: uuid
+        divisionId: {}
+        cpu: {}
+        gpu: {}
+        memoryMB: {}
+        requester: {}
+      required:
+      - divisionId
+      - id
+    SignRequest:
+      example:
+        signerId: ""
+        manifest: ""
+      properties:
+        manifest: {}
+        signerId: {}
+      required:
+      - manifest
+      - signerId
+    _health_get_200_response:
+      example:
+        status: ""
+        ts: ""
+      properties:
+        status: {}
+        ts:
+          format: date-time
+    _ready_get_200_response:
+      example:
+        status: ""
+      properties:
+        status: {}
+    _kernel_agent_post_request:
+      properties:
+        templateId: {}
+        divisionId: {}
+        overrides: {}
+        requester: {}
+      required:
+      - divisionId
+      - templateId
+    _kernel_agent_post_202_response:
+      example:
+        agentId: ""
+      properties:
+        agentId: {}
+    _kernel_eval_post_200_response:
+      example:
+        eval_id: ""
+      properties:
+        eval_id: {}
+    _kernel_allocate_post_202_response:
+      example:
+        allocationId: ""
+      properties:
+        allocationId: {}
+    _kernel_reason__node__get_200_response:
+      example:
+        node: ""
+        trace: ""
+      properties:
+        node: {}
+        trace:
+          items: {}
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+    oidc:
+      openIdConnectUrl: https://auth.example.com/.well-known/openid-configuration
+      type: openIdConnect

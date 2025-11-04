@@ -56,12 +56,30 @@ func main() {
 	// Signer: prefer KMS in prod; fallback to local signer for dev/testing
 	var signClient signer.Signer
 	if cfg.RequireKMS {
+		// In production we require a configured KMS endpoint.
 		if cfg.KMSEndpoint == "" {
-			log.Println("WARNING: REQUIRE_KMS=true but KMS_ENDPOINT not set — using local signer (NOT FOR PROD)")
+			log.Fatalf("REQUIRE_KMS=true but KMS_ENDPOINT not configured")
 		}
-		// TODO: wire a KMS signer here. For now we fall back to local signer.
+		ks, err := signer.NewKMSSigner(cfg.KMSEndpoint, cfg.RequireKMS)
+		if err != nil {
+			log.Fatalf("failed to initialize KMS signer: %v", err)
+		}
+		signClient = ks
+	} else {
+		// Try to use KMS if an endpoint is set; otherwise fall back to local signer for dev.
+		if cfg.KMSEndpoint != "" {
+			ks, err := signer.NewKMSSigner(cfg.KMSEndpoint, cfg.RequireKMS)
+			if err == nil && ks != nil {
+				signClient = ks
+				log.Printf("KMS signer configured (endpoint=%s)", cfg.KMSEndpoint)
+			} else {
+				log.Printf("KMS signer not available: %v — falling back to local signer (dev only)", err)
+				signClient = signer.NewLocalSigner(cfg.LocalSignerID)
+			}
+		} else {
+			signClient = signer.NewLocalSigner(cfg.LocalSignerID)
+		}
 	}
-	signClient = signer.NewLocalSigner(cfg.LocalSignerID)
 
 	// Store: Postgres-backed store when DB present, otherwise local file store for dev
 	var store audit.Store

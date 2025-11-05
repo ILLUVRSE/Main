@@ -36,7 +36,10 @@ const MTLS_KEY = process.env.MTLS_KEY || '';
 const MTLS_CLIENT_CA = process.env.MTLS_CLIENT_CA || '';
 const MTLS_REQUIRE_CLIENT_CERT = (process.env.MTLS_REQUIRE_CLIENT_CERT || 'false').toLowerCase() === 'true';
 
-const ENABLE_TEST_ENDPOINTS = (process.env.ENABLE_TEST_ENDPOINTS || 'false').toLowerCase() === 'true';
+// Enable test endpoints in CI/dev explicitly via ENABLE_TEST_ENDPOINTS=true,
+// and always enable them when running under the Jest test environment (NODE_ENV=test).
+const ENABLE_TEST_ENDPOINTS =
+  (process.env.ENABLE_TEST_ENDPOINTS || '').toLowerCase() === 'true' || NODE_ENV === 'test';
 
 const LOG_PREFIX = '[kernel:' + NODE_ENV + ']';
 
@@ -85,8 +88,10 @@ function metricsText(): string {
  * checkKmsReachable
  * Attempts to contact the KMS_ENDPOINT (if configured) with a GET and timeout.
  * Returns true if reachable (any HTTP response), false on network errors/timeout.
+ *
+ * NOTE: This function reads the KMS_ENDPOINT constant defined above (from process.env at module load).
  */
-async function checkKmsReachable(timeoutMs = 3000): Promise<boolean> {
+export async function checkKmsReachable(timeoutMs = 3000): Promise<boolean> {
   if (!KMS_ENDPOINT) return false;
   try {
     const controller = new AbortController();

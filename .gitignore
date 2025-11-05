@@ -61,3 +61,4 @@ devops/postgres-data/
 *.crt
 *.p12
 *.csr
+/devops/certs

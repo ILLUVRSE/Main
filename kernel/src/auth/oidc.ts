@@ -25,8 +25,8 @@ export class OIDCClient {
   jwks?: ReturnType<typeof createRemoteJWKSet>;
 
   constructor(issuer: string, audience?: string) {
-    if (!issuer) throw new Error('OIDC_ISSUER is required');
-    this.issuer = issuer.replace(/\/$/, '');
+    // Allow empty issuer at construction time (useful for tests). init() enforces issuer presence.
+    this.issuer = issuer ? issuer.replace(/\/$/, '') : '';
     this.audience = audience;
   }
 
@@ -36,6 +36,7 @@ export class OIDCClient {
    */
   async init(): Promise<void> {
     if (this.jwks) return;
+    if (!this.issuer) throw new Error('OIDC_ISSUER is required');
 
     const discoveryUrl = `${this.issuer}/.well-known/openid-configuration`;
     // use global fetch (Node 18+). If you run older Node, install node-fetch and swap here.
@@ -75,10 +76,7 @@ export class OIDCClient {
  * Export a singleton client created from env vars.
  * Call `initOidc()` once (for example in server startup) to fetch discovery & JWKs.
  */
-export const oidcClient = new OIDCClient(
-  OIDC_ISSUER,
-  OIDC_AUDIENCE,
-);
+export const oidcClient = new OIDCClient(OIDC_ISSUER, OIDC_AUDIENCE);
 
 export async function initOidc(): Promise<void> {
   await oidcClient.init();

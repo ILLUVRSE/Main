@@ -4,31 +4,23 @@
  * Production-minded Kernel HTTP server entrypoint.
  *
  * Changes:
- *  - Readiness probe built-in (internal readiness + optional external script).
- *  - REQUIRE_KMS validation on startup (fail-fast when NODE_ENV=production and REQUIRE_KMS=true).
- *  - Minimal Prometheus-compatible /metrics endpoint (in-memory counters).
- *  - Structured startup logs and readiness checks.
+ *  - Reads MTLS env vars and starts HTTPS server with client cert options when configured.
+ *  - Initializes OIDC (if configured) and installs auth middleware.
+ *  - Keeps dev-mode behavior (skip DB/migrations) when NODE_ENV=development.
  *
  * Notes:
- * - This file intentionally avoids adding new runtime dependencies (no prom-client).
- *   If you prefer Prometheus client, run:
- *     npm install prom-client
- *   and replace the simple counters with prom-client metrics.
+ * - This file intentionally avoids adding new runtime dependencies beyond what's needed.
  * - DO NOT COMMIT SECRETS — use Vault/KMS and environment variables.
- *
- * Acceptance:
- *  - When NODE_ENV=production and REQUIRE_KMS=true and KMS_ENDPOINT missing or unreachable,
- *    server logs a fatal error and exits non-zero.
- *  - Server exposes /health (liveness), /ready (readiness doing DB + KMS checks) and /metrics.
- *  - Basic counters exposed under /metrics and incremented on server start/ready/failure events.
  */
-
 import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
 import yaml from 'js-yaml';
 import createKernelRouter from './routes/kernelRoutes';
 import { waitForDb, runMigrations } from './db';
+import { initOidc } from './auth/oidc';
+import { authMiddleware } from './auth/middleware';
 
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -37,6 +29,11 @@ const KMS_ENDPOINT = (process.env.KMS_ENDPOINT || '').replace(/\/$/, '');
 const OPENAPI_PATH = process.env.OPENAPI_PATH
   ? path.resolve(process.cwd(), process.env.OPENAPI_PATH)
   : path.resolve(__dirname, '../openapi.yaml');
+
+const MTLS_CERT = process.env.MTLS_CERT || '';
+const MTLS_KEY = process.env.MTLS_KEY || '';
+const MTLS_CLIENT_CA = process.env.MTLS_CLIENT_CA || '';
+const MTLS_REQUIRE_CLIENT_CERT = (process.env.MTLS_REQUIRE_CLIENT_CERT || 'false').toLowerCase() === 'true';
 
 const LOG_PREFIX = '[kernel:' + NODE_ENV + ']';
 
@@ -172,6 +169,13 @@ export async function createApp() {
   const app = express();
   app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '1mb' }));
 
+  // auth middleware (OIDC / mTLS) - best-effort placement early in chain
+  try {
+    app.use(authMiddleware as any);
+  } catch (e) {
+    warn('Failed to install auth middleware:', (e as Error).message || e);
+  }
+
   // simple request logging
   app.use((req, _res, next) => {
     debug(req.method + ' ' + req.path);
@@ -228,7 +232,8 @@ export async function createApp() {
 /**
  * start
  * - Validates KMS presence when NODE_ENV=production && REQUIRE_KMS=true
- * - Waits for DB then runs migrations and starts HTTP server
+ * - Initializes OIDC if configured
+ * - Waits for DB then runs migrations and starts HTTP or HTTPS server (mTLS) depending on env
  */
 async function start() {
   try {
@@ -253,33 +258,92 @@ async function start() {
       metrics.kms_probe_success_total++;
     }
 
-    // Wait for DB then run migrations
-    info('Waiting for Postgres...');
-    await waitForDb(30_000, 500);
-
-    try {
-      info('Applying migrations...');
-      await runMigrations();
-      info('Migrations applied.');
-    } catch (err) {
-      warn('Migration runner failed (continuing):', (err as Error).message || err);
+    // Initialize OIDC if configured (best-effort)
+    if (process.env.OIDC_ISSUER) {
+      try {
+        info('Initializing OIDC client...');
+        await initOidc();
+        info('OIDC initialized.');
+      } catch (e) {
+        warn('OIDC initialization failed (continuing):', (e as Error).message || e);
+      }
+    } else {
+      debug('OIDC not configured, skipping OIDC init');
     }
 
-    // Create and start app
+    // Wait for DB then run migrations (skip in development)
+    if (NODE_ENV !== 'development') {
+      info('Waiting for Postgres...');
+      await waitForDb(30_000, 500);
+
+      try {
+        info('Applying migrations...');
+        await runMigrations();
+        info('Migrations applied.');
+      } catch (err) {
+        warn('Migration runner failed (continuing):', (err as Error).message || err);
+      }
+    } else {
+      warn('NODE_ENV=development — skipping DB wait and migrations for local dev');
+    }
+
+    // Create app
     const app = await createApp();
+
+    // Decide HTTP vs HTTPS (mTLS)
+    if (MTLS_CERT && MTLS_KEY) {
+      info('Starting HTTPS server (mTLS config present). MTLS_REQUIRE_CLIENT_CERT=' + MTLS_REQUIRE_CLIENT_CERT);
+      try {
+        const tlsOptions: https.ServerOptions = {
+          key: fs.readFileSync(MTLS_KEY),
+          cert: fs.readFileSync(MTLS_CERT),
+          requestCert: MTLS_REQUIRE_CLIENT_CERT,
+          rejectUnauthorized: MTLS_REQUIRE_CLIENT_CERT,
+        };
+        if (MTLS_CLIENT_CA) {
+          try {
+            tlsOptions.ca = fs.readFileSync(MTLS_CLIENT_CA);
+          } catch (e) {
+            warn('Failed to read MTLS_CLIENT_CA:', (e as Error).message || e);
+          }
+        }
+        const server = https.createServer(tlsOptions, app).listen(PORT, () => {
+          metrics.server_start_total++;
+          info('Kernel HTTPS server listening on port ' + PORT);
+          readinessCheck().then((r) => {
+            if (!r.ok) warn('Initial readiness check failed:', r.details);
+            else info('Initial readiness check succeeded');
+          }).catch((e) => warn('Initial readiness check error:', (e as Error).message || e));
+        });
+        // Graceful shutdown wiring
+        const shutdown = async () => {
+          info('Shutting down Kernel HTTPS server...');
+          server.close(() => {
+            info('HTTPS server closed.');
+            process.exit(0);
+          });
+          setTimeout(() => {
+            warn('Forcing shutdown.');
+            process.exit(1);
+          }, 10_000).unref();
+        };
+        process.on('SIGINT', shutdown);
+        process.on('SIGTERM', shutdown);
+        return;
+      } catch (e) {
+        error('Failed to start HTTPS server:', (e as Error).message || e);
+        process.exit(1);
+      }
+    }
+
+    // Fallback: plain HTTP
     const server = app.listen(PORT, () => {
       metrics.server_start_total++;
       info('Kernel server listening on port ' + PORT);
-      // Perform an initial readiness check in background
       readinessCheck().then((r) => {
-        if (!r.ok) {
-          warn('Initial readiness check failed:', r.details);
-        } else {
-          info('Initial readiness check succeeded');
-        }
-      }).catch((e) => {
-        warn('Initial readiness check error:', (e as Error).message || e);
-      });
+        if (!r.ok) warn('Initial readiness check failed:', r.details);
+        else info('Initial readiness check succeeded');
+      }).catch((e) => warn('Initial readiness check error:', (e as Error).message || e));
     });
 
     // Graceful shutdown
@@ -309,27 +373,4 @@ async function start() {
 if (require.main === module) {
   start();
 }
-
-export { createApp };
-
-/**
- * Acceptance criteria (short, testable):
- *
- * - Fail-fast KMS enforcement:
- *   * Set NODE_ENV=production and REQUIRE_KMS=true with KMS_ENDPOINT unset -> server logs fatal error and exits (exit code != 0).
- *   * Set NODE_ENV=production and REQUIRE_KMS=true with KMS_ENDPOINT set but unreachable -> server logs fatal error and exits.
- *
- * - Readiness endpoint:
- *   * /ready returns 200 when DB reachable and KMS reachable if required; returns 503 otherwise.
- *   * Test: start server with DB down -> /ready returns 503; start DB -> /ready returns 200.
- *
- * - Metrics endpoint:
- *   * /metrics returns Prometheus text exposition and includes server_start_total, readiness_success_total, readiness_failure_total.
- *
- * - Liveness:
- *   * /health returns 200 with {status: 'ok'}.
- *
- * Security note:
- * - DO NOT COMMIT SECRETS — use Vault/KMS and environment variables. The server will fail when REQUIRE_KMS=true and KMS is absent/unreachable.
- */
 

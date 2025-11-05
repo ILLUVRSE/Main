@@ -109,7 +109,7 @@ function localEphemeralSign(payload: string): { signature: string; signerId: str
  * Map KMS response to ManifestSignature canonical shape.
  * Adapt to your KMS response contract if it differs.
  */
-function mapKmsManifestResponse(body: any, manifestId: string, ts: string): ManifestSignature {
+function mapKmsManifestResponse(body: any, manifestId: string, ts: string): any {
   return {
     id: body.id ?? crypto.randomUUID(),
     manifest_id: body.manifest_id ?? body.manifestId ?? manifestId,

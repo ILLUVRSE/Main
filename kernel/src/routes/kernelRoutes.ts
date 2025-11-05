@@ -138,7 +138,7 @@ export default function createKernelRouter(): Router {
         ts: sig.ts,
       });
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 
@@ -232,7 +232,7 @@ export default function createKernelRouter(): Router {
         client.release();
       }
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 
@@ -254,7 +254,7 @@ export default function createKernelRouter(): Router {
       if (!r.rows.length) return res.status(404).json({ error: 'not found' });
       return res.json(dbRowToDivisionManifest(r.rows[0]));
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 
@@ -286,7 +286,7 @@ export default function createKernelRouter(): Router {
       const createdRes = await query('SELECT * FROM agents WHERE id = $1', [id]);
       return res.status(201).json(createdRes.rows[0] ? dbRowToAgentProfile(createdRes.rows[0]) : { id, role: body.role, skills: body.skills });
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 
@@ -307,7 +307,7 @@ export default function createKernelRouter(): Router {
       const evals = evalsRes.rows.map(dbRowToEvalReport);
       return res.json({ agent, evals });
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 
@@ -340,7 +340,7 @@ export default function createKernelRouter(): Router {
       await appendAuditEvent('eval.submitted', { evalId: id, agentId: body.agent_id, principal });
       return res.json({ ok: true, eval_id: id });
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 
@@ -386,7 +386,7 @@ export default function createKernelRouter(): Router {
       await appendAuditEvent('allocation.request', { allocationId: id, entityId: body.entity_id, delta: body.delta, principal });
       return res.json({ ok: true, allocation: { id } });
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 
@@ -409,7 +409,7 @@ export default function createKernelRouter(): Router {
       if (!ev) return res.status(404).json({ error: 'not found' });
       return res.json(ev);
     } catch (err) {
-      next(err);
+      return next(err);
     }
   });
 

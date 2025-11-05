@@ -54,3 +54,10 @@ __pycache__/
 *.bak
 *.tmp
 
+devops/certs/
+devops/postgres-data/
+*.pem
+*.key
+*.crt
+*.p12
+*.csr

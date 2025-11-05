@@ -6,11 +6,11 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "migrate": "psql \"$POSTGRES_URL\" -f sql/migrations/001_init.sql",
     "lint": "eslint . --ext .ts",
-    "test": "echo \"No tests yet\" && exit 0",
+    "test": "jest --colors --runInBand",
     "docker:build": "docker build -t illuvrse-kernel:local -f Dockerfile .",
     "docker:run": "docker run --rm -e POSTGRES_URL=${POSTGRES_URL:-} -e KMS_ENDPOINT=${KMS_ENDPOINT:-} -p 3000:3000 illuvrse-kernel:local",
     "docker:local": "npm run docker:build && npm run docker:run"
@@ -31,7 +31,12 @@
     "@types/pg": "^8.6.6",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "jest": "^29.6.1",
+    "ts-jest": "^29.1.0",
+    "@types/jest": "^29.5.3",
+    "supertest": "^6.3.3",
+    "@types/supertest": "^2.0.12"
   },
   "kernel:acceptance": [
     "1) docker:build must build the image from the kernel directory: `npm run docker:build` (from kernel/).",
@@ -47,3 +52,4 @@
   "license": "ISC",
   "type": "commonjs"
 }
+

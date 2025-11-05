@@ -1,0 +1,73 @@
+name: Integration Tests (Compose)
+
+on:
+  push:
+    branches: [ feature/phase4-part2 ]
+  pull_request:
+    branches: [ feature/phase4-part2 ]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      ILLUVRSE_CERT_DIR: /tmp/illuvrse-certs
+      MTLS_REQUIRE_CLIENT_CERT: "false"
+      ENABLE_TEST_ENDPOINTS: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Inject certs from secrets
+        env:
+          CI_KERNEL_CA: ${{ secrets.CI_KERNEL_CA }}
+          CI_KERNEL_SERVER_CERT: ${{ secrets.CI_KERNEL_SERVER_CERT }}
+          CI_KERNEL_SERVER_KEY: ${{ secrets.CI_KERNEL_SERVER_KEY }}
+          CI_KERNEL_CLIENT_CERT: ${{ secrets.CI_KERNEL_CLIENT_CERT }}
+          CI_KERNEL_CLIENT_KEY: ${{ secrets.CI_KERNEL_CLIENT_KEY }}
+        run: |
+          chmod +x devops/scripts/ci_inject_certs.sh
+          devops/scripts/ci_inject_certs.sh /tmp/illuvrse-certs
+          ls -la /tmp/illuvrse-certs
+
+      - name: Build & start compose stack
+        run: |
+          docker compose -f devops/docker-compose.ci.yml up -d --build
+          docker compose -f devops/docker-compose.ci.yml ps
+
+      - name: Wait for Keycloak readiness (best-effort)
+        run: |
+          # Wait for Keycloak to show health / started or port listening
+          for i in $(seq 1 60); do
+            docker compose -f devops/docker-compose.ci.yml logs keycloak --tail 50 | tail -n 200 | grep -E "Started|Quarkus" && break || true
+            sleep 2
+          done
+          docker compose -f devops/docker-compose.ci.yml logs keycloak --tail 200
+
+      - name: Provision Keycloak (idempotent)
+        run: |
+          chmod +x devops/scripts/prepare_oidc.sh
+          ./devops/scripts/prepare_oidc.sh
+
+      - name: Run Kernel integration tests
+        working-directory: kernel
+        run: |
+          npm ci
+          # Accept self-signed certs for now in CI runner
+          NODE_TLS_REJECT_UNAUTHORIZED=0 npx jest test/integration/auth.integration.test.ts --runInBand --detectOpenHandles
+
+      - name: Upload logs (always)
+        if: failure()
+        run: |
+          echo "Kernel logs:"
+          docker compose -f devops/docker-compose.ci.yml logs kernel --tail 500 || true
+
+      - name: Tear down stack
+        if: always()
+        run: |
+          docker compose -f devops/docker-compose.ci.yml down --volumes --remove-orphans
+

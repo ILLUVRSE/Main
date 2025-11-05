@@ -21,6 +21,7 @@ import createKernelRouter from './routes/kernelRoutes';
 import { waitForDb, runMigrations } from './db';
 import { initOidc } from './auth/oidc';
 import { authMiddleware } from './auth/middleware';
+import { getPrincipalFromRequest, requireRoles, requireAnyAuthenticated, Roles } from './rbac';
 
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -34,6 +35,8 @@ const MTLS_CERT = process.env.MTLS_CERT || '';
 const MTLS_KEY = process.env.MTLS_KEY || '';
 const MTLS_CLIENT_CA = process.env.MTLS_CLIENT_CA || '';
 const MTLS_REQUIRE_CLIENT_CERT = (process.env.MTLS_REQUIRE_CLIENT_CERT || 'false').toLowerCase() === 'true';
+
+const ENABLE_TEST_ENDPOINTS = (process.env.ENABLE_TEST_ENDPOINTS || 'false').toLowerCase() === 'true';
 
 const LOG_PREFIX = '[kernel:' + NODE_ENV + ']';
 
@@ -197,6 +200,32 @@ export async function createApp() {
 
   // Mount kernel router
   app.use('/', createKernelRouter());
+
+  // ===== Test-only endpoints (guarded) =====
+  if (ENABLE_TEST_ENDPOINTS) {
+    info('ENABLE_TEST_ENDPOINTS=true -> installing test-only endpoints: /principal /require-any /require-roles');
+
+    // Return the computed/attached principal (does not enforce auth)
+    app.get('/principal', (req: Request, res: Response) => {
+      const principal = (req as any).principal ?? getPrincipalFromRequest(req as any);
+      (req as any).principal = principal;
+      return res.json({ principal } as any);
+    });
+
+    // Require any authenticated principal (human or service)
+    app.get('/require-any', requireAnyAuthenticated, (req: Request, res: Response) => {
+      return res.json({ ok: true, principal: (req as any).principal } as any);
+    });
+
+    // Require at least one of the roles (SuperAdmin OR Operator) for access
+    app.get(
+      '/require-roles',
+      requireRoles(Roles.SUPERADMIN, Roles.OPERATOR),
+      (req: Request, res: Response) => {
+        return res.json({ ok: true, principal: (req as any).principal } as any);
+      }
+    );
+  }
 
   // Liveness endpoint
   app.get('/health', (_req: Request, res: Response) => {

@@ -29,9 +29,22 @@ import {
   dbRowToAuditEvent,
 } from '../models';
 import { DivisionManifest } from '../types';
-import { requireRoles, requireAnyAuthenticated, Roles, hasAnyRole, hasRole, getPrincipalFromRequest } from '../rbac';
+import {
+  requireRoles,
+  requireAnyAuthenticated,
+  Roles,
+  hasAnyRole,
+  hasRole,
+  getPrincipalFromRequest,
+  Principal,
+} from '../rbac';
 import { enforcePolicyOrThrow, PolicyDecision } from '../sentinelClient';
 import idempotencyMiddleware from '../middleware/idempotency';
+import {
+  handleKernelCreateRequest,
+  MissingIdempotencyKeyError,
+  IdempotencyKeyConflictError,
+} from '../handlers/kernelCreate';
 
 const ENV = process.env.NODE_ENV || 'development';
 
@@ -85,6 +98,38 @@ export default function createKernelRouter(): Router {
       signer_id: process.env.SIGNER_ID || 'kernel-signer-local',
       public_key: process.env.KMS_ENDPOINT ? `KMS at ${process.env.KMS_ENDPOINT}` : 'local-ephemeral-key (dev-only)',
     });
+  });
+
+  router.post('/kernel/create', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const principal = ((req as any).principal || getPrincipalFromRequest(req)) as Principal | undefined;
+
+      if (ENV === 'production') {
+        if (!principal || principal.type === 'anonymous') {
+          return res.status(401).json({ error: 'unauthenticated' });
+        }
+        if (!hasAnyRole(principal, [Roles.SUPERADMIN, Roles.OPERATOR])) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+      }
+
+      const result = await handleKernelCreateRequest({
+        payload: req.body,
+        principal,
+        idempotencyKey: req.header('Idempotency-Key'),
+      });
+
+      res.setHeader('Idempotency-Key', result.key);
+      return res.status(result.status).json(result.response);
+    } catch (err) {
+      if (err instanceof MissingIdempotencyKeyError) {
+        return res.status(400).json({ error: 'missing_idempotency_key' });
+      }
+      if (err instanceof IdempotencyKeyConflictError) {
+        return res.status(409).json({ error: 'idempotency_key_conflict' });
+      }
+      return next(err);
+    }
   });
 
   /**

@@ -63,6 +63,10 @@ export function setSentinelClient(c: SentinelClient | null | undefined) {
   client = c || defaultClient;
 }
 
+export function resetSentinelClient() {
+  client = defaultClient;
+}
+
 /**
  * getSentinelClient
  * Return the currently configured client.
@@ -145,6 +149,7 @@ export async function enforcePolicyOrThrow(policyName: string, ctx?: any): Promi
 
 export default {
   setSentinelClient,
+  resetSentinelClient,
   getSentinelClient,
   recordEvent,
   enforcePolicyOrThrow,

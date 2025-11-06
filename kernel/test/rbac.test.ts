@@ -1,7 +1,7 @@
 // kernel/test/rbac.test.ts
 import request from 'supertest';
 import { createTestApp } from './utils/testApp';
-import { hasAnyRole, Roles, Principal } from '../src/rbac';
+import { hasAnyRole, hasRole, Roles, Principal } from '../src/rbac';
 
 describe('RBAC unit tests', () => {
   const app = createTestApp();
@@ -86,6 +86,7 @@ describe('RBAC unit tests', () => {
       const res = await request(app).get('/require-roles');
       expect(res.status).toBe(401);
       expect(res.body).toHaveProperty('error', 'unauthenticated');
+      expect(Array.isArray(res.body.requiredRoles)).toBe(true);
     });
 
     test('403 when authenticated but lacks required roles', async () => {
@@ -96,6 +97,8 @@ describe('RBAC unit tests', () => {
 
       expect(res.status).toBe(403);
       expect(res.body).toHaveProperty('error', 'forbidden');
+      expect(res.body).toHaveProperty('requiredRoles');
+      expect(Array.isArray(res.body.requiredRoles)).toBe(true);
       expect(res.body).toHaveProperty('required');
       expect(Array.isArray(res.body.required)).toBe(true);
     });
@@ -144,6 +147,27 @@ describe('RBAC unit tests', () => {
 
       const p = res.body.principal;
       expect(p.roles).toEqual(expect.arrayContaining(['Operator']));
+    });
+  });
+
+  describe('hasRole helper', () => {
+    test('matches case-insensitively when role present', () => {
+      const principal: Principal = { type: 'human', id: 'user', roles: ['Operator'] };
+      expect(hasRole(principal, 'operator')).toBe(true);
+    });
+
+    test('returns false when principal missing role', () => {
+      const principal: Principal = { type: 'human', id: 'user', roles: ['Auditor'] };
+      expect(hasRole(principal, Roles.SUPERADMIN)).toBe(false);
+    });
+
+    test('returns false when user undefined', () => {
+      expect(hasRole(undefined as unknown as Principal, Roles.OPERATOR)).toBe(false);
+    });
+
+    test('returns false when roles is not an array', () => {
+      const malformed: any = { type: 'human', id: 'abc', roles: 'Operator' };
+      expect(hasRole(malformed, Roles.OPERATOR)).toBe(false);
     });
   });
 });

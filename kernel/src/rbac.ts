@@ -15,6 +15,14 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { logger } from './logger';
+import {
+  Roles as MiddlewareRoles,
+  Role as MiddlewareRole,
+  hasRole,
+  PrincipalLike,
+  requireAuthenticated as middlewareRequireAuthenticated,
+} from './middleware/rbac';
 
 /**
  * Types
@@ -30,14 +38,9 @@ export interface Principal {
 /**
  * Known roles (canonical)
  */
-export const Roles = {
-  SUPERADMIN: 'SuperAdmin',
-  DIVISION_LEAD: 'DivisionLead',
-  OPERATOR: 'Operator',
-  AUDITOR: 'Auditor',
-} as const;
+export const Roles = MiddlewareRoles;
 
-type RoleName = (typeof Roles)[keyof typeof Roles] | string;
+export type RoleName = MiddlewareRole;
 
 /**
  * Dynamic role-mapper loader
@@ -171,13 +174,12 @@ export function getPrincipalFromRequest(req: Request): Principal {
  * hasAnyRole
  * Returns true if principal has at least one of the required roles.
  */
-export function hasAnyRole(principal: Principal, required: RoleName[] | RoleName): boolean {
+export { hasRole };
+
+export function hasAnyRole(principal: Principal | undefined, required: RoleName[] | RoleName): boolean {
   const requiredRoles = Array.isArray(required) ? required : [required];
-  const userRoles = (principal.roles || []).map((r) => r.toString());
-  for (const rr of requiredRoles) {
-    if (userRoles.includes(rr.toString())) return true;
-  }
-  return false;
+  if (!requiredRoles.length) return true;
+  return requiredRoles.some((role) => hasRole(principal as any, role));
 }
 
 /**
@@ -198,7 +200,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   namespace Express {
     interface Request {
-      principal?: Principal;
+      principal?: PrincipalLike;
     }
   }
 }
@@ -206,21 +208,39 @@ declare global {
 export function requireRoles(...requiredRoles: RoleName[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      const principal = getPrincipalFromRequest(req);
-      // Attach for handlers
-      req.principal = principal;
-
-      if (principal.type === 'anonymous') {
-        return res.status(401).json({ error: 'unauthenticated' });
+      let principal = req.principal as PrincipalLike | undefined;
+      if (!principal) {
+        principal = getPrincipalFromRequest(req);
+        (req as any).principal = principal as Principal;
       }
 
-      if (!hasAnyRole(principal, requiredRoles)) {
-        return res.status(403).json({ error: 'forbidden', required: requiredRoles });
+      const typedPrincipal = principal as Principal | undefined;
+      if (!typedPrincipal || typedPrincipal.type === 'anonymous') {
+        logger.warn('rbac.unauthenticated', {
+          path: req.path,
+          method: req.method,
+          requiredRoles,
+        });
+        return res.status(401).json({ error: 'unauthenticated', requiredRoles });
+      }
+
+      if (!hasAnyRole(typedPrincipal, requiredRoles)) {
+        logger.warn('rbac.forbidden', {
+          path: req.path,
+          method: req.method,
+          principal: typedPrincipal.id,
+          requiredRoles,
+        });
+        return res.status(403).json({ error: 'forbidden', requiredRoles, required: requiredRoles });
       }
 
       return next();
     } catch (err) {
-      console.error('RBAC middleware error:', err);
+      logger.warn('rbac.error', {
+        path: req.path,
+        method: req.method,
+        error: (err as Error).message,
+      });
       return res.status(500).json({ error: 'rbac.error' });
     }
   };
@@ -232,11 +252,21 @@ export function requireRoles(...requiredRoles: RoleName[]) {
  * that require authentication but no specific role.
  */
 export function requireAnyAuthenticated(req: Request, res: Response, next: NextFunction) {
-  const principal = getPrincipalFromRequest(req);
-  req.principal = principal;
-  if (principal.type === 'anonymous') return res.status(401).json({ error: 'unauthenticated' });
-  return next();
+  try {
+    const principal = (req.principal as PrincipalLike | undefined) ?? getPrincipalFromRequest(req);
+    (req as any).principal = principal as Principal;
+    if (!principal || (principal as Principal).type === 'anonymous') {
+      logger.warn('rbac.unauthenticated', { path: req.path, method: req.method });
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+    return next();
+  } catch (err) {
+    logger.warn('rbac.error', { path: req.path, method: req.method, error: (err as Error).message });
+    return res.status(500).json({ error: 'rbac.error' });
+  }
 }
+
+export const requireAuthenticated = middlewareRequireAuthenticated;
 
 /**
  * Example usage notes:

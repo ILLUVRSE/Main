@@ -8,6 +8,7 @@ type IdempotencyRow = {
   response_status: number | null;
   response_body: string | null;
   created_at: string;
+  expires_at: string | null;
 };
 
 type ManifestSignatureRow = {
@@ -167,13 +168,14 @@ export class MockDb {
           request_hash: row.request_hash,
           response_status: row.response_status,
           response_body: row.response_body,
+          expires_at: row.expires_at,
         },
       ],
     };
   }
 
   private insertIdempotency(params: any[]): QueryResult<any> {
-    const [key, method, path, requestHash] = params;
+    const [key, method, path, requestHash, expiresAt] = params;
     this.state.idempotency.set(key, {
       key,
       method,
@@ -182,6 +184,7 @@ export class MockDb {
       response_status: null,
       response_body: null,
       created_at: nowIso(),
+      expires_at: expiresAt ?? null,
     });
     return { ...EMPTY_RESULT, rowCount: 1 };
   }
@@ -194,6 +197,19 @@ export class MockDb {
       existing.response_body = body;
     }
     return { ...EMPTY_RESULT, rowCount: existing ? 1 : 0 };
+  }
+
+  private listIdempotency(limitParam: any): QueryResult<any> {
+    const limit = Number(limitParam) || 0;
+    const rows = Array.from(this.state.idempotency.values())
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+      .slice(0, limit || this.state.idempotency.size)
+      .map((row) => ({ ...row }));
+    return {
+      ...EMPTY_RESULT,
+      rowCount: rows.length,
+      rows,
+    };
   }
 
   private insertManifestSignature(params: any[]): QueryResult<any> {
@@ -340,8 +356,11 @@ export class MockDb {
     if (lower === 'commit') return this.commit();
     if (lower === 'rollback') return this.rollback();
 
-    if (lower.startsWith('select') && lower.includes('from idempotency')) {
+    if (lower.startsWith('select') && lower.includes('from idempotency') && lower.includes('where key')) {
       return this.selectIdempotency(params[0]);
+    }
+    if (lower.startsWith('select') && lower.includes('from idempotency') && lower.includes('order by')) {
+      return this.listIdempotency(params[0]);
     }
     if (lower.startsWith('insert into idempotency')) {
       return this.insertIdempotency(params);

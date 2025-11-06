@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import crypto from 'crypto';
 import { PoolClient } from 'pg';
 import { getClient } from '../db';
+import { getIdempotencyTableName, getIdempotencyTtlIso } from '../idempotency/config';
 
 interface IdempotencyContext {
   client: PoolClient;
@@ -10,7 +11,7 @@ interface IdempotencyContext {
 }
 
 const DEFAULT_LIMIT = 1024 * 1024; // 1MB
-const TABLE_NAME = process.env.IDEMPOTENCY_TABLE_NAME || 'idempotency';
+const TABLE_NAME = getIdempotencyTableName();
 
 function stableStringify(value: any): string {
   const normalize = (input: any): any => {
@@ -132,9 +133,10 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
       return;
     }
 
+    const expiresAtIso = getIdempotencyTtlIso();
     await client.query(
-      `INSERT INTO ${TABLE_NAME} (key, method, path, request_hash, created_at) VALUES ($1,$2,$3,$4, now())`,
-      [trimmedKey, req.method, req.originalUrl || req.path, requestHash],
+      `INSERT INTO ${TABLE_NAME} (key, method, path, request_hash, created_at, expires_at) VALUES ($1,$2,$3,$4, now(), $5)`,
+      [trimmedKey, req.method, req.originalUrl || req.path, requestHash, expiresAtIso],
     );
 
     const context: IdempotencyContext = { client, key: trimmedKey, requestHash };

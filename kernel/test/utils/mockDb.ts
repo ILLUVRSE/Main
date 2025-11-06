@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { PoolClient, QueryResult } from 'pg';
 
 type IdempotencyRow = {
@@ -74,6 +75,26 @@ type AllocationRow = {
   ts: string;
 };
 
+type UpgradeRow = {
+  id: string;
+  upgrade_id: string;
+  manifest: any;
+  status: string;
+  submitted_by: string | null;
+  submitted_at: string;
+  applied_at: string | null;
+  applied_by: string | null;
+};
+
+type UpgradeApprovalRow = {
+  id: string;
+  upgrade_id: string;
+  approver_id: string;
+  signature: string;
+  notes: string | null;
+  approved_at: string;
+};
+
 type DbState = {
   idempotency: Map<string, IdempotencyRow>;
   manifest_signatures: Map<string, ManifestSignatureRow>;
@@ -81,6 +102,9 @@ type DbState = {
   agents: Map<string, AgentRow>;
   eval_reports: Map<string, EvalReportRow>;
   resource_allocations: Map<string, AllocationRow>;
+  upgrades: Map<string, UpgradeRow>;
+  upgradesByCode: Map<string, string>;
+  upgradeApprovals: Map<string, Map<string, UpgradeApprovalRow>>;
 };
 
 function nowIso(): string {
@@ -99,6 +123,14 @@ function cloneState(source: DbState): DbState {
     agents: cloneMap(source.agents),
     eval_reports: cloneMap(source.eval_reports),
     resource_allocations: cloneMap(source.resource_allocations),
+    upgrades: cloneMap(source.upgrades),
+    upgradesByCode: new Map(source.upgradesByCode.entries()),
+    upgradeApprovals: new Map(
+      Array.from(source.upgradeApprovals.entries()).map(([upgradeId, approvals]) => [
+        upgradeId,
+        new Map(Array.from(approvals.entries()).map(([approverId, row]) => [approverId, { ...(row as any) }])),
+      ]),
+    ),
   };
 }
 
@@ -124,6 +156,9 @@ export class MockDb {
     agents: new Map(),
     eval_reports: new Map(),
     resource_allocations: new Map(),
+    upgrades: new Map(),
+    upgradesByCode: new Map(),
+    upgradeApprovals: new Map(),
   };
 
   private snapshots: DbState[] = [];
@@ -348,6 +383,108 @@ export class MockDb {
     return { ...EMPTY_RESULT, rowCount: 1 };
   }
 
+  private insertUpgrade(params: any[]): QueryResult<any> {
+    const [upgradeId, manifest, submittedBy] = params;
+    if (this.state.upgradesByCode.has(upgradeId)) {
+      const error: any = new Error('duplicate key value violates unique constraint "upgrades_upgrade_id_key"');
+      error.code = '23505';
+      throw error;
+    }
+    const id = randomUUID();
+    const ts = nowIso();
+    const row: UpgradeRow = {
+      id,
+      upgrade_id: upgradeId,
+      manifest: manifest ?? {},
+      status: 'pending',
+      submitted_by: submittedBy ?? null,
+      submitted_at: ts,
+      applied_at: null,
+      applied_by: null,
+    };
+    this.state.upgrades.set(id, row);
+    this.state.upgradesByCode.set(upgradeId, id);
+    return {
+      ...EMPTY_RESULT,
+      rowCount: 1,
+      rows: [{ ...row }],
+    };
+  }
+
+  private selectUpgradeByCode(upgradeId: string): QueryResult<any> {
+    const id = this.state.upgradesByCode.get(upgradeId);
+    if (!id) return { ...EMPTY_RESULT };
+    const row = this.state.upgrades.get(id);
+    if (!row) return { ...EMPTY_RESULT };
+    return {
+      ...EMPTY_RESULT,
+      rowCount: 1,
+      rows: [{ ...row }],
+    };
+  }
+
+  private insertUpgradeApproval(params: any[]): QueryResult<any> {
+    const [upgradeUuid, approverId, signature, notes] = params;
+    const upgradeId = String(upgradeUuid);
+    const upgrade = this.state.upgrades.get(upgradeId);
+    if (!upgrade) {
+      throw new Error('upgrade_not_found');
+    }
+    let approvals = this.state.upgradeApprovals.get(upgradeId);
+    if (!approvals) {
+      approvals = new Map();
+      this.state.upgradeApprovals.set(upgradeId, approvals);
+    }
+    if (approvals.has(approverId)) {
+      const error: any = new Error('duplicate key value violates unique constraint "upgrade_approvals_upgrade_id_approver_id_key"');
+      error.code = '23505';
+      throw error;
+    }
+    const row: UpgradeApprovalRow = {
+      id: randomUUID(),
+      upgrade_id: upgradeId,
+      approver_id: approverId,
+      signature,
+      notes: notes ?? null,
+      approved_at: nowIso(),
+    };
+    approvals.set(approverId, row);
+    return {
+      ...EMPTY_RESULT,
+      rowCount: 1,
+      rows: [{ ...row }],
+    };
+  }
+
+  private selectUpgradeApprovals(upgradeUuid: string): QueryResult<any> {
+    const approvals = this.state.upgradeApprovals.get(String(upgradeUuid));
+    if (!approvals) return { ...EMPTY_RESULT };
+    const rows = Array.from(approvals.values()).map((row) => ({ ...row }));
+    return {
+      ...EMPTY_RESULT,
+      rowCount: rows.length,
+      rows,
+    };
+  }
+
+  private updateUpgradeApplied(appliedBy: string, upgradeUuid: string): QueryResult<any> {
+    const key = String(upgradeUuid);
+    const existing = this.state.upgrades.get(key);
+    if (!existing) return { ...EMPTY_RESULT };
+    const updated: UpgradeRow = {
+      ...existing,
+      status: 'applied',
+      applied_by: appliedBy ?? null,
+      applied_at: nowIso(),
+    };
+    this.state.upgrades.set(key, updated);
+    return {
+      ...EMPTY_RESULT,
+      rowCount: 1,
+      rows: [{ ...updated }],
+    };
+  }
+
   async handleQuery(text: string, params: any[]): Promise<QueryResult<any>> {
     const normalized = text.replace(/\s+/g, ' ').trim();
     const lower = normalized.toLowerCase();
@@ -388,6 +525,21 @@ export class MockDb {
     }
     if (lower.startsWith('insert into resource_allocations')) {
       return this.insertAllocation(params);
+    }
+    if (lower.startsWith('insert into upgrades')) {
+      return this.insertUpgrade(params);
+    }
+    if (lower.startsWith('select') && lower.includes('from upgrades') && lower.includes('where upgrade_id = $1')) {
+      return this.selectUpgradeByCode(params[0]);
+    }
+    if (lower.startsWith('insert into upgrade_approvals')) {
+      return this.insertUpgradeApproval(params);
+    }
+    if (lower.startsWith('select approver_id from upgrade_approvals where upgrade_id = $1')) {
+      return this.selectUpgradeApprovals(params[0]);
+    }
+    if (lower.startsWith('update upgrades') && lower.includes('set status =')) {
+      return this.updateUpgradeApplied(params[0], params[1]);
     }
 
     throw new Error(`Unsupported query in MockDb: ${text}`);

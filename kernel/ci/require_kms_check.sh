@@ -70,7 +70,7 @@ fi
 #    - Tests: endpoints return 401/403 for unauthorized/unauthenticated callers.
 #
 # 3) SentinelNet integration on critical actions
-#    - Integrate `src/sentinelClient.ts` in allocation and manifest updates (enforcePolicyOrThrow).
+#    - Integrate `src/sentinel/sentinelClient.ts` in allocation and manifest updates (enforcePolicyOrThrow).
 #    - Record policy decisions in audit events.
 #
 # 4) Unit tests for core security primitives

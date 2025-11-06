@@ -40,6 +40,7 @@ import {
   MissingIdempotencyKeyError,
   IdempotencyKeyConflictError,
 } from '../handlers/kernelCreate';
+import createUpgradeRouter from './upgradeRoutes';
 
 const ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = ENV === 'production';
@@ -125,6 +126,8 @@ export default function createKernelRouter(): Router {
       }
     },
   );
+
+  router.use('/kernel/upgrade', createUpgradeRouter());
 
   /**
    * POST /kernel/sign

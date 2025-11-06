@@ -20,6 +20,7 @@ import { waitForDb, runMigrations } from './db';
 import { initOidc } from './auth/oidc';
 import { authMiddleware } from './auth/middleware';
 import { getPrincipalFromRequest, requireRoles, requireAnyAuthenticated, Roles } from './rbac';
+import { createOpenApiValidator } from './middleware/openapiValidator';
 
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -142,34 +143,6 @@ async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
 }
 
 /**
- * tryInstallOpenApiValidator
- */
-async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const OpenApiValidatorModule: any = require('express-openapi-validator');
-    const ValidatorCtor: any =
-      OpenApiValidatorModule?.OpenApiValidator ||
-      OpenApiValidatorModule?.default ||
-      OpenApiValidatorModule;
-
-    if (!ValidatorCtor || typeof ValidatorCtor !== 'function') {
-      throw new Error('express-openapi-validator export shape not recognized');
-    }
-
-    const instance: any = new ValidatorCtor({ apiSpec, validateRequests: true, validateResponses: false });
-    if (typeof instance.install === 'function') {
-      await instance.install(app);
-      info('OpenAPI validation enabled using ' + OPENAPI_PATH);
-    } else {
-      throw new Error('OpenApiValidator instance does not expose install(app)');
-    }
-  } catch (err) {
-    warn('Failed to load/install OpenAPI validator:', (err as Error).message || err);
-  }
-}
-
-/**
  * createApp
  */
 export async function createApp() {
@@ -191,7 +164,9 @@ export async function createApp() {
     try {
       const raw = fs.readFileSync(OPENAPI_PATH, 'utf8');
       const apiSpec = yaml.load(raw) as object;
-      await tryInstallOpenApiValidator(app, apiSpec);
+      const validator = await createOpenApiValidator(apiSpec);
+      app.use(validator);
+      info('OpenAPI validation enabled using ' + OPENAPI_PATH);
     } catch (err) {
       warn('OpenAPI load failed:', (err as Error).message || err);
     }

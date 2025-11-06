@@ -1,160 +1,152 @@
+// kernel/src/sentinelClient.ts
 /**
- * kernel/src/sentinelClient.ts
+ * Small, testable Sentinel/audit client surface.
  *
- * Lightweight SentinelNet (policy engine) client stub for Kernel.
- * - Contacts configured SENTINEL_URL to evaluate policy decisions for actions.
- * - Provides a safe fallback (allow-by-default or reject-by-default configurable) for local dev.
+ * - Exports a minimal SentinelClient interface.
+ * - Exposes `setSentinelClient()` so tests can inject the mock sentinel (or a stub).
+ * - Exposes `recordEvent()` helper which production code calls to emit audit events.
+ * - Exposes `enforcePolicyOrThrow()` helper and `PolicyDecision` so routes can evaluate policies.
  *
- * Responsibilities:
- * - evaluatePolicy(action, payload): ask SentinelNet whether the action is allowed.
- * - enforcePolicyOrThrow(action, payload): helper that throws a structured error when policy blocks action.
- *
- * Notes:
- * - This is a thin HTTP client / fallback for local dev. Replace with your real SentinelNet client
- *   and authentication (mTLS/OAuth) in production.
- * - DO NOT COMMIT SECRETS — use Vault/KMS and environment variables for auth to SentinelNet.
+ * Default client is a noop/allowing implementation so production builds do not fail when
+ * sentinel integration is not configured. Tests can inject a richer client.
  */
 
-import fetch from 'node-fetch';
+export type SentinelEventPayload = any;
 
-const SENTINEL_URL = process.env.SENTINEL_URL || '';
-const SENTINEL_TIMEOUT_MS = Number(process.env.SENTINEL_TIMEOUT_MS || 3000);
-const SENTINEL_FALLBACK_ALLOW = (process.env.SENTINEL_FALLBACK_ALLOW || 'true') === 'true';
-
-/** PolicyDecision — canonical shape returned by evaluatePolicy */
 export interface PolicyDecision {
   allowed: boolean;
-  policyId?: string;
   reason?: string;
-  rationale?: any; // optional structured rationale from SentinelNet
-  ts?: string;
-}
-
-/** Error thrown when policy denies an action */
-export class PolicyDeniedError extends Error {
-  public decision: PolicyDecision;
-  constructor(decision: PolicyDecision) {
-    super(`policy.denied: ${decision.reason ?? 'denied by policy'}`);
-    this.decision = decision;
-    Object.setPrototypeOf(this, PolicyDeniedError.prototype);
-  }
+  [key: string]: any;
 }
 
 /**
- * fetchWithTimeout
- * Simple fetch wrapper that enforces a timeout.
+ * Minimal Sentinel client surface expected by production/tests.
+ * - record(type, payload) => void | Promise<void>
+ * - enforcePolicy?(name, context) => PolicyDecision | Promise<PolicyDecision>
+ *
+ * Tests or a real integration may implement `enforcePolicy` to call an external PDP.
  */
-async function fetchWithTimeout(url: string, opts: any = {}, timeout = SENTINEL_TIMEOUT_MS): Promise<any> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const res = await fetch(url, { ...opts, signal: controller.signal });
-    clearTimeout(id);
-    return res;
-  } finally {
-    clearTimeout(id);
-  }
+export interface SentinelClient {
+  record(type: string, payload?: SentinelEventPayload): void | Promise<void>;
+  // optional policy evaluation hook (some implementations)
+  enforcePolicy?: (policyName: string, ctx?: any) => PolicyDecision | Promise<PolicyDecision>;
 }
 
 /**
- * evaluatePolicy
- * Ask SentinelNet whether the given action with payload is allowed.
- *
- * Parameters:
- * - action: short string identifying the action (e.g., "allocation.request", "manifest.update")
- * - payload: arbitrary JSON payload that helps the policy engine decide
- *
- * Behavior:
- * - If SENTINEL_URL is set, POST to `${SENTINEL_URL}/evaluate` with body { action, payload }.
- *   Expect a JSON response: { allowed: boolean, policyId?: string, reason?: string, rationale?: any }
- * - If SENTINEL_URL is not set, return a fallback decision (configurable with SENTINEL_FALLBACK_ALLOW).
- *
- * Returns: PolicyDecision
+ * Default client: no-op that logs to console.info and *allows* policy decisions.
+ * Safe for local/dev runs.
  */
-export async function evaluatePolicy(action: string, payload: any): Promise<PolicyDecision> {
-  if (!SENTINEL_URL) {
-    return {
-      allowed: SENTINEL_FALLBACK_ALLOW,
-      policyId: SENTINEL_FALLBACK_ALLOW ? 'fallback-allow' : 'fallback-deny',
-      reason: SENTINEL_FALLBACK_ALLOW ? 'no-sentinel-configured: allow-by-default' : 'no-sentinel-configured: deny-by-default',
-      ts: new Date().toISOString(),
-    };
-  }
-
-  const url = `${SENTINEL_URL.replace(/\/$/, '')}/evaluate`;
-  try {
-    const res = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // In production, include auth headers / mTLS client cert mapping, etc.
-      },
-      body: JSON.stringify({ action, payload }),
-    }, SENTINEL_TIMEOUT_MS);
-
-    if (!res.ok) {
-      // Treat non-200 as a conservative fallback: deny (unless configured otherwise)
-      const text = await res.text().catch(() => '<no body>');
-      console.warn(`Sentinel returned non-OK (${res.status}): ${text}`);
-      return {
-        allowed: SENTINEL_FALLBACK_ALLOW,
-        policyId: `sentinel-error-${res.status}`,
-        reason: `sentinel_error_${res.status}`,
-        ts: new Date().toISOString(),
-      };
+const defaultClient: SentinelClient = {
+  record(type: string, payload?: SentinelEventPayload) {
+    try {
+      console.info('[sentinel] event', type, payload === undefined ? '' : payload);
+    } catch (e) {
+      // swallow errors - sentinel must not break main execution path
+      // eslint-disable-next-line no-console
+      console.warn('[sentinel] failed to record event', e);
     }
+  },
 
-    const body = await res.json();
-    // Normalize response to PolicyDecision
-    const decision: PolicyDecision = {
-      allowed: Boolean(body.allowed),
-      policyId: body.policyId || body.policy_id,
-      reason: body.reason,
-      rationale: body.rationale ?? body.details,
-      ts: body.ts || new Date().toISOString(),
-    };
-    return decision;
-  } catch (err: any) {
-    // On network/timeout errors, fallback to configured behavior
-    console.error('Sentinel evaluate error:', err?.message || err);
-    return {
-      allowed: SENTINEL_FALLBACK_ALLOW,
-      policyId: 'sentinel-unreachable',
-      reason: `sentinel_unreachable: ${err?.message || 'timeout'}`,
-      ts: new Date().toISOString(),
-    };
+  // default policy evaluator: allow everything
+  enforcePolicy(_policyName: string, _ctx?: any) {
+    return { allowed: true } as PolicyDecision;
+  },
+};
+
+let client: SentinelClient = defaultClient;
+
+/**
+ * setSentinelClient
+ * Replace the active client (used by tests to inject a mock).
+ */
+export function setSentinelClient(c: SentinelClient | null | undefined) {
+  client = c || defaultClient;
+}
+
+/**
+ * getSentinelClient
+ * Return the currently configured client.
+ */
+export function getSentinelClient(): SentinelClient {
+  return client;
+}
+
+/**
+ * recordEvent
+ * Safe helper to emit an event. Production code should call this instead of
+ * calling the client directly.
+ */
+export async function recordEvent(type: string, payload?: SentinelEventPayload): Promise<void> {
+  try {
+    const res = client.record(type, payload);
+    if (res && typeof (res as Promise<void>).then === 'function') {
+      await (res as Promise<void>);
+    }
+  } catch (e) {
+    // Do not let sentinel failures break primary flows.
+    // eslint-disable-next-line no-console
+    console.warn('[sentinel] recordEvent failed:', (e as Error).message || e);
   }
 }
 
 /**
  * enforcePolicyOrThrow
- * Convenience helper: evaluatePolicy and throw PolicyDeniedError when not allowed.
+ *
+ * Evaluate a named policy with an optional context.
+ *
+ * - If a client.enforcePolicy is provided, call it and use its decision.
+ * - If no client.enforcePolicy exists, default to allowing (PolicyDecision { allowed: true }).
+ * - If the resulting decision has `allowed === false`, this helper will *throw*
+ *   an Error with a `.decision` property so callers can inspect it in a catch block.
+ * - Otherwise the function returns the decision.
+ *
+ * This behavior mirrors how kernel routes are written: they either accept a returned
+ * decision or catch a thrown error which includes `.decision`.
  */
-export async function enforcePolicyOrThrow(action: string, payload: any): Promise<PolicyDecision> {
-  const decision = await evaluatePolicy(action, payload);
-  if (!decision.allowed) {
-    throw new PolicyDeniedError(decision);
+export async function enforcePolicyOrThrow(policyName: string, ctx?: any): Promise<PolicyDecision> {
+  try {
+    const c: any = client as any;
+    let decision: PolicyDecision;
+
+    if (typeof c.enforcePolicy === 'function') {
+      const maybe = c.enforcePolicy(policyName, ctx);
+      decision = maybe && typeof (maybe as Promise<any>).then === 'function' ? await maybe : maybe;
+    } else {
+      // no policy hook configured -> default allow
+      decision = { allowed: true };
+    }
+
+    // Normalize decision
+    if (!decision || typeof decision.allowed !== 'boolean') {
+      // if sentinel returned something unexpected, treat as allowed but log a warning
+      console.warn('[sentinel] unexpected decision shape, allowing by default', decision);
+      decision = { allowed: true };
+    }
+
+    if (decision.allowed === false) {
+      const err: any = new Error('policy.denied');
+      err.decision = decision;
+      throw err;
+    }
+
+    return decision;
+  } catch (err) {
+    // If the sentinel client threw an error that already contains a .decision
+    // bubble that up so callers can inspect it. Otherwise rethrow the error.
+    if ((err as any)?.decision) {
+      throw err;
+    }
+    // Wrap unknown errors so callers can still detect policy vs non-policy failures.
+    const wrapped: any = new Error('sentinel.evaluate_error');
+    wrapped.original = err;
+    throw wrapped;
   }
-  return decision;
 }
 
-/**
- * Acceptance criteria (testable)
- *
- * - evaluatePolicy returns an allowed/denied PolicyDecision when SENTINEL_URL is configured and responds with JSON.
- *   Test: Start a mock HTTP server that responds to /evaluate with {allowed:false, policyId:'p1', reason:'blocked'} and assert evaluatePolicy returns that shape.
- *
- * - When SENTINEL_URL is not configured, evaluatePolicy returns fallback decision controlled by SENTINEL_FALLBACK_ALLOW.
- *   Test: Unset SENTINEL_URL and set SENTINEL_FALLBACK_ALLOW=true/false and confirm behavior.
- *
- * - A network error / timeout to Sentinel results in a fallback decision (not a crash) and logs the error.
- *   Test: Point SENTINEL_URL to a non-responsive address and confirm evaluatePolicy returns fallback decision after timeout.
- *
- * - enforcePolicyOrThrow throws PolicyDeniedError with decision when policy denies action.
- *   Test: Mock sentinel to return allowed:false and assert enforcePolicyOrThrow throws with decision attached.
- *
- * Security/Operational notes:
- * - In production, authenticate calls to SentinelNet (mTLS/OAuth) and ensure principal identity is forwarded for policy checks.
- * - Policy decisions should be recorded in the audit log (the caller should appendAuditEvent with policyId/reason).
- */
+export default {
+  setSentinelClient,
+  getSentinelClient,
+  recordEvent,
+  enforcePolicyOrThrow,
+} as const;
 

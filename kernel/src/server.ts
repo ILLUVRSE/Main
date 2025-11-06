@@ -3,24 +3,22 @@
  *
  * Production-minded Kernel HTTP server entrypoint.
  *
- * Changes:
- *  - Reads MTLS env vars and starts HTTPS server with client cert options when configured.
- *  - Initializes OIDC (if configured) and installs auth middleware.
- *  - Keeps dev-mode behavior (skip DB/migrations) when NODE_ENV=development.
- *
  * Notes:
- * - This file intentionally avoids adding new runtime dependencies beyond what's needed.
- * - DO NOT COMMIT SECRETS — use Vault/KMS and environment variables.
+ * - Exports `checkKmsReachable` for tests.
+ * - Uses Node http/https for KMS probing (no global fetch dependency).
+ * - Exposes guarded test endpoints when ENABLE_TEST_ENDPOINTS=true or NODE_ENV=test.
  */
 import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
+import http from 'http';
 import https from 'https';
 import yaml from 'js-yaml';
 import createKernelRouter from './routes/kernelRoutes';
 import { waitForDb, runMigrations } from './db';
 import { initOidc } from './auth/oidc';
 import { authMiddleware } from './auth/middleware';
+import { getPrincipalFromRequest, requireRoles, requireAnyAuthenticated, Roles } from './rbac';
 
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -35,19 +33,15 @@ const MTLS_KEY = process.env.MTLS_KEY || '';
 const MTLS_CLIENT_CA = process.env.MTLS_CLIENT_CA || '';
 const MTLS_REQUIRE_CLIENT_CERT = (process.env.MTLS_REQUIRE_CLIENT_CERT || 'false').toLowerCase() === 'true';
 
-const LOG_PREFIX = '[kernel:' + NODE_ENV + ']';
+const ENABLE_TEST_ENDPOINTS =
+  (process.env.ENABLE_TEST_ENDPOINTS || '').toLowerCase() === 'true' || NODE_ENV === 'test';
 
-/**
- * Minimal structured logger helpers
- */
+const LOG_PREFIX = '[kernel:' + NODE_ENV + ']';
 function info(...args: any[]) { console.info(LOG_PREFIX, ...args); }
 function warn(...args: any[]) { console.warn(LOG_PREFIX, ...args); }
 function error(...args: any[]) { console.error(LOG_PREFIX, ...args); }
 function debug(...args: any[]) { if ((process.env.LOG_LEVEL || '').toLowerCase() === 'debug') console.debug(LOG_PREFIX, ...args); }
 
-/**
- * Simple in-memory metrics (Prometheus exposition format)
- */
 const metrics = {
   server_start_total: 0,
   readiness_success_total: 0,
@@ -57,7 +51,6 @@ const metrics = {
 };
 
 function metricsText(): string {
-  // Simple exposition - counters only
   return [
     '# HELP kernel_server_start_total Count of server starts',
     '# TYPE kernel_server_start_total counter',
@@ -80,40 +73,55 @@ function metricsText(): string {
 
 /**
  * checkKmsReachable
- * Attempts to contact the KMS_ENDPOINT (if configured) with a GET and timeout.
- * Returns true if reachable (any HTTP response), false on network errors/timeout.
  */
-async function checkKmsReachable(timeoutMs = 3000): Promise<boolean> {
+export async function checkKmsReachable(timeoutMs = 3000): Promise<boolean> {
   if (!KMS_ENDPOINT) return false;
+
   try {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
-    // @ts-ignore global fetch exists in Node 18+; using as any for compatibility
-    const res = await (globalThis as any).fetch(KMS_ENDPOINT, { method: 'GET', signal: controller.signal });
-    clearTimeout(id);
-    // If we got any HTTP response, treat KMS as reachable
-    return true;
-  } catch (err) {
+    const u = new URL(KMS_ENDPOINT);
+    const isHttps = u.protocol === 'https:';
+    const lib = isHttps ? https : http;
+
+    return await new Promise<boolean>((resolve) => {
+      const opts: any = {
+        hostname: u.hostname,
+        port: u.port || (isHttps ? 443 : 80),
+        path: (u.pathname || '/') + (u.search || ''),
+        method: 'GET',
+        timeout: timeoutMs,
+      };
+
+      const req = lib.request(opts, (res: any) => {
+        res.on('data', () => {});
+        res.on('end', () => {});
+        resolve(true);
+      });
+
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        try { req.destroy(); } catch {}
+        resolve(false);
+      });
+
+      req.end();
+    });
+  } catch {
     return false;
   }
 }
 
 /**
  * readinessCheck
- * - Verifies DB is reachable via waitForDb (quick timeout)
- * - Verifies KMS if REQUIRE_KMS==true or KMS_ENDPOINT provided
  */
 async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
   try {
-    // DB check (short timeout)
     try {
-      await waitForDb(5_000, 500); // short wait
+      await waitForDb(5_000, 500);
     } catch (e) {
       metrics.readiness_failure_total++;
       return { ok: false, details: 'db.unreachable' };
     }
 
-    // KMS check if configured or required
     if (REQUIRE_KMS || KMS_ENDPOINT) {
       const reachable = await checkKmsReachable(3000);
       if (!reachable) {
@@ -133,11 +141,10 @@ async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
 }
 
 /**
- * Load OpenAPI validator robustly (support multiple export shapes)
+ * tryInstallOpenApiValidator
  */
 async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
   try {
-    // Try dynamic require and discover common export shapes
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const OpenApiValidatorModule: any = require('express-openapi-validator');
     const ValidatorCtor: any =
@@ -149,7 +156,6 @@ async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
       throw new Error('express-openapi-validator export shape not recognized');
     }
 
-    // instantiate and install
     const instance: any = new ValidatorCtor({ apiSpec, validateRequests: true, validateResponses: false });
     if (typeof instance.install === 'function') {
       await instance.install(app);
@@ -169,20 +175,17 @@ export async function createApp() {
   const app = express();
   app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '1mb' }));
 
-  // auth middleware (OIDC / mTLS) - best-effort placement early in chain
   try {
-    app.use(authMiddleware as any);
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      Promise.resolve(authMiddleware(req as any, res as any, next)).catch(next);
+    });
   } catch (e) {
     warn('Failed to install auth middleware:', (e as Error).message || e);
   }
 
-  // simple request logging
-  app.use((req, _res, next) => {
-    debug(req.method + ' ' + req.path);
-    next();
-  });
+  app.use((req, _res, next) => { debug(req.method + ' ' + req.path); next(); });
 
-  // Try to load OpenAPI spec
   if (fs.existsSync(OPENAPI_PATH)) {
     try {
       const raw = fs.readFileSync(OPENAPI_PATH, 'utf8');
@@ -195,29 +198,45 @@ export async function createApp() {
     warn('OpenAPI not found at ' + OPENAPI_PATH + ' - request validation disabled.');
   }
 
-  // Mount kernel router
   app.use('/', createKernelRouter());
 
-  // Liveness endpoint
+  if (ENABLE_TEST_ENDPOINTS) {
+    info('ENABLE_TEST_ENDPOINTS=true -> installing test-only endpoints: /principal /require-any /require-roles');
+
+    app.get('/principal', (req: Request, res: Response) => {
+      const principal = (req as any).principal ?? getPrincipalFromRequest(req as any);
+      (req as any).principal = principal;
+      return res.json({ principal } as any);
+    });
+
+    app.get('/require-any', requireAnyAuthenticated, (req: Request, res: Response) => {
+      return res.json({ ok: true, principal: (req as any).principal } as any);
+    });
+
+    app.get(
+      '/require-roles',
+      requireRoles(Roles.SUPERADMIN, Roles.OPERATOR),
+      (req: Request, res: Response) => {
+        return res.json({ ok: true, principal: (req as any).principal } as any);
+      }
+    );
+  }
+
   app.get('/health', (_req: Request, res: Response) => {
     return res.json({ status: 'ok', ts: new Date().toISOString() });
   });
 
-  // Readiness endpoint - runs quick checks (DB + optional KMS)
   app.get('/ready', async (_req: Request, res: Response) => {
     const r = await readinessCheck();
     if (!r.ok) return res.status(503).json({ status: 'not_ready', details: r.details ?? null });
     return res.json({ status: 'ready' });
   });
 
-  // Metrics endpoint
   app.get('/metrics', (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'text/plain; version=0.0.4');
     res.send(metricsText());
   });
 
-  // Generic error handler
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     error('Unhandled error:', err && err.stack ? err.stack : err);
     if (err?.status && err?.errors) {
@@ -231,22 +250,17 @@ export async function createApp() {
 
 /**
  * start
- * - Validates KMS presence when NODE_ENV=production && REQUIRE_KMS=true
- * - Initializes OIDC if configured
- * - Waits for DB then runs migrations and starts HTTP or HTTPS server (mTLS) depending on env
  */
 async function start() {
   try {
     info('Kernel server starting...');
     info('NODE_ENV=' + NODE_ENV + ' REQUIRE_KMS=' + REQUIRE_KMS + ' KMS_ENDPOINT=' + (KMS_ENDPOINT ? 'configured' : 'unset'));
 
-    // If in production and KMS is required, fail fast if KMS_ENDPOINT missing or unreachable
     if (NODE_ENV === 'production' && REQUIRE_KMS) {
       if (!KMS_ENDPOINT) {
         error('Fatal: REQUIRE_KMS=true and KMS_ENDPOINT is not set. Exiting.');
         process.exit(1);
       }
-      // Probe KMS quickly
       info('Probing KMS endpoint for reachability...');
       const ok = await checkKmsReachable(3_000);
       if (!ok) {
@@ -258,7 +272,6 @@ async function start() {
       metrics.kms_probe_success_total++;
     }
 
-    // Initialize OIDC if configured (best-effort)
     if (process.env.OIDC_ISSUER) {
       try {
         info('Initializing OIDC client...');
@@ -271,7 +284,6 @@ async function start() {
       debug('OIDC not configured, skipping OIDC init');
     }
 
-    // Wait for DB then run migrations (skip in development)
     if (NODE_ENV !== 'development') {
       info('Waiting for Postgres...');
       await waitForDb(30_000, 500);
@@ -287,10 +299,8 @@ async function start() {
       warn('NODE_ENV=development — skipping DB wait and migrations for local dev');
     }
 
-    // Create app
     const app = await createApp();
 
-    // Decide HTTP vs HTTPS (mTLS)
     if (MTLS_CERT && MTLS_KEY) {
       info('Starting HTTPS server (mTLS config present). MTLS_REQUIRE_CLIENT_CERT=' + MTLS_REQUIRE_CLIENT_CERT);
       try {
@@ -313,9 +323,8 @@ async function start() {
           readinessCheck().then((r) => {
             if (!r.ok) warn('Initial readiness check failed:', r.details);
             else info('Initial readiness check succeeded');
-          }).catch((e) => warn('Initial readiness check error:', (e as Error).message || e));
+          }).catch((e) => warn('Initial readiness_check error:', (e as Error).message || e));
         });
-        // Graceful shutdown wiring
         const shutdown = async () => {
           info('Shutting down Kernel HTTPS server...');
           server.close(() => {
@@ -336,17 +345,15 @@ async function start() {
       }
     }
 
-    // Fallback: plain HTTP
     const server = app.listen(PORT, () => {
       metrics.server_start_total++;
       info('Kernel server listening on port ' + PORT);
       readinessCheck().then((r) => {
         if (!r.ok) warn('Initial readiness check failed:', r.details);
         else info('Initial readiness check succeeded');
-      }).catch((e) => warn('Initial readiness check error:', (e as Error).message || e));
+      }).catch((e) => warn('Initial readiness_check error:', (e as Error).message || e));
     });
 
-    // Graceful shutdown
     const shutdown = async () => {
       info('Shutting down Kernel server...');
       server.close(() => {

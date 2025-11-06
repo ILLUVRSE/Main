@@ -1,0 +1,115 @@
+name: Integration Tests (Compose)
+
+on:
+  push:
+    branches: [ feature/phase4-part2 ]
+  pull_request:
+    branches: [ feature/phase4-part2 ]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      ILLUVRSE_CERT_DIR: /tmp/illuvrse-certs
+      MTLS_REQUIRE_CLIENT_CERT: "false"
+      ENABLE_TEST_ENDPOINTS: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Inject certs from secrets
+        env:
+          CI_KERNEL_CA: ${{ secrets.CI_KERNEL_CA }}
+          CI_KERNEL_SERVER_CERT: ${{ secrets.CI_KERNEL_SERVER_CERT }}
+          CI_KERNEL_SERVER_KEY: ${{ secrets.CI_KERNEL_SERVER_KEY }}
+          CI_KERNEL_CLIENT_CERT: ${{ secrets.CI_KERNEL_CLIENT_CERT }}
+          CI_KERNEL_CLIENT_KEY: ${{ secrets.CI_KERNEL_CLIENT_KEY }}
+        run: |
+          chmod +x devops/scripts/ci_inject_certs.sh
+          devops/scripts/ci_inject_certs.sh /tmp/illuvrse-certs
+          ls -la /tmp/illuvrse-certs
+
+      - name: Build & start compose stack
+        run: |
+          docker compose -f devops/docker-compose.ci.yml up -d --build
+          docker compose -f devops/docker-compose.ci.yml ps
+
+      - name: Make CI wait helper executable
+        run: chmod +x devops/scripts/ci_wait_for_service.sh
+
+      - name: Wait for Keycloak readiness (HTTP)
+        run: |
+          ./devops/scripts/ci_wait_for_service.sh -f devops/docker-compose.ci.yml -s keycloak -t 180 -u "http://localhost:8080/q/health/ready"
+      - name: Wait for mock-kms readiness (logs)
+        run: |
+          ./devops/scripts/ci_wait_for_service.sh -f devops/docker-compose.ci.yml -s mock-kms -t 60 -l "mock-kms listening|status: ready"
+
+      - name: Provision Keycloak (idempotent)
+        run: |
+          chmod +x devops/scripts/prepare_oidc.sh
+          ./devops/scripts/prepare_oidc.sh
+
+      - name: Wait for Kernel TCP and readiness (HTTPS, with test CA)
+        run: |
+          # Wait for TCP open
+          for i in $(seq 1 60); do
+            docker compose -f devops/docker-compose.ci.yml exec -T kernel sh -c "grep -q 3000 /proc/net/tcp" >/dev/null 2>&1 && break || true
+            # Fallback: check host TCP port mapping
+            nc -z localhost 3000 && break || true
+            sleep 2
+          done
+          # Wait for /ready using injected CA
+          for i in $(seq 1 60); do
+            if curl --cacert /tmp/illuvrse-certs/kernel-ca.crt -fsS https://localhost:3000/ready >/dev/null 2>&1; then
+              echo "Kernel readiness OK"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Verify test endpoints installed
+        run: |
+          # Quick check to ensure test-only endpoints are exposed (helpful failure message if not)
+          set -e
+          if ! curl --cacert /tmp/illuvrse-certs/kernel-ca.crt -fsS https://localhost:3000/principal >/dev/null 2>&1; then
+            echo "ERROR: /principal endpoint not found. Ensure ENABLE_TEST_ENDPOINTS=true for kernel service in CI."
+            docker compose -f devops/docker-compose.ci.yml logs kernel --tail 200 || true
+            exit 1
+          fi
+          echo "/principal endpoint exists"
+
+      - name: Run Kernel integration tests
+        working-directory: kernel
+        env:
+          NODE_EXTRA_CA_CERTS: /tmp/illuvrse-certs/kernel-ca.crt
+        run: |
+          npm ci
+          npx jest test/integration/auth.integration.test.ts --runInBand --detectOpenHandles
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/ci-logs
+          echo "===== keycloak logs =====" > /tmp/ci-logs/keycloak.log
+          docker compose -f devops/docker-compose.ci.yml logs keycloak --tail 1000 >> /tmp/ci-logs/keycloak.log || true
+          echo "===== kernel logs =====" > /tmp/ci-logs/kernel.log
+          docker compose -f devops/docker-compose.ci.yml logs kernel --tail 1000 >> /tmp/ci-logs/kernel.log || true
+          echo "===== mock-kms logs =====" > /tmp/ci-logs/mock-kms.log
+          docker compose -f devops/docker-compose.ci.yml logs mock-kms --tail 500 >> /tmp/ci-logs/mock-kms.log || true
+      - name: Upload logs artifact (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: /tmp/ci-logs
+
+      - name: Tear down stack
+        if: always()
+        run: |
+          docker compose -f devops/docker-compose.ci.yml down --volumes --remove-orphans
+

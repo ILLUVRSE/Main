@@ -18,6 +18,7 @@
 
 import express, { Request, Response, NextFunction, Router } from 'express';
 import crypto from 'crypto';
+import { PoolClient } from 'pg';
 import { getClient, query } from '../db';
 import signingProxy from '../signingProxy';
 import { appendAuditEvent, getAuditEventById } from '../auditStore';
@@ -36,6 +37,7 @@ import {
   getPrincipalFromRequest,
 } from '../rbac';
 import { enforcePolicyOrThrow, PolicyDecision } from '../sentinelClient';
+import idempotencyMiddleware from '../middleware/idempotency';
 
 const ENV = process.env.NODE_ENV || 'development';
 
@@ -65,6 +67,15 @@ function requirePrincipalOrFail(principal: any, res: Response) {
   return true;
 }
 
+async function resolveClient(res: Response): Promise<{ client: PoolClient; managed: boolean }> {
+  const ctx = res.locals.idempotency as { client?: PoolClient } | undefined;
+  if (ctx?.client) {
+    return { client: ctx.client, managed: false };
+  }
+  const client = await getClient();
+  return { client, managed: true };
+}
+
 /** Create and return router */
 export default function createKernelRouter(): Router {
   const router = express.Router();
@@ -85,7 +96,9 @@ export default function createKernelRouter(): Router {
   /**
    * POST /kernel/sign
    */
-  router.post('/kernel/sign', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/kernel/sign', idempotencyMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+    let managed = false;
+    let client: PoolClient | undefined;
     try {
       const principal = (req as any).principal || getPrincipalFromRequest(req);
 
@@ -112,13 +125,28 @@ export default function createKernelRouter(): Router {
         console.warn('sentinel evaluate failed for manifest.sign, continuing:', (polErr as Error).message || polErr);
       }
 
+      const resolved = await resolveClient(res);
+      client = resolved.client;
+      managed = resolved.managed;
+      if (managed) {
+        await client.query('BEGIN');
+      }
+
       const sig = await signingProxy.signManifest(manifest);
 
       try {
-        await query(
+        await client.query(
           `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, version, ts, prev_hash)
            VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [sig.id, sig.manifestId ?? null, sig.signerId ?? null, sig.signature, sig.version ?? null, sig.ts ?? new Date().toISOString(), (sig as any).prevHash ?? null],
+          [
+            sig.id,
+            sig.manifestId ?? null,
+            sig.signerId ?? null,
+            sig.signature,
+            sig.version ?? null,
+            sig.ts ?? new Date().toISOString(),
+            (sig as any).prevHash ?? null,
+          ],
         );
       } catch (e) {
         console.warn('persist manifest_signature failed:', (e as Error).message || e);
@@ -130,6 +158,12 @@ export default function createKernelRouter(): Router {
         console.warn('audit append failed for manifest.signed:', (e as Error).message || e);
       }
 
+      if (managed) {
+        await client.query('COMMIT');
+        client.release();
+        client = undefined;
+      }
+
       return res.json({
         manifest_id: sig.manifestId ?? null,
         signer_id: sig.signerId ?? null,
@@ -138,6 +172,10 @@ export default function createKernelRouter(): Router {
         ts: sig.ts,
       });
     } catch (err) {
+      if (managed && client) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+      }
       return next(err);
     }
   });
@@ -146,7 +184,7 @@ export default function createKernelRouter(): Router {
    * POST /kernel/division - upsert
    * Prod: require DivisionLead|SuperAdmin. Dev: allow.
    */
-  router.post('/kernel/division', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/kernel/division', idempotencyMiddleware, async (req: Request, res: Response, next: NextFunction) => {
     const manifest: DivisionManifest = req.body;
     if (!manifest || !manifest.id) return res.status(400).json({ error: 'manifest with id required' });
 
@@ -159,7 +197,8 @@ export default function createKernelRouter(): Router {
         return res.status(403).json({ error: 'forbidden' });
       }
     }
-
+    let managed = false;
+    let client: PoolClient | undefined;
     try {
       // Policy
       try {
@@ -173,65 +212,78 @@ export default function createKernelRouter(): Router {
         console.warn('sentinel evaluate failed for manifest.update, continuing:', (err as Error).message || err);
       }
 
-      const client = await getClient();
-      try {
+      const resolved = await resolveClient(res);
+      client = resolved.client;
+      managed = resolved.managed;
+      if (managed) {
         await client.query('BEGIN');
+      }
 
-        const sig = await signingProxy.signManifest(manifest);
+      const sig = await signingProxy.signManifest(manifest);
 
-        await client.query(
-          `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, version, ts, prev_hash)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [sig.id, manifest.id, sig.signerId ?? null, sig.signature, sig.version ?? manifest.version ?? null, sig.ts ?? new Date().toISOString(), (sig as any).prevHash ?? null],
-        );
-
-        const upsert = `
-          INSERT INTO divisions (
-            id, name, goals, budget, currency, kpis, policies, metadata, status, version, manifest_signature_id, created_at, updated_at
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(), now())
-          ON CONFLICT (id) DO UPDATE SET
-            name = EXCLUDED.name,
-            goals = EXCLUDED.goals,
-            budget = EXCLUDED.budget,
-            currency = EXCLUDED.currency,
-            kpis = EXCLUDED.kpis,
-            policies = EXCLUDED.policies,
-            metadata = EXCLUDED.metadata,
-            status = EXCLUDED.status,
-            version = EXCLUDED.version,
-            manifest_signature_id = EXCLUDED.manifest_signature_id,
-            updated_at = now()
-        `;
-        await client.query(upsert, [
-          manifest.id,
-          manifest.name ?? null,
-          asJsonString(manifest.goals ?? []),
-          manifest.budget ?? 0,
-          manifest.currency ?? 'USD',
-          asJsonString(manifest.kpis ?? []),
-          asJsonString(manifest.policies ?? []),
-          asJsonString(manifest.metadata ?? {}),
-          manifest.status ?? 'active',
-          manifest.version ?? '1.0.0',
+      await client.query(
+        `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, version, ts, prev_hash)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
           sig.id,
-        ]);
+          manifest.id,
+          sig.signerId ?? null,
+          sig.signature,
+          sig.version ?? manifest.version ?? null,
+          sig.ts ?? new Date().toISOString(),
+          (sig as any).prevHash ?? null,
+        ],
+      );
 
+      const upsert = `
+        INSERT INTO divisions (
+          id, name, goals, budget, currency, kpis, policies, metadata, status, version, manifest_signature_id, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(), now())
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          goals = EXCLUDED.goals,
+          budget = EXCLUDED.budget,
+          currency = EXCLUDED.currency,
+          kpis = EXCLUDED.kpis,
+          policies = EXCLUDED.policies,
+          metadata = EXCLUDED.metadata,
+          status = EXCLUDED.status,
+          version = EXCLUDED.version,
+          manifest_signature_id = EXCLUDED.manifest_signature_id,
+          updated_at = now()
+      `;
+      await client.query(upsert, [
+        manifest.id,
+        manifest.name ?? null,
+        asJsonString(manifest.goals ?? []),
+        manifest.budget ?? 0,
+        manifest.currency ?? 'USD',
+        asJsonString(manifest.kpis ?? []),
+        asJsonString(manifest.policies ?? []),
+        asJsonString(manifest.metadata ?? {}),
+        manifest.status ?? 'active',
+        manifest.version ?? '1.0.0',
+        sig.id,
+      ]);
+
+      if (managed) {
         await client.query('COMMIT');
+        client.release();
+        client = undefined;
+      }
 
-        try {
-          await appendAuditEvent('manifest.update', { manifestId: manifest.id, signatureId: sig.id, signerId: sig.signerId ?? null, principal });
-        } catch (e) {
-          console.warn('Audit append failed for manifest.update:', (e as Error).message || e);
-        }
-
-        return res.json(manifest);
+      try {
+        await appendAuditEvent('manifest.update', { manifestId: manifest.id, signatureId: sig.id, signerId: sig.signerId ?? null, principal });
       } catch (e) {
+        console.warn('Audit append failed for manifest.update:', (e as Error).message || e);
+      }
+
+      return res.json(manifest);
+    } catch (err) {
+      if (managed && client) {
         await client.query('ROLLBACK').catch(() => {});
-        throw e;
-      } finally {
         client.release();
       }
-    } catch (err) {
       return next(err);
     }
   });
@@ -262,7 +314,7 @@ export default function createKernelRouter(): Router {
    * POST /kernel/agent
    * Prod: require Operator|SuperAdmin. Dev: allow.
    */
-  router.post('/kernel/agent', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/kernel/agent', idempotencyMiddleware, async (req: Request, res: Response, next: NextFunction) => {
     const body = req.body;
     if (!body) return res.status(400).json({ error: 'body required' });
 
@@ -275,17 +327,54 @@ export default function createKernelRouter(): Router {
     }
 
     const id = body.id || `agent-${crypto.randomUUID()}`;
+    let managed = false;
+    let client: PoolClient | undefined;
     try {
-      await query(
+      const resolved = await resolveClient(res);
+      client = resolved.client;
+      managed = resolved.managed;
+      if (managed) {
+        await client.query('BEGIN');
+      }
+
+      await client.query(
         `INSERT INTO agents (id, template_id, role, skills, code_ref, division_id, state, score, resource_allocation, last_heartbeat, owner, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), $10, now(), now())
          ON CONFLICT (id) DO NOTHING`,
-        [id, body.templateId || null, body.role || null, asJsonString(body.skills ?? []), body.codeRef || null, body.divisionId || null, 'running', body.computedScore ?? 0.0, asJsonString(body.resourceAllocation ?? {}), body.owner || null],
+        [
+          id,
+          body.templateId || null,
+          body.role || null,
+          asJsonString(body.skills ?? []),
+          body.codeRef || null,
+          body.divisionId || null,
+          'running',
+          body.computedScore ?? 0.0,
+          asJsonString(body.resourceAllocation ?? {}),
+          body.owner || null,
+        ],
       );
+
       await appendAuditEvent('agent.spawn', { agentId: id, templateId: body.templateId || null, principal });
-      const createdRes = await query('SELECT * FROM agents WHERE id = $1', [id]);
-      return res.status(201).json(createdRes.rows[0] ? dbRowToAgentProfile(createdRes.rows[0]) : { id, role: body.role, skills: body.skills });
+
+      const createdRes = await client.query('SELECT * FROM agents WHERE id = $1', [id]);
+
+      const payload = createdRes.rows[0]
+        ? dbRowToAgentProfile(createdRes.rows[0])
+        : { id, role: body.role, skills: body.skills };
+
+      if (managed) {
+        await client.query('COMMIT');
+        client.release();
+        client = undefined;
+      }
+
+      return res.status(201).json(payload);
     } catch (err) {
+      if (managed && client) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+      }
       return next(err);
     }
   });
@@ -315,31 +404,59 @@ export default function createKernelRouter(): Router {
    * POST /kernel/eval
    * Prod: require auth; Dev: allow.
    */
-  router.post('/kernel/eval', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/kernel/eval', idempotencyMiddleware, async (req: Request, res: Response, next: NextFunction) => {
     const body = req.body;
     if (!body || !body.agent_id) return res.status(400).json({ error: 'agent_id required' });
 
     const principal = (req as any).principal || getPrincipalFromRequest(req);
     if (ENV === 'production' && !principal) return res.status(401).json({ error: 'unauthenticated' });
 
+    let managed = false;
+    let client: PoolClient | undefined;
     try {
       const id = body.id || `eval-${crypto.randomUUID()}`;
-      await query(
+      const resolved = await resolveClient(res);
+      client = resolved.client;
+      managed = resolved.managed;
+      if (managed) {
+        await client.query('BEGIN');
+      }
+
+      await client.query(
         'INSERT INTO eval_reports (id, agent_id, metric_set, timestamp, source, computed_score, "window") VALUES ($1,$2,$3,$4,$5,$6,$7)',
-        [id, body.agent_id, asJsonString(body.metric_set || {}), body.timestamp || new Date().toISOString(), body.source || 'unknown', body.computedScore ?? null, body.window ?? null],
+        [
+          id,
+          body.agent_id,
+          asJsonString(body.metric_set || {}),
+          body.timestamp || new Date().toISOString(),
+          body.source || 'unknown',
+          body.computedScore ?? null,
+          body.window ?? null,
+        ],
       );
 
       if (body.computedScore != null) {
         try {
-          await query('UPDATE agents SET score = $1, updated_at = now() WHERE id = $2', [body.computedScore, body.agent_id]);
+          await client.query('UPDATE agents SET score = $1, updated_at = now() WHERE id = $2', [body.computedScore, body.agent_id]);
         } catch (e) {
           console.warn('Agent score update failed:', (e as Error).message || e);
         }
       }
 
       await appendAuditEvent('eval.submitted', { evalId: id, agentId: body.agent_id, principal });
+
+      if (managed) {
+        await client.query('COMMIT');
+        client.release();
+        client = undefined;
+      }
+
       return res.json({ ok: true, eval_id: id });
     } catch (err) {
+      if (managed && client) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+      }
       return next(err);
     }
   });
@@ -348,7 +465,7 @@ export default function createKernelRouter(): Router {
    * POST /kernel/allocate
    * Prod: require Operator|DivisionLead|SuperAdmin. Dev: allow.
    */
-  router.post('/kernel/allocate', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/kernel/allocate', idempotencyMiddleware, async (req: Request, res: Response, next: NextFunction) => {
     const body = req.body;
     if (!body || !body.entity_id) return res.status(400).json({ error: 'entity_id required' });
 
@@ -360,6 +477,8 @@ export default function createKernelRouter(): Router {
       }
     }
 
+    let managed = false;
+    let client: PoolClient | undefined;
     try {
       try {
         const decision = await enforcePolicyOrThrow('allocation.request', { principal, allocation: body });
@@ -373,7 +492,14 @@ export default function createKernelRouter(): Router {
       }
 
       const id = `alloc-${crypto.randomUUID()}`;
-      await query('INSERT INTO resource_allocations (id, entity_id, pool, delta, reason, requested_by, status, ts) VALUES ($1,$2,$3,$4,$5,$6,$7,now())', [
+      const resolved = await resolveClient(res);
+      client = resolved.client;
+      managed = resolved.managed;
+      if (managed) {
+        await client.query('BEGIN');
+      }
+
+      await client.query('INSERT INTO resource_allocations (id, entity_id, pool, delta, reason, requested_by, status, ts) VALUES ($1,$2,$3,$4,$5,$6,$7,now())', [
         id,
         body.entity_id,
         body.pool || null,
@@ -384,8 +510,19 @@ export default function createKernelRouter(): Router {
       ]);
 
       await appendAuditEvent('allocation.request', { allocationId: id, entityId: body.entity_id, delta: body.delta, principal });
+
+      if (managed) {
+        await client.query('COMMIT');
+        client.release();
+        client = undefined;
+      }
+
       return res.json({ ok: true, allocation: { id } });
     } catch (err) {
+      if (managed && client) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+      }
       return next(err);
     }
   });

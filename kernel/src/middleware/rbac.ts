@@ -11,24 +11,44 @@ export const Roles = {
 
 export type Role = (typeof Roles)[keyof typeof Roles] | string;
 
-function normalize(role: string): string {
-  return role.trim().toLowerCase();
+type RoleCandidate = string | { toString(): string } | null | undefined;
+
+export type PrincipalLike =
+  | (Partial<AuthenticatedPrincipal> & { roles?: RoleCandidate[] | undefined })
+  | { roles?: RoleCandidate[] | undefined; id?: string }
+  | null
+  | undefined;
+
+export function normalizeRole(role: RoleCandidate): string {
+  if (role === null || role === undefined) return '';
+  const value = typeof role === 'string' ? role : String(role);
+  return value.trim().toLowerCase();
 }
 
-export function hasRole(user: AuthenticatedPrincipal | undefined, role: Role): boolean {
+export function hasRole(user: PrincipalLike, role: Role): boolean {
+  const target = normalizeRole(role);
+  if (!target) return false;
   if (!user || !Array.isArray(user.roles)) return false;
-  const target = normalize(String(role));
-  return user.roles.some((r) => normalize(String(r)) === target);
+  return user.roles.some((candidate) => normalizeRole(candidate) === target);
 }
 
-function hasAnyRole(user: AuthenticatedPrincipal | undefined, required: Role[]): boolean {
-  if (!user) return false;
-  if (!required.length) return true;
-  return required.some((role) => hasRole(user, role));
+export function hasAnyRole(user: PrincipalLike, required: Role[] | Role): boolean {
+  const requiredRoles = Array.isArray(required) ? required : [required];
+  if (!requiredRoles.length) return true;
+  return requiredRoles.some((role) => hasRole(user, role));
+}
+
+declare global {
+  namespace Express {
+    // eslint-disable-next-line @typescript-eslint/no-empty-interface
+    interface Request {
+      principal?: PrincipalLike;
+    }
+  }
 }
 
 export function requireAuthenticated(req: Request, res: Response, next: NextFunction) {
-  const principal = req.principal as AuthenticatedPrincipal | undefined;
+  const principal = req.principal as PrincipalLike;
   if (!principal) {
     logger.warn('rbac.unauthenticated', { path: req.path, method: req.method });
     return res.status(401).json({ error: 'unauthenticated' });
@@ -38,27 +58,33 @@ export function requireAuthenticated(req: Request, res: Response, next: NextFunc
 
 export function requireRoles(...requiredRoles: Role[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const principal = req.principal as AuthenticatedPrincipal | undefined;
+    const principal = req.principal as PrincipalLike;
     if (!principal) {
-      logger.warn('rbac.unauthenticated', { path: req.path, method: req.method });
-      return res.status(401).json({ error: 'unauthenticated' });
+      logger.warn('rbac.unauthenticated', {
+        path: req.path,
+        method: req.method,
+        requiredRoles,
+      });
+      return res.status(401).json({ error: 'unauthenticated', requiredRoles });
     }
 
     if (!hasAnyRole(principal, requiredRoles)) {
       logger.warn('rbac.forbidden', {
         path: req.path,
         method: req.method,
-        principal: principal.id,
+        principal: (principal as AuthenticatedPrincipal | undefined)?.id,
         requiredRoles,
       });
-      return res.status(403).json({ error: 'forbidden', requiredRoles });
+      return res
+        .status(403)
+        .json({ error: 'forbidden', requiredRoles, required: requiredRoles });
     }
 
     return next();
   };
 }
 
-export function enforceRoles(principal: AuthenticatedPrincipal | undefined, roles: Role[]): void {
+export function enforceRoles(principal: PrincipalLike, roles: Role[]): void {
   if (!principal) {
     throw new Error('unauthenticated');
   }
@@ -70,6 +96,7 @@ export function enforceRoles(principal: AuthenticatedPrincipal | undefined, role
 export default {
   Roles,
   hasRole,
+  hasAnyRole,
   requireRoles,
   requireAuthenticated,
   enforceRoles,

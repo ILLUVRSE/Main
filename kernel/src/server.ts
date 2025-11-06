@@ -15,6 +15,7 @@ import http from 'http';
 import https from 'https';
 import yaml from 'js-yaml';
 import createKernelRouter from './routes/kernelRoutes';
+import createAdminRouter from './routes/adminRoutes';
 import { waitForDb, runMigrations } from './db';
 import { initOidc } from './auth/oidc';
 import { authMiddleware } from './auth/middleware';
@@ -199,6 +200,7 @@ export async function createApp() {
   }
 
   app.use('/', createKernelRouter());
+  app.use('/', createAdminRouter());
 
   if (ENABLE_TEST_ENDPOINTS) {
     info('ENABLE_TEST_ENDPOINTS=true -> installing test-only endpoints: /principal /require-any /require-roles');

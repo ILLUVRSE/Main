@@ -28,9 +28,11 @@ describe('idempotencyMiddleware', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     delete process.env.IDEMPOTENCY_RESPONSE_BODY_LIMIT;
+    delete process.env.IDEMPOTENCY_TTL_SECONDS;
   });
 
   test('stores response for new key', async () => {
+    process.env.IDEMPOTENCY_TTL_SECONDS = '600';
     const app = buildApp(async (_req, res) => {
       return res.status(201).json({ ok: true });
     });
@@ -46,6 +48,13 @@ describe('idempotencyMiddleware', () => {
     expect(record).toBeDefined();
     expect(record?.response_status).toBe(201);
     expect(record?.response_body).toBe(JSON.stringify({ ok: true }));
+    expect(record?.expires_at).toBeTruthy();
+    if (record?.expires_at) {
+      const created = new Date(record.created_at).getTime();
+      const expires = new Date(record.expires_at).getTime();
+      expect(expires - created).toBeGreaterThanOrEqual(599_000);
+      expect(expires - created).toBeLessThanOrEqual(601_000);
+    }
   });
 
   test('replays stored response on retry with same payload', async () => {

@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { IncomingHttpHeaders } from 'http';
+import { TLSSocket } from 'tls';
 import { Request, Response, NextFunction } from 'express';
 import { JWTPayload, createLocalJWKSet, createRemoteJWKSet, jwtVerify, JWK } from 'jose';
 import { logger } from '../logger';
+import { principalFromCert as mapPrincipalFromCert } from '../auth/roleMapping';
 
 export type PrincipalType = 'human' | 'service';
 
@@ -11,7 +13,7 @@ export interface AuthenticatedPrincipal {
   id: string;
   type: PrincipalType;
   roles: string[];
-  source: 'oidc' | 'mtls';
+  source: 'oidc' | 'mtls' | 'dev';
   issuer?: string;
   metadata?: Record<string, unknown>;
   tokenClaims?: JWTPayload;
@@ -172,27 +174,6 @@ function parseRoles(claims: JWTPayload): string[] {
   return Array.from(roles);
 }
 
-function extractServiceRoles(serviceId: string): string[] {
-  const mapRaw = process.env.SERVICE_ROLE_MAP;
-  if (!mapRaw) return [];
-  try {
-    const parsed = JSON.parse(mapRaw);
-    const roles = parsed?.[serviceId];
-    if (!roles) return [];
-    if (Array.isArray(roles)) return roles.map((r) => String(r));
-    if (typeof roles === 'string') {
-      return roles
-        .split(/[\s,]+/)
-        .map((v: string) => v.trim())
-        .filter(Boolean);
-    }
-    return [];
-  } catch (err) {
-    logger.warn('auth.service_role_map.invalid', { error: (err as Error).message });
-    return [];
-  }
-}
-
 function rolesFromHeaders(headers: IncomingHttpHeaders): string[] {
   const headerRoles = headers['x-roles'] || headers['x-user-roles'];
   if (!headerRoles) return [];
@@ -232,46 +213,173 @@ async function authenticateBearerToken(req: Request, token: string): Promise<Aut
   return principal;
 }
 
-function extractCertificatePrincipal(req: Request): AuthenticatedPrincipal | null {
-  const socket: any = (req as any).socket || (req as any).connection;
-  if (!socket || typeof socket.getPeerCertificate !== 'function') return null;
+function isProduction(): boolean {
+  return (process.env.NODE_ENV || '').toLowerCase() === 'production';
+}
+
+function getTlsSocket(req: Request): TLSSocket | null {
+  const socket: TLSSocket | undefined = (req as any).socket || (req as any).connection;
+  if (!socket) return null;
+  if (typeof (socket as any).getPeerCertificate !== 'function') return null;
+  if (!(socket as any).encrypted) return null;
+  return socket;
+}
+
+function sanitizeAltName(raw: unknown): string | undefined {
+  if (!raw) return undefined;
+  const text = String(raw);
+  const parts = text.split(/[,\s]+/);
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const idx = trimmed.indexOf(':');
+    if (idx >= 0) {
+      const value = trimmed.slice(idx + 1).trim();
+      if (value) return value;
+    } else if (trimmed) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function authenticateMutualTls(req: Request): AuthenticatedPrincipal | null {
+  const socket = getTlsSocket(req);
+  if (!socket) return null;
+
+  let cert: any;
+  try {
+    cert = socket.getPeerCertificate(true);
+  } catch (err) {
+    logger.audit('auth.mtls.failure', {
+      reason: 'certificate_read_error',
+      error: (err as Error).message,
+      path: req.path,
+    });
+    throw new AuthError(401, 'mtls.error', 'Failed to read peer certificate');
+  }
+
+  const hasCert = cert && Object.keys(cert).length > 0;
+  if (!hasCert) {
+    if (isProduction()) {
+      logger.audit('auth.mtls.failure', { reason: 'missing_certificate', path: req.path });
+      throw new AuthError(401, 'mtls.missing_cert', 'Client certificate required');
+    }
+    return null;
+  }
+
+  const allowSelfSigned = !isProduction() && process.env.KERNEL_ALLOW_INSECURE_MTLS === 'true';
+  const authorized = Boolean(socket.authorized);
+  if (!authorized && !allowSelfSigned) {
+    const rawReason = socket.authorizationError || 'client certificate not authorized';
+    const reason =
+      typeof rawReason === 'string'
+        ? rawReason
+        : rawReason instanceof Error
+        ? rawReason.message
+        : String(rawReason);
+    logger.audit('auth.mtls.failure', {
+      reason,
+      path: req.path,
+      fingerprint: cert.fingerprint256 || cert.fingerprint,
+    });
+    throw new AuthError(401, 'mtls.unauthorized', reason);
+  }
 
   try {
-    const cert = socket.getPeerCertificate(true);
-    if (!cert || Object.keys(cert).length === 0) return null;
-
-    const authorized = Boolean(socket.authorized);
-    const allowSelfSigned = (process.env.NODE_ENV !== 'production' && socket.authorizationError)
-      || process.env.KERNEL_ALLOW_INSECURE_MTLS === 'true';
-    if (!authorized && !allowSelfSigned) {
-      throw new AuthError(401, 'mtls.unauthorized', socket.authorizationError || 'client certificate not authorized');
-    }
-
-    const subject = cert.subject || {};
-    const id = subject.CN || subject.commonName || cert.subjectaltname || cert.subjectAltName;
-    if (!id) {
-      throw new AuthError(401, 'mtls.subject_missing', 'client certificate missing common name');
-    }
-
-    const roles = extractServiceRoles(String(id));
-
-    return {
-      id: String(id),
-      type: 'service',
-      roles,
+    const mapped = mapPrincipalFromCert(cert);
+    const commonName = cert.subject?.CN || cert.subject?.commonName || cert.subjectCN || cert.CN;
+    const altName = sanitizeAltName(cert.subjectaltname || cert.subjectAltName || cert.altNames);
+    const id = String(mapped?.id || commonName || altName || 'service-unknown');
+    const roles = Array.isArray(mapped?.roles) ? mapped.roles.map((r) => String(r)) : [];
+    const principal: AuthenticatedPrincipal = {
+      id,
+      type: mapped?.type === 'human' ? 'human' : 'service',
+      roles: Array.from(new Set(roles)),
       source: 'mtls',
       metadata: {
+        commonName: commonName || null,
+        subjectAltName: altName || null,
         fingerprint256: cert.fingerprint256 || cert.fingerprint || null,
+        authorized: authorized || allowSelfSigned,
+        authorizationError: socket.authorizationError || null,
       },
     };
+    logger.audit('auth.mtls.success', { subject: principal.id, roles: principal.roles, path: req.path });
+    return principal;
   } catch (err) {
+    logger.audit('auth.mtls.failure', {
+      reason: (err as Error).message,
+      path: req.path,
+      fingerprint: cert?.fingerprint256 || cert?.fingerprint,
+    });
     if (err instanceof AuthError) throw err;
-    throw new AuthError(401, 'mtls.error', (err as Error).message);
+    throw new AuthError(401, 'mtls.mapping_failed', 'Failed to map client certificate');
   }
 }
 
+function parseLocalDevPrincipal(req: Request): AuthenticatedPrincipal | null {
+  const headerValue = req.headers['x-local-dev-principal'];
+  if (!headerValue || isProduction()) return null;
+
+  const raw = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (!raw || typeof raw !== 'string') return null;
+
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    parsed = null;
+  }
+
+  const keyValues: Record<string, unknown> = {};
+  if (parsed && typeof parsed === 'object') {
+    Object.assign(keyValues, parsed);
+  } else {
+    const segments = raw.split(';');
+    for (const segment of segments) {
+      const trimmed = segment.trim();
+      if (!trimmed) continue;
+      const [k, ...rest] = trimmed.split('=');
+      if (!k) continue;
+      keyValues[k.trim().toLowerCase()] = rest.join('=').trim();
+    }
+    if (!keyValues.id) {
+      keyValues.id = raw.trim();
+    }
+  }
+
+  const id = String(keyValues.id || keyValues.subject || 'local-dev');
+  const typeRaw = String(keyValues.type || keyValues.principalType || 'service').toLowerCase();
+  const type: PrincipalType = typeRaw === 'human' ? 'human' : 'service';
+  const rolesRaw = keyValues.roles;
+  let roles: string[] = [];
+  if (Array.isArray(rolesRaw)) {
+    roles = rolesRaw.map((r) => String(r));
+  } else if (typeof rolesRaw === 'string') {
+    roles = rolesRaw
+      .split(/[\s,]+/)
+      .map((r) => r.trim())
+      .filter(Boolean);
+  }
+
+  const principal: AuthenticatedPrincipal = {
+    id,
+    type,
+    roles,
+    source: 'dev',
+    metadata: { header: 'x-local-dev-principal' },
+  };
+
+  logger.audit('auth.dev.success', { subject: principal.id, roles: principal.roles, path: req.path });
+  return principal;
+}
+
 export async function authenticateRequest(req: Request): Promise<AuthenticatedPrincipal> {
-  const authHeader = req.headers.authorization || req.headers.Authorization;
+  const certPrincipal = authenticateMutualTls(req);
+  if (certPrincipal) return certPrincipal;
+
+  const authHeader = req.headers.authorization || (req.headers as any).Authorization;
   if (typeof authHeader === 'string' && /^\s*Bearer\s+/i.test(authHeader)) {
     const token = authHeader.replace(/^\s*Bearer\s+/i, '').trim();
     if (!token) {
@@ -294,15 +402,8 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedPr
     }
   }
 
-  const certPrincipal = extractCertificatePrincipal(req);
-  if (certPrincipal) {
-    logger.audit('auth.success', {
-      subject: certPrincipal.id,
-      source: 'mtls',
-      path: req.path,
-    });
-    return certPrincipal;
-  }
+  const devPrincipal = parseLocalDevPrincipal(req);
+  if (devPrincipal) return devPrincipal;
 
   throw new AuthError(401, 'unauthenticated', 'Authentication required');
 }

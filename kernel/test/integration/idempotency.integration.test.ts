@@ -3,11 +3,11 @@ import request from 'supertest';
 import createKernelRouter from '../../src/routes/kernelRoutes';
 import * as dbModule from '../../src/db';
 import { MockDb } from '../utils/mockDb';
-import { enforcePolicyOrThrow } from '../../src/sentinelClient';
+import { enforcePolicyOrThrow } from '../../src/sentinel/sentinelClient';
 import signingProxy from '../../src/signingProxy';
 import { appendAuditEvent } from '../../src/auditStore';
 
-jest.mock('../../src/sentinelClient', () => ({
+jest.mock('../../src/sentinel/sentinelClient', () => ({
   enforcePolicyOrThrow: jest.fn(),
 }));
 

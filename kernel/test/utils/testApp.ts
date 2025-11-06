@@ -7,7 +7,7 @@ import {
   requireAnyAuthenticated,
   Roles,
 } from '../../src/rbac';
-import { setSentinelClient, resetSentinelClient } from '../../src/sentinelClient';
+import { setSentinelClient, resetSentinelClient } from '../../src/sentinel/sentinelClient';
 
 export type TestAppOpts = {
   mockSentinel?: any;      // optional test double for sentinel (must implement record, etc.)

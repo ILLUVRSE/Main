@@ -33,7 +33,7 @@ import {
   Principal,
   RoleName,
 } from '../rbac';
-import { enforcePolicyOrThrow, PolicyDecision } from '../sentinelClient';
+import { enforcePolicyOrThrow, PolicyDecision } from '../sentinel/sentinelClient';
 import idempotencyMiddleware from '../middleware/idempotency';
 import {
   handleKernelCreateRequest,
@@ -155,11 +155,9 @@ export default function createKernelRouter(): Router {
 
         // Policy decision (best-effort)
         try {
-          const decision = await enforcePolicyOrThrow('manifest.sign', { principal, manifest });
-          await appendAuditEvent('policy.decision', { action: 'manifest.sign', manifestId: manifest.id ?? null, decision });
+          await enforcePolicyOrThrow('manifest.sign', { principal, manifest });
         } catch (polErr) {
           if ((polErr as any).decision) {
-            await appendAuditEvent('policy.decision', { action: 'manifest.sign', manifestId: manifest.id ?? null, decision: (polErr as any).decision });
             return res.status(403).json({ error: 'policy.denied', reason: (polErr as any).decision?.reason });
           }
           console.warn('sentinel evaluate failed for manifest.sign, continuing:', (polErr as Error).message || polErr);
@@ -241,10 +239,8 @@ export default function createKernelRouter(): Router {
       // Policy
       try {
         const decision: PolicyDecision = await enforcePolicyOrThrow('manifest.update', { principal, manifest });
-        await appendAuditEvent('policy.decision', { action: 'manifest.update', manifestId: manifest.id, decision });
       } catch (err) {
         if ((err as any).decision?.allowed === false) {
-          await appendAuditEvent('policy.decision', { action: 'manifest.update', manifestId: manifest.id, decision: (err as any).decision });
           return res.status(403).json({ error: 'policy.denied', reason: (err as any).decision?.reason });
         }
         console.warn('sentinel evaluate failed for manifest.update, continuing:', (err as Error).message || err);
@@ -525,11 +521,9 @@ export default function createKernelRouter(): Router {
       let client: PoolClient | undefined;
       try {
         try {
-          const decision = await enforcePolicyOrThrow('allocation.request', { principal, allocation: body });
-          await appendAuditEvent('policy.decision', { action: 'allocation.request', allocation: { entityId: body.entity_id, delta: body.delta }, decision });
+          await enforcePolicyOrThrow('allocation.request', { principal, allocation: body });
         } catch (polErr) {
           if ((polErr as any).decision?.allowed === false) {
-            await appendAuditEvent('policy.decision', { action: 'allocation.request', allocation: { entityId: body.entity_id, delta: body.delta }, decision: (polErr as any).decision });
             return res.status(403).json({ error: 'policy.denied', reason: (polErr as any).decision?.reason });
           }
           console.warn('sentinel evaluate failed for allocation.request, continuing:', (polErr as Error).message || polErr);

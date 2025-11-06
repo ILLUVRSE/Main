@@ -1,7 +1,7 @@
 // kernel/scripts/check_sentinel.ts
 // Quick verification helper to test sentinelClient + mockSentinel wiring.
 
-import { setSentinelClient, recordEvent } from '../src/sentinelClient';
+import { setSentinelClient, recordEvent } from '../src/sentinel/sentinelClient';
 import { mockSentinel } from '../test/mocks/mockSentinel';
 
 (async () => {

@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"reflect"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ILLUVRSE/Main/kernel/internal/audit"
+	"github.com/ILLUVRSE/Main/kernel/internal/auth"
 	"github.com/ILLUVRSE/Main/kernel/internal/canonical"
 	"github.com/ILLUVRSE/Main/kernel/internal/config"
 	"github.com/ILLUVRSE/Main/kernel/internal/signer"
@@ -36,10 +38,12 @@ func RegisterRoutes(app interface{}, r chi.Router) {
 	// kernel endpoints (minimal Priority A)
 
 	// Division routes (register + fetch)
+	// These handlers are implemented in kernel/internal/handlers/division.go
 	r.Post("/kernel/division", handleDivisionPost(cfg, db, sgn, store))
 	r.Get("/kernel/division/{id}", handleDivisionGet(cfg, db, store))
 
 	// Agent routes
+	// Implementations live in kernel/internal/handlers/agent.go
 	r.Post("/kernel/agent", handleAgentPost(cfg, db, sgn, store))
 	r.Get("/kernel/agent/{id}/state", handleAgentGet(cfg, db, store))
 
@@ -49,10 +53,11 @@ func RegisterRoutes(app interface{}, r chi.Router) {
 
 	// Sign & Audit
 	r.Post("/kernel/sign", handleSign(sgn, store))
+	// Audit handlers implemented in kernel/internal/handlers/audit.go
 	r.Post("/kernel/audit", handleAuditPost(cfg, sgn, store))
 	r.Get("/kernel/audit/{id}", handleAuditGet(store))
 
-	// Reasoning trace
+	// Reasoning trace (implemented in kernel/internal/handlers/reason.go)
 	r.Get("/kernel/reason/{node}", handleReasonGet(cfg, store))
 }
 
@@ -116,7 +121,7 @@ func extractDependencies(app interface{}) (cfg *config.Config, db *sql.DB, sgn s
 	return cfg, dbp, sgnCast, storeCast, true
 }
 
-// --- Handlers ---
+// --- Handlers (core handlers retained here; division/agent/reason handled in separate files) ---
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "ts": time.Now().UTC()})
@@ -146,6 +151,20 @@ func handleReady(cfg *config.Config, db *sql.DB, store audit.Store) http.Handler
 // Response: ManifestSignature
 func handleSign(s signer.Signer, store audit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Production RBAC: allow service principals (mTLS peer CN) OR SuperAdmin role.
+		if os.Getenv("NODE_ENV") == "production" {
+			ai := auth.FromContext(r.Context())
+			if ai == nil {
+				http.Error(w, "unauthenticated", http.StatusUnauthorized)
+				return
+			}
+			// If no PeerCN (not a service principal), require SuperAdmin role.
+			if ai.PeerCN == "" && !auth.HasRole(ai, auth.RoleSuperAdmin) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+
 		var req struct {
 			Manifest interface{} `json:"manifest"`
 			SignerId string      `json:"signerId"`
@@ -204,70 +223,6 @@ func handleSign(s signer.Signer, store audit.Store) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, ms)
-	}
-}
-
-// POST /kernel/audit
-// Accepts { eventType: string, payload: object, metadata?: object }
-// If REQUIRE_MTLS is true the request must be TLS with a peer cert (checked by main's TLS setup).
-func handleAuditPost(cfg *config.Config, s signer.Signer, store audit.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// mTLS guard if configured (main should configure TLS)
-		if cfg.RequireMTLS {
-			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-				http.Error(w, "mTLS required", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		var req struct {
-			EventType string      `json:"eventType"`
-			Payload   interface{} `json:"payload"`
-			Metadata  interface{} `json:"metadata,omitempty"`
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.UseNumber()
-		if err := dec.Decode(&req); err != nil {
-			http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if req.EventType == "" {
-			http.Error(w, "eventType required", http.StatusBadRequest)
-			return
-		}
-
-		ev := &audit.AuditEvent{
-			EventType: req.EventType,
-			Payload:   req.Payload,
-			Metadata:  req.Metadata,
-			Ts:        time.Now().UTC(),
-		}
-		if err := store.AppendAuditEvent(r.Context(), ev, s); err != nil {
-			http.Error(w, "append audit event: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		// Accepting (202) to indicate append performed
-		writeJSON(w, http.StatusAccepted, ev)
-	}
-}
-
-func handleAuditGet(store audit.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		if id == "" {
-			http.Error(w, "id required", http.StatusBadRequest)
-			return
-		}
-		ev, err := store.GetAuditEvent(r.Context(), id)
-		if err != nil {
-			if err == audit.ErrNotFound {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			http.Error(w, "get audit: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, ev)
 	}
 }
 

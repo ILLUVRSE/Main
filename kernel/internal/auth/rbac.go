@@ -1,10 +1,8 @@
 package auth
 
-import (
-	"net/http"
-)
+import "strings"
 
-// Canonical role names used across the system.
+// Canonical role names used throughout the codebase.
 const (
 	RoleSuperAdmin   = "SuperAdmin"
 	RoleDivisionLead = "DivisionLead"
@@ -12,70 +10,73 @@ const (
 	RoleAuditor      = "Auditor"
 )
 
-// HasRole returns true if the provided AuthInfo contains the requested role.
-// It checks:
-// 1) explicit Roles slice, and
-// 2) fallback: peer CN equals the role string (useful for quick tests or service identities).
+// HasRole returns true if the provided AuthInfo contains the (canonical) role.
+// Role matching is case-insensitive and accepts common variants (underscores/hyphens).
 func HasRole(ai *AuthInfo, role string) bool {
-	if ai == nil {
+	if ai == nil || len(ai.Roles) == 0 {
 		return false
 	}
+	want := normalizeRole(role)
 	for _, r := range ai.Roles {
-		if r == role {
+		if normalizeRole(r) == want {
 			return true
 		}
-	}
-	// Fallback: if peer CN exactly equals the role name, treat it as having that role.
-	// This is NOT a substitute for proper OIDC / role mapping, but is handy for bootstrapping.
-	if ai.PeerCN != "" && ai.PeerCN == role {
-		return true
 	}
 	return false
 }
 
-// RequireRole returns a middleware that allows the request to continue only if
-// the request's AuthInfo (in context) has the given role. Otherwise 403 is returned.
-func RequireRole(role string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ai := FromContext(r.Context())
-			if HasRole(ai, role) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			http.Error(w, "forbidden", http.StatusForbidden)
-		})
+// HasAnyRole returns true if AuthInfo has any of the provided roles.
+func HasAnyRole(ai *AuthInfo, roles ...string) bool {
+	if ai == nil || len(ai.Roles) == 0 || len(roles) == 0 {
+		return false
 	}
+	for _, want := range roles {
+		if HasRole(ai, want) {
+			return true
+		}
+	}
+	return false
 }
 
-// RequireAnyRole returns middleware that allows the request if the AuthInfo has
-// any one of the provided roles.
-func RequireAnyRole(roles ...string) func(http.Handler) http.Handler {
-	roleSet := make(map[string]struct{}, len(roles))
-	for _, rr := range roles {
-		roleSet[rr] = struct{}{}
+// MapClaimsToRoles extracts roles from token claims and maps them to canonical names.
+// It uses the existing extractRolesFromClaims helper and then normalizes/mappings.
+func MapClaimsToRoles(claims map[string]interface{}) []string {
+	raw := extractRolesFromClaims(claims)
+	out := make([]string, 0, len(raw))
+	seen := map[string]struct{}{}
+	for _, r := range raw {
+		c := normalizeRole(r)
+		if c == "" {
+			continue
+		}
+		// Map common aliases to canonical role names.
+		switch c {
+		case "superadmin", "super_admin", "super-admin":
+			c = RoleSuperAdmin
+		case "divisionlead", "division_lead", "division-lead", "divisionleadership":
+			c = RoleDivisionLead
+		case "operator", "ops", "operator_role":
+			c = RoleOperator
+		case "auditor", "audit":
+			c = RoleAuditor
+		default:
+			// Capitalize first letter for readability (e.g., "developer" -> "Developer")
+			c = strings.Title(strings.ToLower(c))
+		}
+		if _, ok := seen[c]; !ok {
+			seen[c] = struct{}{}
+			out = append(out, c)
+		}
 	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ai := FromContext(r.Context())
-			if ai == nil {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-			for _, role := range ai.Roles {
-				if _, ok := roleSet[role]; ok {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-			// fallback: check peer CN against roles
-			for rr := range roleSet {
-				if ai.PeerCN == rr {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-			http.Error(w, "forbidden", http.StatusForbidden)
-		})
-	}
+	return out
+}
+
+// normalizeRole lowercases and removes spaces/underscores/hyphens for comparison.
+func normalizeRole(r string) string {
+	r = strings.TrimSpace(r)
+	r = strings.ToLower(r)
+	r = strings.ReplaceAll(r, "_", "")
+	r = strings.ReplaceAll(r, "-", "")
+	r = strings.ReplaceAll(r, " ", "")
+	return r
 }

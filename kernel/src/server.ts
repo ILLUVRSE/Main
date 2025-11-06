@@ -21,6 +21,16 @@ import { initOidc } from './auth/oidc';
 import { authMiddleware } from './auth/middleware';
 import { getPrincipalFromRequest, requireRoles, requireAnyAuthenticated, Roles } from './rbac';
 import { createOpenApiValidator } from './middleware/openapiValidator';
+import { metricsMiddleware } from './middleware/metrics';
+import {
+  getMetrics,
+  getMetricsContentType,
+  incrementKmsProbeFailure,
+  incrementKmsProbeSuccess,
+  incrementReadinessFailure,
+  incrementReadinessSuccess,
+  incrementServerStart,
+} from './metrics/prometheus';
 
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -43,35 +53,6 @@ function info(...args: any[]) { console.info(LOG_PREFIX, ...args); }
 function warn(...args: any[]) { console.warn(LOG_PREFIX, ...args); }
 function error(...args: any[]) { console.error(LOG_PREFIX, ...args); }
 function debug(...args: any[]) { if ((process.env.LOG_LEVEL || '').toLowerCase() === 'debug') console.debug(LOG_PREFIX, ...args); }
-
-const metrics = {
-  server_start_total: 0,
-  readiness_success_total: 0,
-  readiness_failure_total: 0,
-  kms_probe_success_total: 0,
-  kms_probe_failure_total: 0,
-};
-
-function metricsText(): string {
-  return [
-    '# HELP kernel_server_start_total Count of server starts',
-    '# TYPE kernel_server_start_total counter',
-    'kernel_server_start_total ' + metrics.server_start_total,
-    '# HELP kernel_readiness_success_total Count of successful readiness probes',
-    '# TYPE kernel_readiness_success_total counter',
-    'kernel_readiness_success_total ' + metrics.readiness_success_total,
-    '# HELP kernel_readiness_failure_total Count of failed readiness probes',
-    '# TYPE kernel_readiness_failure_total counter',
-    'kernel_readiness_failure_total ' + metrics.readiness_failure_total,
-    '# HELP kernel_kms_probe_success_total Count of successful KMS probes',
-    '# TYPE kernel_kms_probe_success_total counter',
-    'kernel_kms_probe_success_total ' + metrics.kms_probe_success_total,
-    '# HELP kernel_kms_probe_failure_total Count of failed KMS probes',
-    '# TYPE kernel_kms_probe_failure_total counter',
-    'kernel_kms_probe_failure_total ' + metrics.kms_probe_failure_total,
-    '',
-  ].join('\n');
-}
 
 /**
  * checkKmsReachable
@@ -120,24 +101,24 @@ async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
     try {
       await waitForDb(5_000, 500);
     } catch (e) {
-      metrics.readiness_failure_total++;
+      incrementReadinessFailure();
       return { ok: false, details: 'db.unreachable' };
     }
 
     if (REQUIRE_KMS || KMS_ENDPOINT) {
       const reachable = await checkKmsReachable(3000);
       if (!reachable) {
-        metrics.kms_probe_failure_total++;
-        metrics.readiness_failure_total++;
+        incrementKmsProbeFailure();
+        incrementReadinessFailure();
         return { ok: false, details: 'kms.unreachable' };
       }
-      metrics.kms_probe_success_total++;
+      incrementKmsProbeSuccess();
     }
 
-    metrics.readiness_success_total++;
+    incrementReadinessSuccess();
     return { ok: true };
   } catch (err) {
-    metrics.readiness_failure_total++;
+    incrementReadinessFailure();
     return { ok: false, details: (err as Error).message || 'unknown' };
   }
 }
@@ -148,6 +129,7 @@ async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
 export async function createApp() {
   const app = express();
   app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '1mb' }));
+  app.use(metricsMiddleware);
 
   try {
     app.use((req: Request, res: Response, next: NextFunction) => {
@@ -210,8 +192,8 @@ export async function createApp() {
   });
 
   app.get('/metrics', (_req: Request, res: Response) => {
-    res.setHeader('Content-Type', 'text/plain; version=0.0.4');
-    res.send(metricsText());
+    res.setHeader('Content-Type', getMetricsContentType());
+    res.send(getMetrics());
   });
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -242,11 +224,11 @@ async function start() {
       const ok = await checkKmsReachable(3_000);
       if (!ok) {
         error('Fatal: REQUIRE_KMS=true but KMS_ENDPOINT is unreachable. Exiting.');
-        metrics.kms_probe_failure_total++;
+        incrementKmsProbeFailure();
         process.exit(1);
       }
       info('KMS probe succeeded.');
-      metrics.kms_probe_success_total++;
+      incrementKmsProbeSuccess();
     }
 
     if (process.env.OIDC_ISSUER) {
@@ -301,7 +283,7 @@ async function start() {
           warn('Client certificate required but MTLS_CLIENT_CA is not configured. Using default trust store.');
         }
         const server = https.createServer(tlsOptions, app).listen(PORT, () => {
-          metrics.server_start_total++;
+          incrementServerStart();
           info('Kernel HTTPS server listening on port ' + PORT);
           readinessCheck().then((r) => {
             if (!r.ok) warn('Initial readiness check failed:', r.details);
@@ -329,7 +311,7 @@ async function start() {
     }
 
     const server = app.listen(PORT, () => {
-      metrics.server_start_total++;
+      incrementServerStart();
       info('Kernel server listening on port ' + PORT);
       readinessCheck().then((r) => {
         if (!r.ok) warn('Initial readiness check failed:', r.details);

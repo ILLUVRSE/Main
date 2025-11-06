@@ -302,13 +302,17 @@ async function start() {
     const app = await createApp();
 
     if (MTLS_CERT && MTLS_KEY) {
-      info('Starting HTTPS server (mTLS config present). MTLS_REQUIRE_CLIENT_CERT=' + MTLS_REQUIRE_CLIENT_CERT);
+      const shouldRequireClientCert = MTLS_REQUIRE_CLIENT_CERT || NODE_ENV === 'production';
+      info(
+        'Starting HTTPS server (mTLS config present). requestCert=' + shouldRequireClientCert +
+          ' NODE_ENV=' + NODE_ENV,
+      );
       try {
         const tlsOptions: https.ServerOptions = {
           key: fs.readFileSync(MTLS_KEY),
           cert: fs.readFileSync(MTLS_CERT),
-          requestCert: MTLS_REQUIRE_CLIENT_CERT,
-          rejectUnauthorized: MTLS_REQUIRE_CLIENT_CERT,
+          requestCert: shouldRequireClientCert,
+          rejectUnauthorized: shouldRequireClientCert,
         };
         if (MTLS_CLIENT_CA) {
           try {
@@ -316,6 +320,8 @@ async function start() {
           } catch (e) {
             warn('Failed to read MTLS_CLIENT_CA:', (e as Error).message || e);
           }
+        } else if (shouldRequireClientCert) {
+          warn('Client certificate required but MTLS_CLIENT_CA is not configured. Using default trust store.');
         }
         const server = https.createServer(tlsOptions, app).listen(PORT, () => {
           metrics.server_start_total++;

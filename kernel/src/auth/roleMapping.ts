@@ -6,6 +6,33 @@
 
 import { Principal as RbacPrincipal, Roles } from '../rbac';
 
+function loadServiceRoleMap(): Record<string, string[]> {
+  const raw = process.env.SERVICE_ROLE_MAP;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    const map: Record<string, string[]> = {};
+    if (parsed && typeof parsed === 'object') {
+      for (const [key, value] of Object.entries(parsed)) {
+        if (!value) continue;
+        if (Array.isArray(value)) {
+          map[key] = value.map((v) => String(v));
+        } else if (typeof value === 'string') {
+          map[key] = value
+            .split(/[\s,]+/)
+            .map((v) => v.trim())
+            .filter(Boolean);
+        }
+      }
+    }
+    return map;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('roleMapping: failed to parse SERVICE_ROLE_MAP:', (err as Error).message);
+    return {};
+  }
+}
+
 export type Principal = RbacPrincipal;
 
 /**
@@ -80,24 +107,59 @@ export function principalFromOidcClaims(claims: any): Principal {
  * principalFromCert
  */
 export function principalFromCert(cert: any): Principal {
-  let cn: string | undefined = undefined;
+  const roleMap = loadServiceRoleMap();
 
+  const candidates: string[] = [];
   try {
-    if (!cert) return { type: 'service', id: 'service-unknown', roles: [Roles.OPERATOR] };
+    if (!cert) {
+      return { type: 'service', id: 'service-unknown', roles: [Roles.OPERATOR] };
+    }
 
-    if (typeof cert === 'string') cn = cert;
-    else if (cert.subject && typeof cert.subject === 'object') cn = String(cert.subject.CN || cert.subject.commonName || '');
-    else if (cert.subjectString) cn = String(cert.subjectString);
-    else if (cert.commonName) cn = String(cert.commonName);
-    else if (cert.CN) cn = String(cert.CN);
-    else cn = JSON.stringify(cert).slice(0, 128);
+    if (typeof cert === 'string' && cert.trim()) {
+      candidates.push(cert.trim());
+    }
+
+    const subject = cert.subject || cert.subjectCertificate || {};
+    if (subject && typeof subject === 'object') {
+      const cn = subject.CN || subject.commonName;
+      if (cn && typeof cn === 'string') candidates.push(cn);
+    }
+
+    if (typeof cert.subjectString === 'string' && cert.subjectString.includes('/CN=')) {
+      const match = cert.subjectString.match(/\/CN=([^\/,;+]+)/);
+      if (match?.[1]) candidates.push(match[1]);
+    }
+
+    if (typeof cert.CN === 'string') candidates.push(cert.CN);
+    if (typeof cert.commonName === 'string') candidates.push(cert.commonName);
+
+    const rawAlt = cert.subjectaltname || cert.subjectAltName || cert.altNames;
+    if (rawAlt) {
+      const list = Array.isArray(rawAlt) ? rawAlt : String(rawAlt).split(/[,\s]+/);
+      for (const entry of list) {
+        if (!entry) continue;
+        const text = String(entry).trim();
+        if (!text) continue;
+        const idx = text.indexOf(':');
+        const value = idx >= 0 ? text.slice(idx + 1) : text;
+        if (value) candidates.push(value.trim());
+      }
+    }
   } catch {
-    cn = undefined;
+    // ignore parsing errors; fall back below
   }
 
-  const id = cn || (cert?.subject ? JSON.stringify(cert.subject) : 'service-unknown');
-  const isAuditor = typeof id === 'string' && /auditor|audit/i.test(id);
-  return { type: 'service', id, roles: isAuditor ? [Roles.AUDITOR] : [Roles.OPERATOR] };
+  const normalized = candidates.map((c) => c && c.trim()).filter(Boolean) as string[];
+  const uniqueCandidates = Array.from(new Set(normalized));
+  const matchedId = uniqueCandidates.find((c) => roleMap[c] && roleMap[c].length > 0);
+  const id = matchedId || uniqueCandidates[0] || 'service-unknown';
+
+  let roles: string[] | undefined = matchedId ? roleMap[matchedId] : undefined;
+  if (!roles || roles.length === 0) {
+    roles = /auditor|audit/i.test(id) ? [Roles.AUDITOR] : [Roles.OPERATOR];
+  }
+
+  return { type: 'service', id, roles: Array.from(new Set(roles)) };
 }
 
 export default {

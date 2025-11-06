@@ -1,0 +1,55 @@
+{
+  "name": "kernel-dev-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ILLUVRSE Kernel service",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "migrate": "psql \"$POSTGRES_URL\" -f sql/migrations/001_init.sql",
+    "lint": "eslint . --ext .ts",
+    "test": "jest --colors --runInBand",
+    "docker:build": "docker build -t illuvrse-kernel:local -f Dockerfile .",
+    "docker:run": "docker run --rm -e POSTGRES_URL=${POSTGRES_URL:-} -e KMS_ENDPOINT=${KMS_ENDPOINT:-} -p 3000:3000 illuvrse-kernel:local",
+    "docker:local": "npm run docker:build && npm run docker:run"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-openapi-validator": "^5.6.0",
+    "jose": "^4.15.9",
+    "js-yaml": "^4.1.0",
+    "node-fetch": "^2.6.7",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "@types/js-yaml": "^4.0.5",
+    "@types/node": "^20.19.24",
+    "@types/node-fetch": "^2.6.2",
+    "@types/pg": "^8.6.6",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3",
+    "jest": "^29.6.1",
+    "ts-jest": "^29.1.0",
+    "@types/jest": "^29.5.3",
+    "supertest": "^6.3.3",
+    "@types/supertest": "^2.0.12"
+  },
+  "kernel:acceptance": [
+    "1) docker:build must build the image from the kernel directory: `npm run docker:build` (from kernel/).",
+    "2) docker:run must start the image and allow health checks: `POSTGRES_URL=... npm run docker:run` -> `curl /health` returns {status:'ok'}.",
+    "3) docker:local is a convenience wrapper: `npm run docker:local` builds and runs the image.",
+    "4) npm run build and npm run start must function correctly inside the container: `node dist/server.js` starts the server."
+  ],
+  "directories": {
+    "test": "test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
+

@@ -9,11 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -27,124 +26,32 @@ type jwkKey struct {
 	E   string `json:"e"`
 }
 
-// jwks document
-type jwksDoc struct {
-	Keys []jwkKey `json:"keys"`
-}
-
-// JWKSCache fetches and caches JWKS keys.
-// It supports only RSA keys (kty == "RSA") used with RS256.
-type JWKSCache struct {
-	url    string
-	ttl    time.Duration
-	mu     sync.RWMutex
-	keys   map[string]*rsa.PublicKey
-	expiry time.Time
-	client *http.Client
-}
-
-// NewJWKSCache constructs a JWKSCache that will fetch from jwksURL and cache keys for ttl.
-func NewJWKSCache(jwksURL string, ttl time.Duration) *JWKSCache {
-	return &JWKSCache{
-		url:    jwksURL,
-		ttl:    ttl,
-		keys:   make(map[string]*rsa.PublicKey),
-		client: &http.Client{Timeout: 10 * time.Second},
+// getKeyFromCache retrieves the rsa.PublicKey for the given kid from the provided JWKSCache.
+// This function adapts the generic crypto.PublicKey returned by JWKSCache.GetKey into *rsa.PublicKey.
+func getKeyFromCache(jwks *JWKSCache, kid string) (*rsa.PublicKey, error) {
+	if jwks == nil {
+		return nil, fmt.Errorf("jwks cache is nil")
 	}
-}
-
-// getKey returns the RSA public key for kid, refreshing the cache if needed.
-func (c *JWKSCache) getKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
-	// fast path: read lock
-	c.mu.RLock()
-	if key, ok := c.keys[kid]; ok && time.Now().Before(c.expiry) {
-		c.mu.RUnlock()
-		return key, nil
+	key, err := jwks.GetKey(kid)
+	if err != nil {
+		return nil, fmt.Errorf("get jwk key: %w", err)
 	}
-	c.mu.RUnlock()
-
-	// refresh
-	if err := c.refresh(ctx); err != nil {
-		return nil, err
-	}
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	key, ok := c.keys[kid]
+	pub, ok := key.(*rsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("kid %s not found in jwks", kid)
+		return nil, fmt.Errorf("jwks: key %s is not rsa", kid)
 	}
-	return key, nil
+	return pub, nil
 }
 
-// refresh downloads the JWKS document and populates keys.
-func (c *JWKSCache) refresh(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch jwks: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("jwks endpoint returned %d", resp.StatusCode)
-	}
-	var doc jwksDoc
-	dec := json.NewDecoder(resp.Body)
-	if err := dec.Decode(&doc); err != nil {
-		return fmt.Errorf("decode jwks: %w", err)
-	}
-	tmp := make(map[string]*rsa.PublicKey)
-	for _, k := range doc.Keys {
-		if strings.ToUpper(k.Kty) != "RSA" {
-			// skip non-RSA keys in this simple implementation
-			continue
-		}
-		nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
-		if err != nil {
-			return fmt.Errorf("decode n for kid %s: %w", k.Kid, err)
-		}
-		eBytes, err := base64.RawURLEncoding.DecodeString(k.E)
-		if err != nil {
-			return fmt.Errorf("decode e for kid %s: %w", k.Kid, err)
-		}
-		// e is typically small (65537). Interpret big-endian bytes
-		e := 0
-		for _, by := range eBytes {
-			e = e<<8 + int(by)
-		}
-		if e == 0 {
-			// fallback: try big.Int
-			ebi := new(big.Int).SetBytes(eBytes)
-			e = int(ebi.Int64())
-		}
-		pub := &rsa.PublicKey{
-			N: new(big.Int).SetBytes(nBytes),
-			E: e,
-		}
-		tmp[k.Kid] = pub
-	}
-
-	c.mu.Lock()
-	c.keys = tmp
-	c.expiry = time.Now().Add(c.ttl)
-	c.mu.Unlock()
-	return nil
-}
-
-// ValidateJWT validates a RS256 JWT token using the JWKS cache. It validates:
-// - signature
-// - exp > now
-// - iss == issuer (if provided)
-// - aud contains audience (if provided)
-// On success it returns the claims map and the roles extracted (if any).
+// ValidateJWT validates an RS256 JWT token using the JWKS cache.
+// Returns the claims map and roles extracted from it.
 func ValidateJWT(ctx context.Context, token string, jwks *JWKSCache, issuer string, audience string) (map[string]interface{}, []string, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, nil, errors.New("token must have 3 parts")
 	}
+
+	// header
 	headerB, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode header: %w", err)
@@ -158,13 +65,14 @@ func ValidateJWT(ctx context.Context, token string, jwks *JWKSCache, issuer stri
 	if algVal != "RS256" {
 		return nil, nil, fmt.Errorf("unsupported alg %s", algVal)
 	}
-	// get key
-	pub, err := jwks.getKey(ctx, kidVal)
+
+	// find key
+	pub, err := getKeyFromCache(jwks, kidVal)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get jwk key: %w", err)
 	}
 
-	// decode payload
+	// payload
 	payloadB, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode payload: %w", err)
@@ -174,7 +82,7 @@ func ValidateJWT(ctx context.Context, token string, jwks *JWKSCache, issuer stri
 		return nil, nil, fmt.Errorf("unmarshal claims: %w", err)
 	}
 
-	// verify signature: verify rsa PKCS1v15 with SHA256 over signing input
+	// signature verification
 	signatureB, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode signature: %w", err)
@@ -185,7 +93,7 @@ func ValidateJWT(ctx context.Context, token string, jwks *JWKSCache, issuer stri
 		return nil, nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
-	// Validate claims: exp, nbf (opt), iss, aud
+	// Validate claims: exp, nbf, iss, aud
 	now := time.Now().Unix()
 	if expV, ok := claims["exp"]; ok {
 		expFloat, okf := toFloat64(expV)
@@ -226,7 +134,6 @@ func ValidateJWT(ctx context.Context, token string, jwks *JWKSCache, issuer stri
 }
 
 func rsaVerify(pub *rsa.PublicKey, hash []byte, sig []byte) error {
-	// Use crypto.SHA256
 	return rsa.VerifyPKCS1v15(pub, crypto.SHA256, hash, sig)
 }
 
@@ -241,7 +148,6 @@ func toFloat64(v interface{}) (float64, bool) {
 		}
 		return 0, false
 	case string:
-		// try parse
 		if f, err := strconv.ParseFloat(x, 64); err == nil {
 			return f, true
 		}
@@ -265,11 +171,7 @@ func okAud(aud interface{}, expected string) bool {
 	return false
 }
 
-// extractRolesFromClaims attempts to find roles in common claim locations:
-// - "roles" claim (array of strings)
-// - "realm_access.roles" (Keycloak style)
-// - "resource_access.<client>.roles" (Keycloak)
-// - "scope" (space-separated string) -> treat as roles
+// extractRolesFromClaims attempts to find roles in common claim locations.
 func extractRolesFromClaims(claims map[string]interface{}) []string {
 	out := make([]string, 0)
 	// direct roles
@@ -337,40 +239,44 @@ func extractRolesFromClaims(claims map[string]interface{}) []string {
 	return out
 }
 
-// OIDCMiddleware returns a middleware that will validate a Bearer token (if present)
-// and populate the Roles on the request's AuthInfo. It does NOT overwrite PeerCN.
+// OIDCMiddleware validates Bearer token (if present) and populates Roles on AuthInfo.
 func OIDCMiddleware(jwks *JWKSCache, issuer, audience string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ai := FromContext(r.Context())
 			if ai == nil {
-				// ensure we have an AuthInfo in context
 				ai = &AuthInfo{}
 				ctx := context.WithValue(r.Context(), ctxKeyAuthInfo, ai)
 				r = r.WithContext(ctx)
 			}
-			// prefer token in AuthInfo (populated by auth middleware) but also check header
+			// Prefer Bearer token from AuthInfo or header
 			token := ai.BearerToken
 			if token == "" {
-				if authz := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(authz), "bearer ") {
-					token = strings.TrimSpace(authz[7:])
+				ah := r.Header.Get("Authorization")
+				if strings.HasPrefix(strings.ToLower(ah), "bearer ") {
+					token = strings.TrimSpace(ah[len("bearer "):])
 				}
 			}
 			if token == "" {
-				// no token — proceed without roles
 				next.ServeHTTP(w, r)
 				return
 			}
-			claims, roles, err := ValidateJWT(r.Context(), token, jwks, issuer, audience)
+
+			// Validate token and log failures for diagnosis.
+			_, roles, err := ValidateJWT(r.Context(), token, jwks, issuer, audience)
 			if err != nil {
-				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
+				var jerr error
+				if jwks != nil {
+					jerr = jwks.LastError()
+				}
+				log.Printf("[oidc] token validation failed: %v jwks.last_err=%v", err, jerr)
+				next.ServeHTTP(w, r)
 				return
 			}
-			// attach roles and claims to AuthInfo
+
 			ai.Roles = roles
-			// Optionally store claims somewhere (not part of AuthInfo for now)
-			_ = claims
 			next.ServeHTTP(w, r)
 		})
 	}
 }
+

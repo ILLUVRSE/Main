@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/x509"
+	"log"
 	"net/http"
 	"strings"
 
@@ -23,6 +24,12 @@ type AuthInfo struct {
 
 	// Raw bearer token (if provided). Token validation is not performed by this middleware.
 	BearerToken string
+
+	// Subject (sub claim) extracted from validated token (populated by OIDC middleware).
+	Subject string
+
+	// Issuer (iss claim) extracted from validated token (populated by OIDC middleware).
+	Issuer string
 
 	// Derived roles (populated by RBAC/oidc helper later).
 	Roles []string
@@ -74,6 +81,11 @@ func NewMiddleware(cfg *config.Config) func(next http.Handler) http.Handler {
 					ai.BearerToken = strings.TrimSpace(authz[7:])
 				}
 			}
+
+			// Structured debug: show what was extracted (no secrets)
+			tokenPresent := ai.BearerToken != ""
+			log.Printf("[auth] principal extracted peer_cn=%q token_present=%v require_mtls=%v",
+				ai.PeerCN, tokenPresent, cfg.RequireMTLS)
 
 			// place AuthInfo into context for downstream use
 			ctx := context.WithValue(r.Context(), ctxKeyAuthInfo, ai)

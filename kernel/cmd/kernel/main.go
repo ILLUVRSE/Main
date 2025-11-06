@@ -21,6 +21,7 @@ import (
 	"github.com/ILLUVRSE/Main/kernel/internal/handlers"
 	"github.com/ILLUVRSE/Main/kernel/internal/keys"
 	"github.com/ILLUVRSE/Main/kernel/internal/signer"
+	tlsutil "github.com/ILLUVRSE/Main/kernel/internal/tls"
 )
 
 // AppContext holds shared dependencies passed to handlers.
@@ -94,8 +95,6 @@ func main() {
 	// Key registry - register the signer public key so auditors can discover it
 	reg := keys.NewRegistry()
 	if pk := signClient.PublicKey(); pk != nil {
-		// Attempt to obtain signerId by asking signer to sign a small probe.
-		// This yields the signerId returned by Sign(). This is cheap and safe for local signer.
 		if sig, sid, err := signClient.Sign([]byte("kernel-registry-probe")); err == nil && sid != "" && len(pk) > 0 && len(sig) > 0 {
 			reg.AddSigner(sid, pk, "Ed25519")
 			log.Printf("registered signer %s in key registry", sid)
@@ -124,7 +123,6 @@ func main() {
 		s3Prefix := strings.TrimSpace(os.Getenv("S3_PREFIX")) // optional
 
 		if kafkaBrokersEnv != "" && kafkaTopic != "" && s3Bucket != "" {
-			// parse brokers
 			rawBrokers := strings.Split(kafkaBrokersEnv, ",")
 			brokers := make([]string, 0, len(rawBrokers))
 			for _, b := range rawBrokers {
@@ -134,12 +132,10 @@ func main() {
 				}
 			}
 
-			// create kafka producer
 			kafkaCfg := audit.KafkaProducerConfig{
 				Brokers:     brokers,
 				Topic:       kafkaTopic,
 				MaxAttempts: 3,
-				// WriteTimeout left as zero -> defaults inside constructor
 			}
 			producer, err := audit.NewKafkaProducer(kafkaCfg)
 			if err != nil {
@@ -147,15 +143,12 @@ func main() {
 			}
 			log.Printf("kafka producer initialized (brokers=%v topic=%s)", brokers, kafkaTopic)
 
-			// create S3 archiver
 			archiver, err := audit.NewS3Archiver(context.Background(), s3Bucket, s3Prefix)
 			if err != nil {
-				// archiver is critical to our durable pipeline; fail-fast so we don't lose events.
 				log.Fatalf("failed to initialize s3 archiver: %v", err)
 			}
 			log.Printf("s3 archiver initialized (bucket=%s prefix=%s)", s3Bucket, s3Prefix)
 
-			// streamer config from env (with defaults)
 			batchSize := 10
 			if v := strings.TrimSpace(os.Getenv("STREAM_BATCH_SIZE")); v != "" {
 				if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -175,7 +168,6 @@ func main() {
 				}
 			}
 
-			// ensure store is PGStore so we can use FetchPendingEventsForStreaming/MarkEventStreamResult
 			pgStore, ok := store.(*audit.PGStore)
 			if !ok {
 				log.Printf("audit store is not Postgres-backed; skipping audit streamer startup")
@@ -187,7 +179,6 @@ func main() {
 				}
 				streamer := audit.NewStreamer(pgStore, producer, archiver, streamerCfg)
 
-				// start streamer in background with cancellable context
 				ctxStr, cancel := context.WithCancel(context.Background())
 				streamerCancel = cancel
 				go func() {
@@ -211,8 +202,43 @@ func main() {
 	// Auth middleware (mTLS / OIDC extraction)
 	r.Use(auth.NewMiddleware(cfg))
 
-	// Mount the security/status endpoint for key registry
+	// --- OIDC / JWKS wiring (from cfg) ---
+	jwksURL := strings.TrimSpace(cfg.JWKSURL)
+	jwksTTLSeconds := cfg.JWKSCacheTTLSeconds
+	oidcIssuer := strings.TrimSpace(cfg.OIDCIssuer)
+	oidcAudience := strings.TrimSpace(cfg.OIDCAudience)
+
+	// prepare jwks variable and metrics stop func so they are visible below
+	var jwks *auth.JWKSCache
+	var jwksMetricsStop func()
+
+	if jwksURL != "" {
+		// Small health probe so we log meaningful errors early (non-fatal).
+		client := &http.Client{Timeout: 2 * time.Second}
+		if resp, err := client.Get(jwksURL); err != nil {
+			log.Printf("warning: JWKS URL %s not reachable right now: %v (middleware will still be installed)", jwksURL, err)
+		} else {
+			_ = resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+				log.Printf("warning: JWKS URL %s returned HTTP %d (middleware will still be installed)", jwksURL, resp.StatusCode)
+			}
+		}
+
+		jwks = auth.NewJWKSCache(jwksURL, time.Duration(jwksTTLSeconds)*time.Second)
+
+		// Start JWKS metrics updater
+		jwksMetricsStop = auth.StartJWKSMetricsUpdater(jwks, 15*time.Second)
+		log.Printf("JWKS metrics updater started (interval=15s)")
+
+		r.Use(auth.OIDCMiddleware(jwks, oidcIssuer, oidcAudience))
+		log.Printf("OIDC middleware configured (jwks=%s issuer=%s audience=%s ttl=%ds)", jwksURL, oidcIssuer, oidcAudience, jwksTTLSeconds)
+	} else {
+		log.Println("OIDC JWKS_URL not configured in cfg; skipping OIDC middleware (roles will not be validated)")
+	}
+
+	// Mount the security/status endpoint for key registry and jwks metrics
 	r.Get("/kernel/security/status", reg.StatusHandler())
+	r.Get("/kernel/security/jwks_metrics", handlers.JWKSStatusHandler(jwks))
 
 	// Register kernel routes (handlers.RegisterRoutes uses reflection to pull dependencies from app)
 	handlers.RegisterRoutes(app, r)
@@ -226,13 +252,34 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start server
-	go func() {
-		log.Printf("starting kernel server on %s", cfg.ListenAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server failed: %v", err)
+	// --- TLS / mTLS setup using cfg paths ---
+	certPath := strings.TrimSpace(cfg.TLSCertPath)
+	keyPath := strings.TrimSpace(cfg.TLSKeyPath)
+	clientCAPath := strings.TrimSpace(cfg.TLSClientCAPath)
+
+	if certPath != "" && keyPath != "" {
+		tlsCfg, err := tlsutil.NewTLSConfigFromFiles(certPath, keyPath, clientCAPath, cfg.RequireMTLS)
+		if err != nil {
+			log.Fatalf("failed to initialize TLS config: %v", err)
 		}
-	}()
+		srv.TLSConfig = tlsCfg
+
+		// Start TLS server
+		go func() {
+			log.Printf("starting kernel server (TLS) on %s", cfg.ListenAddr)
+			if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("server failed: %v", err)
+			}
+		}()
+	} else {
+		// Plain HTTP server
+		go func() {
+			log.Printf("starting kernel server on %s", cfg.ListenAddr)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("server failed: %v", err)
+			}
+		}()
+	}
 
 	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
@@ -253,6 +300,12 @@ func main() {
 		// give streamer up to 10s to drain in-flight work; it will also close the producer.
 		shutdownWait := time.NewTimer(10 * time.Second)
 		<-shutdownWait.C
+	}
+
+	// Stop JWKS metrics updater if started
+	if jwksMetricsStop != nil {
+		jwksMetricsStop()
+		log.Println("JWKS metrics updater stopped")
 	}
 
 	if db != nil {

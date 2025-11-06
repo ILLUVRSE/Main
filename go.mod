@@ -2,7 +2,6 @@ module github.com/ILLUVRSE/Main
 
 go 1.23
 
-toolchain go1.23.12
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2

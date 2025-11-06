@@ -98,7 +98,7 @@ Return structured evidence and rule evaluation path.
   2. Check DB connectivity and WAL lag.  
   3. Roll back if needed or scale pods.
 
-- Audit integrity alert: verify `audit_events` tail and run replay test.  
+- Audit integrity alert: verify `audit_events` tail and run replay test. Use `node tools/audit-verify.js --database-url $POSTGRES_URL --signers /path/to/signers.json` to confirm the chain head hash. The signers file must map each `signerId` to a base64 Ed25519 public key (`{"signers":[{"signerId":"kernel-signer","publicKey":"<base64>"}]}`).
 - Key compromise: rotate keys, revoke old keys, and replay signed
   manifests for verification.
 

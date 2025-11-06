@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ILLUVRSE/Main/kernel/internal/audit"
+	"github.com/ILLUVRSE/Main/kernel/internal/auth"
 	"github.com/ILLUVRSE/Main/kernel/internal/canonical"
 	"github.com/ILLUVRSE/Main/kernel/internal/config"
 	"github.com/ILLUVRSE/Main/kernel/internal/signer"
@@ -30,6 +31,19 @@ type DivisionManifest map[string]interface{}
 // Response: { manifest: <manifest>, manifestSignature: <ManifestSignature> }
 func handleDivisionPost(cfg *config.Config, db *sql.DB, s signer.Signer, store audit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Production RBAC: require DivisionLead or SuperAdmin
+		if os.Getenv("NODE_ENV") == "production" {
+			ai := auth.FromContext(r.Context())
+			if ai == nil {
+				http.Error(w, "unauthenticated", http.StatusUnauthorized)
+				return
+			}
+			if !auth.HasRole(ai, auth.RoleSuperAdmin) && !auth.HasRole(ai, auth.RoleDivisionLead) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+
 		// parse manifest
 		var manifest DivisionManifest
 		dec := json.NewDecoder(r.Body)
@@ -119,6 +133,15 @@ func handleDivisionPost(cfg *config.Config, db *sql.DB, s signer.Signer, store a
 // Returns the manifest JSON if present.
 func handleDivisionGet(cfg *config.Config, db *sql.DB, store audit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Production: require authenticated principal
+		if os.Getenv("NODE_ENV") == "production" {
+			ai := auth.FromContext(r.Context())
+			if ai == nil {
+				http.Error(w, "unauthenticated", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		id := chi.URLParam(r, "id")
 		if id == "" {
 			http.Error(w, "id required", http.StatusBadRequest)

@@ -7,7 +7,7 @@
 /* eslint-disable no-console */
 import fs from 'fs';
 import path from 'path';
-import { resetSentinelClient } from '../../src/sentinelClient';
+import { resetSentinelClient } from '../../src/sentinel/sentinelClient';
 
 // Ensure tests run in test mode and test endpoints are enabled
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';

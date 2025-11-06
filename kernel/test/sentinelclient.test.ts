@@ -1,91 +1,74 @@
 // kernel/test/sentinelClient.test.ts
-import { startMockSentinelServer } from './mocks/mockSentinelServer';
+import { setSentinelClient, resetSentinelClient, enforcePolicyOrThrow } from '../src/sentinel/sentinelClient';
+import { appendAuditEvent } from '../src/auditStore';
 
-afterEach(() => {
-  jest.resetModules();
-  delete process.env.SENTINEL_URL;
-  delete process.env.SENTINEL_FALLBACK_ALLOW;
-  delete process.env.SENTINEL_TIMEOUT_MS;
-});
+jest.mock('../src/auditStore', () => ({
+  appendAuditEvent: jest.fn().mockResolvedValue({ id: 'audit-1', hash: 'hash-1', ts: new Date().toISOString() }),
+}));
 
-describe('sentinelClient', () => {
-  test('evaluatePolicy fallback allow (no SENTINEL_URL)', async () => {
-    // Default fallback allow is true
-    jest.resetModules();
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { evaluatePolicy } = require('../src/sentinelClient');
-    const decision = await evaluatePolicy('any.action', { foo: 'bar' });
-    expect(decision).toBeDefined();
+describe('sentinelClient policy enforcement', () => {
+  afterEach(() => {
+    resetSentinelClient();
+    (appendAuditEvent as jest.Mock).mockClear();
+  });
+
+  test('default client allows and records audit event', async () => {
+    const decision = await enforcePolicyOrThrow('test.policy', { principal: { id: 'user-1', type: 'human', roles: ['Operator'] } });
+
     expect(decision.allowed).toBe(true);
-    expect(decision.policyId).toMatch(/fallback-allow/);
-  });
-
-  test('evaluatePolicy fallback deny when SENTINEL_FALLBACK_ALLOW=false', async () => {
-    process.env.SENTINEL_FALLBACK_ALLOW = 'false';
-    jest.resetModules();
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { evaluatePolicy } = require('../src/sentinelClient');
-    const decision = await evaluatePolicy('action', {});
-    expect(decision).toBeDefined();
-    expect(decision.allowed).toBe(false);
-    expect(decision.policyId).toMatch(/fallback-deny/);
-  });
-
-  test('evaluatePolicy uses remote sentinel when SENTINEL_URL set', async () => {
-    const server = await startMockSentinelServer({
-      onEvaluate: (payload: any) => ({ allowed: false, policyId: 'p1', reason: 'blocked', ts: new Date().toISOString() }),
+    const auditCalls = (appendAuditEvent as jest.Mock).mock.calls;
+    expect(auditCalls).toHaveLength(1);
+    const [eventType, payload] = auditCalls[0];
+    expect(eventType).toBe('policy.decision');
+    expect(payload).toMatchObject({
+      policy: 'test.policy',
+      decision: { allowed: true },
+      principal: { id: 'user-1', type: 'human', roles: ['Operator'] },
     });
-    try {
-      process.env.SENTINEL_URL = server.url;
-      jest.resetModules();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { evaluatePolicy } = require('../src/sentinelClient');
-      const decision = await evaluatePolicy('action.remote', { a: 1 });
-      expect(decision).toBeDefined();
-      expect(decision.allowed).toBe(false);
-      expect(decision.policyId).toBe('p1');
-      expect(decision.reason).toBe('blocked');
-    } finally {
-      await server.close();
-    }
   });
 
-  test('enforcePolicyOrThrow throws PolicyDeniedError when remote denies', async () => {
-    const server = await startMockSentinelServer({
-      onEvaluate: () => ({ allowed: false, policyId: 'deny-1', reason: 'nope', ts: new Date().toISOString() }),
+  test('custom sentinel denial throws and records audit event', async () => {
+    const sentinel = {
+      record: jest.fn(),
+      enforcePolicy: jest.fn().mockResolvedValue({
+        allowed: false,
+        decisionId: 'deny-1',
+        ruleId: 'rule-42',
+        rationale: 'nope',
+        reason: 'nope',
+      }),
+    };
+
+    setSentinelClient(sentinel);
+
+    await expect(() => enforcePolicyOrThrow('test.policy', { principal: { id: 'user-2' } })).rejects.toThrow('policy.denied');
+
+    const auditCalls = (appendAuditEvent as jest.Mock).mock.calls;
+    expect(auditCalls).toHaveLength(1);
+    const [eventType, payload] = auditCalls[0];
+    expect(eventType).toBe('policy.decision');
+    expect(payload.decision).toMatchObject({
+      id: 'deny-1',
+      ruleId: 'rule-42',
+      rationale: 'nope',
+      allowed: false,
     });
-    try {
-      process.env.SENTINEL_URL = server.url;
-      jest.resetModules();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { enforcePolicyOrThrow, PolicyDeniedError } = require('../src/sentinelClient');
-
-      await expect(enforcePolicyOrThrow('x', {})).rejects.toThrow(PolicyDeniedError);
-    } finally {
-      await server.close();
-    }
   });
 
-  test('network timeout to sentinel returns fallback decision', async () => {
-    // Start server that delays longer than configured timeout
-    const server = await startMockSentinelServer({ delayMs: 200 });
-    try {
-      process.env.SENTINEL_URL = server.url;
-      // set small timeout so it triggers
-      process.env.SENTINEL_TIMEOUT_MS = '50';
-      // set fallback allow to false so we can assert fallback denies
-      process.env.SENTINEL_FALLBACK_ALLOW = 'false';
-      jest.resetModules();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { evaluatePolicy } = require('../src/sentinelClient');
-      const decision = await evaluatePolicy('timed.out', {});
-      expect(decision).toBeDefined();
-      // network timeout should result in fallback decision with allowed === false
-      expect(decision.allowed).toBe(false);
-      expect(decision.policyId).toMatch(/sentinel-unreachable|fallback-deny/);
-    } finally {
-      await server.close();
-    }
+  test('invalid sentinel response falls back to allow and records audit', async () => {
+    const sentinel = {
+      record: jest.fn(),
+      enforcePolicy: jest.fn().mockResolvedValue({ any: 'thing' }),
+    };
+    setSentinelClient(sentinel);
+
+    const decision = await enforcePolicyOrThrow('test.policy', {});
+    expect(decision.allowed).toBe(true);
+
+    const auditCalls = (appendAuditEvent as jest.Mock).mock.calls;
+    expect(auditCalls).toHaveLength(1);
+    const [, payload] = auditCalls[0];
+    expect(payload.decision.allowed).toBe(true);
+    expect(payload.decision.ruleId).toBe('invalid-decision');
   });
 });
-

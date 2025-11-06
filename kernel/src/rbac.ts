@@ -16,6 +16,9 @@
 
 import { Request, Response, NextFunction } from 'express';
 
+/**
+ * Types
+ */
 export type PrincipalType = 'human' | 'service' | 'anonymous';
 
 export interface Principal {
@@ -37,47 +40,19 @@ export const Roles = {
 type RoleName = (typeof Roles)[keyof typeof Roles] | string;
 
 /**
- * getPrincipalFromRequest
+ * Dynamic role-mapper loader
  *
- * Lightweight principal extractor for development and local testing.
- * Production: replace with proper OIDC token validation (extract roles from ID token or introspection)
- *           and mTLS cert mapping for service principals.
- *
- * Current heuristics (dev/testing only):
- * - If header `x-oidc-sub` is present => human principal
- *   - roles parsed from `x-oidc-roles` (comma-separated) or `x-roles`
- * - Else if header `x-service-id` present => service principal
- *   - roles parsed from `x-service-roles` (comma-separated)
- * - Else fallback to anonymous principal
- *
- * NOTE: These headers are for development only and should not be trusted in production.
+ * We require it at runtime inside functions to avoid a static circular import
+ * during module initialization (roleMapping may reference this module for types).
  */
-export function getPrincipalFromRequest(req: Request): Principal {
-  // Human/OIDC-style headers (development-only)
-  const oidcSub = req.header('x-oidc-sub') || req.header('x-user-id');
-  const oidcRoles = req.header('x-oidc-roles') || req.header('x-roles');
-
-  if (oidcSub) {
-    const roles = parseRolesHeader(oidcRoles);
-    return { type: 'human', id: oidcSub, roles: roles.length ? roles : [] };
+function loadRoleMapper(): any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-member-access
+    return require('./auth/roleMapping');
+  } catch (e) {
+    // Not present (or circular during early init); fall back to no-op mapper
+    return null;
   }
-
-  // Service / mTLS-style headers (development-only)
-  const serviceId = req.header('x-service-id') || req.header('x-mtls-service');
-  const serviceRoles = req.header('x-service-roles') || req.header('x-service-role');
-
-  if (serviceId) {
-    const roles = parseRolesHeader(serviceRoles);
-    return { type: 'service', id: serviceId, roles: roles.length ? roles : [] };
-  }
-
-  // Allow explicit "role override" for quick local testing (NOT for prod)
-  const roleOverride = req.header('x-role-override');
-  if (roleOverride) {
-    return { type: 'human', id: 'dev-override', roles: parseRolesHeader(roleOverride) };
-  }
-
-  return { type: 'anonymous', roles: [] };
 }
 
 /**
@@ -90,6 +65,106 @@ function parseRolesHeader(headerValue?: string | undefined | null): string[] {
     .split(/[,\s]+/)
     .map((r) => r.trim())
     .filter(Boolean);
+}
+
+/**
+ * normalizeRoles
+ * Use the roleMapping helper to map incoming role strings into canonical roles when available.
+ */
+function normalizeRoles(rawRoles: string[]): string[] {
+  const mapper = loadRoleMapper();
+  if (mapper && typeof mapper.mapOidcRolesToCanonical === 'function') {
+    try {
+      return mapper.mapOidcRolesToCanonical(rawRoles);
+    } catch (e) {
+      // ignore mapper errors and fall back to raw roles
+    }
+  }
+  // Default: return unique cleaned roles
+  return Array.from(new Set(rawRoles));
+}
+
+/**
+ * getPrincipalFromRequest
+ *
+ * Lightweight principal extractor for development and local testing.
+ * Production: replace with proper OIDC token validation (extract roles from ID token or introspection)
+ *           and mTLS cert mapping for service principals.
+ *
+ * Heuristics (dev/testing only):
+ * - If header `x-oidc-claims` (JSON) present -> use principalFromOidcClaims(claims) if mapper available
+ * - Else if header `x-oidc-sub` is present => human principal (roles from x-oidc-roles or x-roles)
+ * - Else if header `x-service-id` present => service principal (roles from x-service-roles)
+ * - Else fallback to anonymous principal
+ *
+ * NOTE: These headers are for development only and should not be trusted in production.
+ */
+export function getPrincipalFromRequest(req: Request): Principal {
+  const mapper = loadRoleMapper();
+
+  // 1) If JSON claims provided, let the mapper parse them if available
+  const claimsHeader = req.header('x-oidc-claims');
+  if (claimsHeader && mapper && typeof mapper.principalFromOidcClaims === 'function') {
+    try {
+      const parsed = JSON.parse(claimsHeader);
+      const p = mapper.principalFromOidcClaims(parsed) as Principal;
+      // ensure roles normalized
+      p.roles = normalizeRoles(p.roles || []);
+      return p;
+    } catch (e) {
+      // fall through to header parsing on JSON errors
+    }
+  }
+
+  // Human/OIDC-style headers (development-only)
+  const oidcSub = req.header('x-oidc-sub') || req.header('x-user-id');
+  const oidcRoles = req.header('x-oidc-roles') || req.header('x-roles');
+
+  if (oidcSub) {
+    const parsed = parseRolesHeader(oidcRoles);
+    const roles = normalizeRoles(parsed);
+    return { type: 'human', id: oidcSub, roles: roles.length ? roles : [] };
+  }
+
+  // Service / mTLS-style headers (development-only)
+  const serviceId = req.header('x-service-id') || req.header('x-mtls-service');
+  const serviceRoles = req.header('x-service-roles') || req.header('x-service-role');
+
+  if (serviceId) {
+    // if mapper offers principalFromCert and we have a cert header, try that path
+    const certHeader = req.header('x-service-cert') || req.header('x-mtls-cert');
+    if (certHeader && mapper && typeof mapper.principalFromCert === 'function') {
+      try {
+        // try parse as JSON cert shape or fallback to subject string
+        let certObj: any = certHeader;
+        try {
+          certObj = JSON.parse(certHeader);
+        } catch (_) {
+          // leave as string
+        }
+        const p = mapper.principalFromCert(certObj) as Principal;
+        // prefer explicit serviceId header if provided
+        p.id = p.id || serviceId;
+        p.roles = normalizeRoles(p.roles || []);
+        return p;
+      } catch (e) {
+        // ignore and fall back to header roles
+      }
+    }
+
+    const parsed = parseRolesHeader(serviceRoles);
+    const roles = normalizeRoles(parsed);
+    return { type: 'service', id: serviceId, roles: roles.length ? roles : [] };
+  }
+
+  // Allow explicit "role override" for quick local testing (NOT for prod)
+  const roleOverride = req.header('x-role-override');
+  if (roleOverride) {
+    const roles = normalizeRoles(parseRolesHeader(roleOverride));
+    return { type: 'human', id: 'dev-override', roles };
+  }
+
+  return { type: 'anonymous', roles: [] };
 }
 
 /**
@@ -178,21 +253,4 @@ export function requireAnyAuthenticated(req: Request, res: Response, next: NextF
  * - Consider caching principal lookups (token introspection, authz calls) to reduce latency.
  */
 
-/**
- * Acceptance criteria (short, testable):
- *
- * - getPrincipalFromRequest correctly identifies principals from headers:
- *   Test: Provide headers x-oidc-sub + x-oidc-roles and expect Principal.type === 'human' and roles populated.
- *
- * - requireRoles middleware:
- *   - Returns 401 when no principal/auth present.
- *   - Returns 403 when principal lacks required roles.
- *   - Calls next() when principal has at least one required role and attaches req.principal.
- *   Test: Mount middleware on a test express app and assert responses for various header combos.
- *
- * - hasAnyRole works for single and multiple required roles.
- *   Test: Create Principal with roles ['Operator'] and assert hasAnyRole(principal, ['Operator','Auditor']) === true.
- *
- * - Production note present and obvious: headers are only for dev. Real systems must validate tokens/certs.
- */
 

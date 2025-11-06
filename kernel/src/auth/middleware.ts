@@ -4,6 +4,18 @@ import { oidcClient } from './oidc';
 import { Principal } from '../rbac';
 
 /**
+ * Runtime loader for role-mapping utilities to avoid circular imports.
+ */
+function loadRoleMapper(): any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('./roleMapping');
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Extract commonName from Node's getPeerCertificate() output. Works with:
  *  - cert.subject = { CN: '...' } or { commonName: '...' }
  *  - cert.subject.CN or cert.subject.commonName
@@ -44,18 +56,20 @@ function extractSAN(cert: any): string | undefined {
  */
 export async function authMiddleware(req: Request, _res: Response, next: NextFunction) {
   try {
+    const mapper = loadRoleMapper();
+
     // 1) Bearer token (preferred)
     const authHeader = (req.headers.authorization || '') as string;
     const m = authHeader.match(/^\s*Bearer\s+(.+)\s*$/i);
     if (m) {
       const token = m[1];
       try {
-        // lazy-init jwks if needed
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((oidcClient as any).jwks === undefined) {
+        // lazy-init oidc jwks if needed
+        // @ts-ignore
+        if ((oidcClient as any).init && (oidcClient as any).jwks === undefined) {
           try {
             // init() is idempotent
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            // @ts-ignore
             await (oidcClient as any).init();
           } catch (e) {
             console.warn('authMiddleware: oidc init failed:', (e as Error).message || e);
@@ -63,14 +77,29 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
         }
 
         // verify token; throws on invalid
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // @ts-ignore
         const payload: any = await (oidcClient as any).verify(token);
 
-        // collect roles: try common claim shapes
+        // If mapper provides principalFromOidcClaims, prefer it for canonical roles
+        if (mapper && typeof mapper.principalFromOidcClaims === 'function') {
+          try {
+            const p = mapper.principalFromOidcClaims(payload) as Principal;
+            // Ensure id/roles present
+            p.id = String(p.id || payload.sub || payload.sid || 'unknown');
+            p.roles = p.roles || [];
+            req.principal = p;
+            return next();
+          } catch (e) {
+            // fallback to manual parsing below
+            console.warn('authMiddleware: roleMapper.principalFromOidcClaims failed, falling back:', (e as Error).message || e);
+          }
+        }
+
+        // collect roles: try common claim shapes (fallback)
         let roles: string[] = [];
-        if (payload.realm_access && Array.isArray(payload.realm_access.roles)) {
+        if (payload?.realm_access && Array.isArray(payload.realm_access.roles)) {
           roles = payload.realm_access.roles as string[];
-        } else if (payload.resource_access) {
+        } else if (payload?.resource_access && typeof payload.resource_access === 'object') {
           const ra = payload.resource_access;
           const all: string[] = [];
           for (const k of Object.keys(ra || {})) {
@@ -78,18 +107,27 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
             if (Array.isArray(r)) all.push(...r);
           }
           if (all.length) roles = all;
-        } else if (Array.isArray(payload.roles)) {
+        } else if (Array.isArray(payload?.roles)) {
           roles = payload.roles;
-        } else if (payload.scope && typeof payload.scope === 'string') {
+        } else if (payload?.scope && typeof payload.scope === 'string') {
           roles = (payload.scope as string).split(/\s+/).filter(Boolean);
         }
 
-        // Attach canonical Principal (rbac.Principal expects type: 'human' for users)
+        // If mapper provides role normalization, apply it
+        if (mapper && typeof mapper.mapOidcRolesToCanonical === 'function') {
+          try {
+            roles = mapper.mapOidcRolesToCanonical(roles || []);
+          } catch (e) {
+            // ignore and keep raw roles
+          }
+        }
+
         const principal: Principal = {
           type: 'human',
-          id: String(payload.sub ?? payload.sid ?? payload.subject ?? 'unknown'),
+          id: String(payload?.sub ?? payload?.sid ?? payload?.subject ?? 'unknown'),
           roles: roles || [],
         };
+
         req.principal = principal;
         return next();
       } catch (err) {
@@ -100,20 +138,34 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
 
     // 2) mTLS client cert extraction (Node http/https)
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // @ts-ignore
       const sock: any = (req as any).socket || (req as any).connection;
       if (sock && typeof sock.getPeerCertificate === 'function') {
         const cert = sock.getPeerCertificate(true);
         const hasCert = cert && Object.keys(cert).length > 0;
         if (hasCert) {
+          // if mapper supports principalFromCert, use it
+          if (mapper && typeof mapper.principalFromCert === 'function') {
+            try {
+              // pass the cert object directly to mapper
+              const p = mapper.principalFromCert(cert) as Principal;
+              p.roles = p.roles || [];
+              req.principal = p;
+              return next();
+            } catch (e) {
+              console.warn('authMiddleware: roleMapper.principalFromCert failed, falling back:', (e as Error).message || e);
+            }
+          }
+
+          // fallback: derive id from CN / SAN and attach service principal
           const cn = extractCNFromCert(cert);
           const san = extractSAN(cert);
-          const id = cn || (cert.subject ? JSON.stringify(cert.subject) : 'service-unknown');
+          const id = cn || (cert?.subject ? JSON.stringify(cert.subject) : (san || 'service-unknown'));
 
           const principal: Principal = {
             type: 'service',
             id,
-            roles: [], // service roles mapping left empty for now — RBAC can map later
+            roles: [], // RBAC mapping will enrich service roles where needed
           };
           req.principal = principal;
           return next();
@@ -126,6 +178,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
     // 3) No principal found — continue unauthenticated (rbac.getPrincipalFromRequest will still work for dev headers)
     return next();
   } catch (err) {
+    // Pass unexpected errors to express error handler
     return next(err);
   }
 }

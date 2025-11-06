@@ -3,9 +3,10 @@
 // Uses the OIDC discovery endpoint to find jwks_uri and verifies JWTs using `jose`.
 //
 // Usage:
-//   import { oidcClient, initOidc } from './auth/oidc';
+//   import { oidcClient, initOidc, getJwtClaims, parseOidcClaims } from './auth/oidc';
 //   await initOidc(); // once at startup
-//   const payload = await oidcClient.verify(token); // throws if invalid
+//   const payload = await getJwtClaims(token); // throws if invalid
+//   const claims = parseOidcClaims(payload); // normalized claim shape
 //
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
 
@@ -81,4 +82,104 @@ export const oidcClient = new OIDCClient(OIDC_ISSUER, OIDC_AUDIENCE);
 export async function initOidc(): Promise<void> {
   await oidcClient.init();
 }
+
+/**
+ * Helper: getJwtClaims
+ * Small wrapper around oidcClient.verify that returns the JWT payload.
+ * Ensures client has been initialized first (callers may call initOidc()).
+ */
+export async function getJwtClaims(token: string, opts?: { audience?: string }): Promise<JWTPayload> {
+  // If jwks not initialized, try to init but do not crash if issuer empty — leave to caller
+  if (!oidcClient.jwks) {
+    try {
+      await oidcClient.init();
+    } catch (e) {
+      // rethrow with explanatory message
+      throw new Error(`OIDC client not initialized and init failed: ${(e as Error).message || e}`);
+    }
+  }
+  return await oidcClient.verify(token, opts);
+}
+
+/**
+ * Helper: parseOidcClaims
+ * Normalize common OIDC claim shapes into a predictable structure that downstream
+ * role-mapping logic can consume reliably.
+ *
+ * The returned object includes:
+ *  - sub: subject
+ *  - realm_access: { roles: string[] } (ensured array)
+ *  - resource_access: preserved if present
+ *  - roles: top-level roles array (if present)
+ *  - groups: array (if present)
+ *  - scope: unchanged (string)
+ *
+ * This function is defensive and preserves unknown claim keys.
+ */
+export function parseOidcClaims(payload: JWTPayload): Record<string, any> {
+  const claims: Record<string, any> = { ...(payload as Record<string, any>) };
+
+  // Ensure subject normalized
+  claims.sub = String(claims.sub ?? claims.uid ?? claims.user_id ?? claims.preferred_username ?? claims.preferredUsername ?? '');
+
+  // Normalize realm_access.roles -> array
+  if (claims.realm_access) {
+    try {
+      const ra = claims.realm_access;
+      if (ra && Array.isArray(ra.roles)) {
+        claims.realm_access = { roles: ra.roles.slice() };
+      } else if (ra && typeof ra.roles === 'string') {
+        claims.realm_access = { roles: (ra.roles as string).split(/[,\s]+/).filter(Boolean) };
+      } else {
+        claims.realm_access = { roles: [] };
+      }
+    } catch {
+      claims.realm_access = { roles: [] };
+    }
+  } else {
+    claims.realm_access = { roles: [] };
+  }
+
+  // Preserve resource_access shape; ensure roles arrays if present
+  if (claims.resource_access && typeof claims.resource_access === 'object') {
+    const ra: Record<string, any> = {};
+    for (const k of Object.keys(claims.resource_access)) {
+      const entry = claims.resource_access[k] || {};
+      if (Array.isArray(entry.roles)) ra[k] = { roles: entry.roles.slice() };
+      else if (entry.roles && typeof entry.roles === 'string') ra[k] = { roles: (entry.roles as string).split(/[,\s]+/).filter(Boolean) };
+      else ra[k] = { roles: [] };
+    }
+    claims.resource_access = ra;
+  } else {
+    claims.resource_access = {};
+  }
+
+  // top-level roles normalization
+  if (Array.isArray(claims.roles)) {
+    claims.roles = claims.roles.slice();
+  } else if (typeof claims.roles === 'string') {
+    claims.roles = (claims.roles as string).split(/[,\s]+/).filter(Boolean);
+  } else {
+    // leave undefined or set to empty array depending on your downstream needs
+    claims.roles = claims.roles ?? [];
+  }
+
+  // groups normalization
+  if (Array.isArray(claims.groups)) {
+    claims.groups = claims.groups.slice();
+  } else if (typeof claims.groups === 'string') {
+    claims.groups = (claims.groups as string).split(/[,\s]+/).filter(Boolean);
+  } else {
+    claims.groups = claims.groups ?? [];
+  }
+
+  // scope left as string if present
+  if (typeof claims.scope === 'string') {
+    claims.scope = claims.scope;
+  }
+
+  return claims;
+}
+
+export type OidcClaims = ReturnType<typeof parseOidcClaims>;
 

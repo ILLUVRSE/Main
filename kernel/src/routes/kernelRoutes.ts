@@ -29,13 +29,7 @@ import {
   dbRowToAuditEvent,
 } from '../models';
 import { DivisionManifest } from '../types';
-import {
-  requireRoles,
-  requireAnyAuthenticated,
-  Roles,
-  hasAnyRole,
-  getPrincipalFromRequest,
-} from '../rbac';
+import { requireRoles, requireAnyAuthenticated, Roles, hasAnyRole, hasRole, getPrincipalFromRequest } from '../rbac';
 import { enforcePolicyOrThrow, PolicyDecision } from '../sentinelClient';
 import idempotencyMiddleware from '../middleware/idempotency';
 
@@ -105,7 +99,7 @@ export default function createKernelRouter(): Router {
       // In production require authenticated principal and proper role/type
       if (ENV === 'production') {
         if (!principal) return res.status(401).json({ error: 'unauthenticated' });
-        if (principal.type !== 'service' && !hasAnyRole(principal, Roles.SUPERADMIN)) {
+        if (principal.type !== 'service' && !hasRole(principal, Roles.SUPERADMIN)) {
           return res.status(403).json({ error: 'forbidden' });
         }
       }
@@ -193,7 +187,7 @@ export default function createKernelRouter(): Router {
     // RBAC in production
     if (ENV === 'production') {
       if (!principal) return res.status(401).json({ error: 'unauthenticated' });
-      if (!hasAnyRole(principal, Roles.SUPERADMIN) && !hasAnyRole(principal, Roles.DIVISION_LEAD)) {
+      if (!hasRole(principal, Roles.SUPERADMIN) && !hasRole(principal, Roles.DIVISION_LEAD)) {
         return res.status(403).json({ error: 'forbidden' });
       }
     }

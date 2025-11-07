@@ -65,6 +65,16 @@ Security sign-off and to guide ops runbooks.
 5. Mark `kernel-signer-v2` as primary in KMS (atomic switch). Emit `signer.rotation.applied` audit event signed by new key.
 6. Keep old key active for overlap period (e.g., 7 days) for verification, then retire in KMS.
 
+**Operational helper:** use `node tools/rotate_keys.js --signer-id <id>` to rotate keys. When `KMS_ENDPOINT` is configured the
+script calls `POST /keys/rotate` on the KMS and records a `signer.rotation` audit event with the returned key id. Without a KMS
+endpoint the script generates a local Ed25519 keypair, prints the private key for secure storage, and still records the audit
+event (marked as `provider: local`). Ensure `POSTGRES_URL` is set so the audit event persists.
+
+**Test run:** in staging, execute `SIGNER_ID=kernel-staging node tools/rotate_keys.js`. Verify:
+- CLI exits successfully and prints the new public key information.
+- An audit event `signer.rotation` exists with the correct `traceId` and signer metadata.
+- Downstream services can verify a new manifest signed after rotation.
+
 **Compromise (urgent):**
 1. Immediately disable compromised key in KMS (or mark as compromised).
 2. Create a new emergency key (KMS), set `SIGNER_ID` to emergency key for Kernel in staging, verify signing.
@@ -107,6 +117,11 @@ Security sign-off and to guide ops runbooks.
 
 - **Retention**
   - Audit events: retain raw events for 7 years (or org policy). Use WORM/append-only storage for long-term retention if required.
+
+**Key rotation quick reference**
+- `node tools/rotate_keys.js --signer-id kernel-signer-v2`
+- Confirm audit event via `/kernel/audit/<id>`
+- Update truststore with new public key and distribute to auditors.
 
 ---
 

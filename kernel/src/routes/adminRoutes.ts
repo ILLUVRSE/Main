@@ -2,6 +2,7 @@ import express, { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db';
 import { getIdempotencyTableName } from '../idempotency/config';
 import { requireRoles, Roles } from '../rbac';
+import { cleanupExpiredAuditEvents } from '../audit/auditPolicy';
 
 interface IdempotencyRow {
   key: string;
@@ -48,6 +49,19 @@ export default function createAdminRouter(): Router {
           expiresAt: row.expires_at,
         }));
         res.json({ keys: records });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.post(
+    '/admin/audit/cleanup',
+    requireRoles(Roles.SUPERADMIN),
+    async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        const removed = await cleanupExpiredAuditEvents();
+        res.json({ removed });
       } catch (err) {
         next(err);
       }

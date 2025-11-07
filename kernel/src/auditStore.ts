@@ -23,8 +23,10 @@
 
 import crypto from 'crypto';
 import { getClient, query } from './db';
+import { getCurrentTraceId } from './middleware/tracing';
 import signingProxy from './signingProxy';
 import { AuditEvent } from './types';
+import { evaluateAuditPolicy } from './audit/auditPolicy';
 
 /**
  * Simple in-memory audit metrics (exported).
@@ -101,6 +103,12 @@ export async function appendAuditEvent(eventType: string, payload: any, retries 
     attempt++;
     const client = await getClient();
     try {
+      const policy = evaluateAuditPolicy(eventType, payload?.principal);
+      if (!policy.keep) {
+        client.release();
+        return { id: 'sampled', hash: '', ts: new Date().toISOString() };
+      }
+
       await client.query('BEGIN');
 
       // Get latest head hash
@@ -108,7 +116,19 @@ export async function appendAuditEvent(eventType: string, payload: any, retries 
       const prevHash: string | null = lastRes.rows[0]?.hash ?? null;
 
       const ts = new Date().toISOString();
-      const hash = computeHash(eventType, payload, prevHash, ts);
+      const traceId = getCurrentTraceId();
+      let payloadWithTrace: any;
+      if (traceId) {
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          payloadWithTrace = { ...payload, traceId: (payload as any).traceId ?? traceId };
+        } else {
+          payloadWithTrace = { value: payload ?? null, traceId };
+        }
+      } else {
+        payloadWithTrace = payload;
+      }
+
+      const hash = computeHash(eventType, payloadWithTrace, prevHash, ts);
 
       // Idempotency check: if an event with the same hash already exists, return it.
       const existing = await client.query('SELECT id, hash, ts FROM audit_events WHERE hash = $1 LIMIT 1', [hash]);
@@ -124,10 +144,21 @@ export async function appendAuditEvent(eventType: string, payload: any, retries 
 
       const id = crypto.randomUUID();
       const insertSql = `
-        INSERT INTO audit_events (id, event_type, payload, prev_hash, hash, signature, signer_id, ts)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        INSERT INTO audit_events (id, event_type, payload, prev_hash, hash, signature, signer_id, ts, sampled, retention_expires_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       `;
-      await client.query(insertSql, [id, eventType, payload, prevHash, hash, signature, signerId, ts]);
+      await client.query(insertSql, [
+        id,
+        eventType,
+        payloadWithTrace,
+        prevHash,
+        hash,
+        signature,
+        signerId,
+        ts,
+        false,
+        policy.retentionExpiresAt,
+      ]);
 
       await client.query('COMMIT');
 

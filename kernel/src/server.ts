@@ -4,8 +4,7 @@
  * Production-minded Kernel HTTP server entrypoint.
  *
  * Notes:
- * - Exports `checkKmsReachable` for tests.
- * - Uses Node http/https for KMS probing (no global fetch dependency).
+ * - Uses Node http/https for optional TLS server handling.
  * - Exposes guarded test endpoints when ENABLE_TEST_ENDPOINTS=true or NODE_ENV=test.
  */
 import express, { Request, Response, NextFunction } from 'express';
@@ -22,20 +21,24 @@ import { authMiddleware } from './auth/middleware';
 import { getPrincipalFromRequest, requireRoles, requireAnyAuthenticated, Roles } from './rbac';
 import { createOpenApiValidator } from './middleware/openapiValidator';
 import { metricsMiddleware } from './middleware/metrics';
+import tracingMiddleware from './middleware/tracing';
+import errorHandler from './middleware/errorHandler';
 import {
   getMetrics,
   getMetricsContentType,
   incrementKmsProbeFailure,
   incrementKmsProbeSuccess,
-  incrementReadinessFailure,
-  incrementReadinessSuccess,
   incrementServerStart,
 } from './metrics/prometheus';
+import createHealthRouter, { readinessCheck } from './routes/health';
+import { probeKmsReachable } from './services/kms';
+import { loadKmsConfig } from './config/kms';
 
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const REQUIRE_KMS = (process.env.REQUIRE_KMS || 'false').toLowerCase() === 'true';
-const KMS_ENDPOINT = (process.env.KMS_ENDPOINT || '').replace(/\/$/, '');
+const kmsConfig = loadKmsConfig();
+const REQUIRE_KMS = kmsConfig.requireKms;
+const KMS_ENDPOINT = (kmsConfig.endpoint || '').replace(/\/$/, '');
 const OPENAPI_PATH = process.env.OPENAPI_PATH
   ? path.resolve(process.cwd(), process.env.OPENAPI_PATH)
   : path.resolve(__dirname, '../openapi.yaml');
@@ -55,80 +58,12 @@ function error(...args: any[]) { console.error(LOG_PREFIX, ...args); }
 function debug(...args: any[]) { if ((process.env.LOG_LEVEL || '').toLowerCase() === 'debug') console.debug(LOG_PREFIX, ...args); }
 
 /**
- * checkKmsReachable
- */
-export async function checkKmsReachable(timeoutMs = 3000): Promise<boolean> {
-  if (!KMS_ENDPOINT) return false;
-
-  try {
-    const u = new URL(KMS_ENDPOINT);
-    const isHttps = u.protocol === 'https:';
-    const lib = isHttps ? https : http;
-
-    return await new Promise<boolean>((resolve) => {
-      const opts: any = {
-        hostname: u.hostname,
-        port: u.port || (isHttps ? 443 : 80),
-        path: (u.pathname || '/') + (u.search || ''),
-        method: 'GET',
-        timeout: timeoutMs,
-      };
-
-      const req = lib.request(opts, (res: any) => {
-        res.on('data', () => {});
-        res.on('end', () => {});
-        resolve(true);
-      });
-
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => {
-        try { req.destroy(); } catch {}
-        resolve(false);
-      });
-
-      req.end();
-    });
-  } catch {
-    return false;
-  }
-}
-
-/**
- * readinessCheck
- */
-async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
-  try {
-    try {
-      await waitForDb(5_000, 500);
-    } catch (e) {
-      incrementReadinessFailure();
-      return { ok: false, details: 'db.unreachable' };
-    }
-
-    if (REQUIRE_KMS || KMS_ENDPOINT) {
-      const reachable = await checkKmsReachable(3000);
-      if (!reachable) {
-        incrementKmsProbeFailure();
-        incrementReadinessFailure();
-        return { ok: false, details: 'kms.unreachable' };
-      }
-      incrementKmsProbeSuccess();
-    }
-
-    incrementReadinessSuccess();
-    return { ok: true };
-  } catch (err) {
-    incrementReadinessFailure();
-    return { ok: false, details: (err as Error).message || 'unknown' };
-  }
-}
-
-/**
  * createApp
  */
 export async function createApp() {
   const app = express();
   app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '1mb' }));
+  app.use(tracingMiddleware);
   app.use(metricsMiddleware);
 
   try {
@@ -156,6 +91,7 @@ export async function createApp() {
     warn('OpenAPI not found at ' + OPENAPI_PATH + ' - request validation disabled.');
   }
 
+  app.use('/', createHealthRouter());
   app.use('/', createKernelRouter());
   app.use('/', createAdminRouter());
 
@@ -181,28 +117,12 @@ export async function createApp() {
     );
   }
 
-  app.get('/health', (_req: Request, res: Response) => {
-    return res.json({ status: 'ok', ts: new Date().toISOString() });
-  });
-
-  app.get('/ready', async (_req: Request, res: Response) => {
-    const r = await readinessCheck();
-    if (!r.ok) return res.status(503).json({ status: 'not_ready', details: r.details ?? null });
-    return res.json({ status: 'ready' });
-  });
-
   app.get('/metrics', (_req: Request, res: Response) => {
     res.setHeader('Content-Type', getMetricsContentType());
     res.send(getMetrics());
   });
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    error('Unhandled error:', err && err.stack ? err.stack : err);
-    if (err?.status && err?.errors) {
-      return res.status(err.status).json({ error: 'validation_error', details: err.errors });
-    }
-    return res.status(err?.status || 500).json({ error: err?.message || 'internal_error' });
-  });
+  app.use(errorHandler);
 
   return app;
 }
@@ -221,7 +141,7 @@ async function start() {
         process.exit(1);
       }
       info('Probing KMS endpoint for reachability...');
-      const ok = await checkKmsReachable(3_000);
+      const ok = await probeKmsReachable(KMS_ENDPOINT, 3_000);
       if (!ok) {
         error('Fatal: REQUIRE_KMS=true but KMS_ENDPOINT is unreachable. Exiting.');
         incrementKmsProbeFailure();

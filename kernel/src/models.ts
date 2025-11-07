@@ -92,6 +92,17 @@ export function dbRowToMemoryNode(row: any): MemoryNode {
   };
 }
 
+/** Memory node: MemoryNode -> DB values */
+export function memoryNodeToDbRow(node: MemoryNode): any[] {
+  return [
+    node.id ?? null,
+    node.text ?? null,
+    node.embeddingId ?? null,
+    node.metadata ?? {},
+    node.ttl ?? null,
+  ];
+}
+
 /** ManifestSignature: DB row -> ManifestSignature */
 export function dbRowToManifestSignature(row: any): ManifestSignature {
   if (!row) return row;

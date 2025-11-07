@@ -1,0 +1,68 @@
+name: Security Scans
+
+on:
+  push:
+    paths:
+      - 'kernel/**'
+  pull_request:
+    paths:
+      - 'kernel/**'
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secrets scan
+        run: ./kernel/ci/secrets_check.sh
+
+  dast:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kernel_security
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        working-directory: kernel
+        run: npm ci
+      - name: Build kernel
+        working-directory: kernel
+        run: npm run build
+      - name: Start kernel server
+        working-directory: kernel
+        env:
+          PORT: 3100
+          NODE_ENV: development
+          POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/kernel_security
+        run: |
+          node dist/server.js &
+          echo $! > server.pid
+          sleep 10
+      - name: Run ZAP baseline scan
+        working-directory: kernel
+        env:
+          TARGET_URL: http://127.0.0.1:3100/health
+        run: |
+          docker run --rm --network host ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t "$TARGET_URL" -m 5 -J zap_report.json
+      - name: Stop kernel server
+        if: always()
+        working-directory: kernel
+        run: |
+          if [ -f server.pid ]; then
+            kill $(cat server.pid) || true
+          fi

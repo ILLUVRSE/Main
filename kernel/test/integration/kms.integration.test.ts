@@ -1,8 +1,9 @@
 // kernel/test/integration/kms.integration.test.ts
 import http from 'http';
 import fetchNode from 'node-fetch';
+import { probeKmsReachable } from '../../src/services/kms';
 
-describe('KMS reachability (checkKmsReachable)', () => {
+describe('KMS reachability (probeKmsReachable)', () => {
   beforeEach(() => {
     // Ensure a fresh module cache so server module reads process.env.KMS_ENDPOINT afresh
     jest.resetModules();
@@ -27,10 +28,7 @@ describe('KMS reachability (checkKmsReachable)', () => {
 
     try {
       // point KMS_ENDPOINT at the ephemeral server
-      process.env.KMS_ENDPOINT = `http://127.0.0.1:${port}/`;
-      // re-import server module after setting env so KMS_ENDPOINT constant is initialized correctly
-      const mod: any = await import('../../src/server');
-      const ok = await mod.checkKmsReachable(2000);
+      const ok = await probeKmsReachable(`http://127.0.0.1:${port}/`, 2000);
       expect(ok).toBe(true);
     } finally {
       await new Promise<void>((resolve, reject) => {
@@ -46,9 +44,7 @@ describe('KMS reachability (checkKmsReachable)', () => {
       globalThis.fetch = fetchNode;
     }
     // pick a likely-unused port
-    process.env.KMS_ENDPOINT = 'http://127.0.0.1:59999/';
-    const mod: any = await import('../../src/server');
-    const ok = await mod.checkKmsReachable(500);
+    const ok = await probeKmsReachable('http://127.0.0.1:59999/', 500);
     expect(ok).toBe(false);
   });
 });

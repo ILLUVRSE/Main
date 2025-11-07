@@ -22,6 +22,7 @@ import { PoolClient } from 'pg';
 import { getClient, query } from '../db';
 import signingProxy from '../signingProxy';
 import { appendAuditEvent, getAuditEventById } from '../auditStore';
+import { buildHealthResponse } from './health';
 import { dbRowToDivisionManifest, dbRowToAgentProfile, dbRowToEvalReport } from '../models';
 import { DivisionManifest } from '../types';
 import {
@@ -41,6 +42,7 @@ import {
   IdempotencyKeyConflictError,
 } from '../handlers/kernelCreate';
 import createUpgradeRouter from './upgradeRoutes';
+import { getReasoningClient, ReasoningClientError } from '../reasoning/client';
 
 const ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = ENV === 'production';
@@ -87,9 +89,9 @@ async function resolveClient(res: Response): Promise<{ client: PoolClient; manag
 export default function createKernelRouter(): Router {
   const router = express.Router();
 
-  // liveness
-  router.get('/health', (_req, res) => {
-    res.json({ status: 'ok', ts: new Date().toISOString() });
+  router.get('/health', async (_req, res) => {
+    const payload = await buildHealthResponse();
+    res.json(payload);
   });
 
   // security info
@@ -587,17 +589,35 @@ export default function createKernelRouter(): Router {
   );
 
   /**
-   * GET /kernel/reason/:node (stub)
+   * GET /kernel/reason/:node
    */
   router.get(
     '/kernel/reason/:node',
     ...requireAuthInProduction(),
-    async (req: Request, res: Response) => {
+    async (req: Request, res: Response, next: NextFunction) => {
       const node = req.params.node;
-      return res.json({
-        node,
-        trace: [{ step: 1, ts: new Date().toISOString(), note: 'trace stub — integrate with reasoning-graph' }],
-      });
+      try {
+        const client = getReasoningClient();
+        const trace = await client.getRedactedTrace(node);
+        const principal = (req as any).principal ?? getPrincipalFromRequest(req as any);
+        const principalSummary = principal
+          ? {
+              id: principal.id ?? principal.sub ?? principal.email ?? null,
+              type: principal.type ?? principal.kind ?? null,
+              roles: Array.isArray(principal.roles) ? principal.roles : [],
+            }
+          : null;
+        await appendAuditEvent('reason.trace.fetch', { node, principal: principalSummary });
+        return res.json(trace);
+      } catch (err) {
+        if (err instanceof ReasoningClientError) {
+          if (err.status === 404) {
+            return res.status(404).json({ error: 'trace_not_found' });
+          }
+          return res.status(502).json({ error: 'reasoning_unavailable', detail: err.message });
+        }
+        return next(err);
+      }
     },
   );
 

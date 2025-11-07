@@ -28,3 +28,22 @@ jobs:
       - name: Test
         run: go test ./... -v
 
+  kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: kernel
+        run: npm ci
+
+      - name: Run kernel tests with coverage
+        working-directory: kernel
+        run: npm test -- --coverage
+

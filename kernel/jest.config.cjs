@@ -3,7 +3,7 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   rootDir: __dirname,
-  roots: ['<rootDir>/test'],
+  roots: ['<rootDir>/test', '<rootDir>/integration'],
   testMatch: ['**/*.test.ts'],
   verbose: true,
   clearMocks: true,
@@ -14,6 +14,22 @@ module.exports = {
     }
   },
   // Increase default timeout for slow CI machines if needed; tests are small so keep low.
-  testTimeout: 10000
+  testTimeout: 10000,
+  collectCoverage: true,
+  collectCoverageFrom: [
+    'src/auditStore.ts',
+    'src/audit/auditPolicy.ts',
+    'src/signingProxy.ts',
+    'src/internal/multisig.ts',
+    'src/rbac.ts',
+  ],
+  coverageThreshold: {
+    'src/auditStore.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+    'src/audit/auditPolicy.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+    'src/signingProxy.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+    'src/internal/multisig.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+    'src/rbac.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+  },
+  coverageReporters: ['text', 'lcov'],
 };
 

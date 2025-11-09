@@ -20,3 +20,7 @@
 .vercel
 kernel/test/fixtures
 *.bak*
+node_modules/
+IDEA/node_modules/
+IDEA/.pnpm-store/
+.pnpm-store/

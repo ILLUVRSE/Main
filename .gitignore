@@ -19,3 +19,17 @@
 *.test
 .vercel
 kernel/test/fixtures
+*.bak*
+node_modules/
+IDEA/node_modules/
+IDEA/.pnpm-store/
+.pnpm-store/
+
+# IDEA: ignore internal git, data, and temp artifacts
+IDEA/.git/
+IDEA/server/data/
+IDEA/server/tmp/
+IDEA/server/data/artifacts/
+IDEA/server/data/*.json
+IDEA/server/data/*.log
+IDEA/server/tmp/*.tgz

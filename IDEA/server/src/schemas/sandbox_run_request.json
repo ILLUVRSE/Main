@@ -1,0 +1,27 @@
+{
+  "sandbox_run_request": {
+    "type":"object",
+    "required":["agent_id","bundle","tests"],
+    "properties":{
+      "agent_id":{"type":"string"},
+      "bundle":{"$ref":"https://idea.illuvrse/schema/agent_bundle"},
+      "tests":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"cmd":{"type":"string"}}}},
+      "timeout_seconds":{"type":"integer","default":120},
+      "env":{"type":"object"}
+    }
+  },
+  "sandbox_run_result": {
+    "type":"object",
+    "required":["run_id","status","logs","artifacts"],
+    "properties":{
+      "run_id":{"type":"string","format":"uuid"},
+      "status":{"type":"string","enum":["queued","running","passed","failed","error","timeout"]},
+      "logs":{"type":"string"},
+      "test_results":{"type":"object"},
+      "artifacts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"url":{"type":"string","format":"uri"}}}},
+      "started_at":{"type":"string"},
+      "finished_at":{"type":"string"}
+    }
+  }
+}
+

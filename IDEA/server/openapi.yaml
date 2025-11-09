@@ -1,0 +1,84 @@
+openapi: 3.0.3
+info:
+  title: IDEA Creator API
+  version: 1.0.0
+servers:
+  - url: http://127.0.0.1:5175/api/v1
+paths:
+  /package:
+    post:
+      summary: Create package upload URL
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_id: { type: string }
+                include_repo: { type: boolean }
+      responses:
+        '200':
+          description: OK
+  /package/complete:
+    post:
+      summary: Complete package upload and verify sha256
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [artifact_id, sha256]
+              properties:
+                artifact_id: { type: string }
+                sha256: { type: string }
+      responses:
+        '200':
+          description: OK
+  /kernel/submit:
+    post:
+      summary: Submit artifact to Kernel for signing
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/kernel_sign_request'
+      responses:
+        '200': { description: Sync signed manifest }
+        '202': { description: Accepted (async) }
+  /kernel/callback:
+    post:
+      summary: Kernel callback to provide validation
+      parameters:
+        - name: X-Kernel-Signature
+          in: header
+          required: true
+  /sandbox/run:
+    post:
+      summary: Start a sandbox run
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/sandbox_run_request'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    kernel_sign_request:
+      $ref: './schemas/kernel_sign_request.json'
+    sandbox_run_request:
+      type: object
+      properties:
+        agent_id: { type: string }
+

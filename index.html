@@ -1,11 +1,177 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>ILLUVRSE</title>
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:6rem;text-align:center;color:#111}
-  h1{font-size:48px;margin:0}
-  p{color:#444}
-</style>
-<h1>ILLUVRSE</h1>
-<p>Hello — deployed to Vercel.</p>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ILLUVRSE — Coming Soon</title>
+
+  <meta name="description" content="A governed platform where ideas evolve into intelligent agents — verified, accountable, and built for a world that demands proof." />
+  <meta name="theme-color" content="#1C8174" />
+
+  <!-- Social -->
+  <meta property="og:title" content="ILLUVRSE — Coming Soon" />
+  <meta property="og:description" content="A governed platform where ideas evolve into intelligent agents — verified, accountable, and built for a world that demands proof." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="assets/images/og-image.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <!-- Icons -->
+  <link rel="icon" href="assets/images/favicon.ico" />
+  <link rel="apple-touch-icon" href="assets/images/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/images/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/images/favicon-16.png" />
+
+  <link rel="stylesheet" href="assets/css/coming-soon.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- Brand -->
+  <header class="brand-header" role="banner" aria-label="ILLUVRSE">
+    <img src="assets/images/logo.png" alt="ILLUVRSE logo" class="brand-logo-lg" />
+  </header>
+
+  <!-- Mascot: FLOATING, OUTSIDE HERO -->
+  <img
+    src="assets/images/mascot.png"
+    alt="ILLUVRSE Mascot"
+    class="mascot-badge"
+    style="position:fixed; top:140px; right:32px; width:120px; max-width:22vw; border-radius:50%; box-shadow:0 10px 22px rgba(0,0,0,.18); z-index:10;"
+  />
+
+  <main id="main" class="container" role="main">
+    <section class="hero" aria-labelledby="headline">
+      <h2 class="coming-soon-tag">Coming Soon</h2>
+
+      <h1 id="headline">Something powerful is orbiting closer — and ILLUVRSE has IDEAs.</h1>
+
+      <!-- (Mascot removed from here to avoid overlap) -->
+
+      <p class="subhead">
+        A governed platform where ideas evolve into intelligent agents — verified, accountable, and built for a world that demands proof.
+      </p>
+
+      <!-- Email (mailto fallback) -->
+      <form class="notify" action="mailto:ryan.lueckenotte@gmail.com" method="post" enctype="text/plain" aria-label="Notify me form">
+        <label for="email" class="sr-only">Email address</label>
+        <input id="email" name="email" type="email" inputmode="email" autocomplete="email" required placeholder="you@example.com" aria-required="true" />
+        <button type="submit" class="btn-primary">Notify me</button>
+      </form>
+
+      <p class="microcopy">We’ll email once about early access. No spam, no tracking.</p>
+
+      <!-- Chatbot trigger -->
+      <div class="cta-row">
+        <button class="btn-chat" id="openChat" aria-haspopup="dialog" aria-controls="otterModal">
+          🦦 Ask the Otter about ILLUVRSE
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="foot-brand">
+      <img src="assets/images/mascot.png" alt="" class="foot-mascot" width="22" height="22" aria-hidden="true" />
+      <span>© <span id="year">2025</span> ILLUVRSE</span>
+    </div>
+    <nav aria-label="Footer links">
+      <ul class="links">
+        <li><a href="mailto:ryan.lueckenotte@gmail.com">Contact</a></li>
+        <li><a href="https://www.linkedin.com/in/ryanlueckenotte" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="https://www.youtube.com/@ILLUVRSE" target="_blank" rel="noopener">YouTube</a></li>
+        <li><a href="assets/images/og-image.jpg">Press image</a></li>
+        <li class="privacy">We don’t track you. Early-access emails only.</li>
+      </ul>
+    </nav>
+  </footer>
+
+  <!-- Static Q&A modal (no secrets) -->
+  <dialog id="otterModal" aria-labelledby="otterTitle" aria-describedby="otterDesc">
+    <form method="dialog" class="modal">
+      <header class="modal-head">
+        <h2 id="otterTitle">Ask the Otter</h2>
+        <button value="close" class="modal-close" aria-label="Close">✕</button>
+      </header>
+
+      <div id="otterDesc" class="modal-body">
+        <div class="chat" role="log" aria-live="polite">
+          <div class="bubble bot">Hi! I’m the ILLUVRSE Otter. Quick answers about our mission? Pick a topic:</div>
+
+          <div class="quick">
+            <button type="button" class="quick-btn" data-q="What is ILLUVRSE?">What is ILLUVRSE?</button>
+            <button type="button" class="quick-btn" data-q="Who is it for?">Who is it for?</button>
+            <button type="button" class="quick-btn" data-q="How is it different?">How is it different?</button>
+            <button type="button" class="quick-btn" data-q="When can I try it?">When can I try it?</button>
+            <button type="button" class="quick-btn" data-q="How do you keep creators safe?">How do you keep creators safe?</button>
+            <button type="button" class="quick-btn" data-q="What does ‘governed’ mean?">What does ‘governed’ mean?</button>
+            <button type="button" class="quick-btn" data-q="How do agents make money?">How do agents make money?</button>
+          </div>
+
+          <div id="chatStream"></div>
+        </div>
+      </div>
+
+      <footer class="modal-foot">
+        <a class="btn-ghost" href="mailto:ryan.lueckenotte@gmail.com">Email us</a>
+        <button value="close" class="btn-ghost">Close</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <noscript>JavaScript is disabled — email <a href="mailto:ryan.lueckenotte@gmail.com">ryan.lueckenotte@gmail.com</a> to get notified.</noscript>
+
+  <script>
+    // Year
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    // Chat modal
+    const modal = document.getElementById('otterModal');
+    const openBtn = document.getElementById('openChat');
+    const stream = document.getElementById('chatStream');
+
+    // Simple focus trap
+    function trapFocus(dlg){ const focusables=[...dlg.querySelectorAll('button,a,input')]; const first=focusables[0], last=focusables[focusables.length-1];
+      dlg.addEventListener('keydown',e=>{ if(e.key!=='Tab') return; if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+        else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }});
+    }
+
+    const ANSWERS = {
+      "What is ILLUVRSE?": "ILLUVRSE is a governed platform where ideas evolve into intelligent agents. Create, verify, run, and get rewarded — on rails that are accountable and auditable.",
+      "Who is it for?": "Independent creators, small studios, and teams who want trustworthy infrastructure instead of DIY glue. Build products, not plumbing.",
+      "How is it different?": "Safety and provenance aren’t add-ons. Policy enforcement, cryptographic audit, and payouts are built into the core workflow.",
+      "When can I try it?": "Soon. Join the early access list and we’ll invite you as we open up.",
+      "How do you keep creators safe?": "Policies control access and actions; every critical event is signed and linked for audit. Keys stay in KMS/HSM — not in repos.",
+      "What does ‘governed’ mean?": "All important actions are policy-checked and leave a signed trail (who, what, when). Risky operations require multi-party approval.",
+      "How do agents make money?": "Publish to the marketplace with licensing, payments, royalties, and reporting handled by the platform."
+    };
+
+    function addBubble(role, text) {
+      const div = document.createElement('div');
+      div.className = 'bubble ' + (role === 'bot' ? 'bot' : 'user');
+      div.textContent = text;
+      stream.appendChild(div);
+      stream.scrollTop = stream.scrollHeight;
+    }
+
+    function reply(q) {
+      addBubble('user', q);
+      const a = ANSWERS[q] || "We’ll share more at launch. Meanwhile, join early access from the main page.";
+      setTimeout(() => addBubble('bot', a), 120);
+    }
+
+    openBtn.addEventListener('click', () => {
+      stream.innerHTML = '';
+      modal.showModal();
+      trapFocus(modal);
+    });
+
+    document.querySelectorAll('.quick-btn').forEach(b => {
+      b.addEventListener('click', () => reply(b.dataset.q));
+    });
+
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.close(); });
+    modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.close(); });
+  </script>
+</body>
+</html>
 

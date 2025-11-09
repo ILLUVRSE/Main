@@ -1,0 +1,13 @@
+{
+  "type":"object",
+  "required":["artifact_url","sha256","actor_id","metadata"],
+  "properties":{
+    "artifact_url":{"type":"string","format":"uri"},
+    "sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "actor_id":{"type":"string"},
+    "metadata":{"type":"object"},
+    "callback_url":{"type":"string","format":"uri"},
+    "profile":{"type":"string","enum":["illuvrse","personal"]}
+  }
+}
+

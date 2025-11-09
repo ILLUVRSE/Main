@@ -19,3 +19,4 @@
 *.test
 .vercel
 kernel/test/fixtures
+*.bak*

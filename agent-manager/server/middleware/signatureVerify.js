@@ -1,20 +1,16 @@
 // agent-manager/server/middleware/signatureVerify.js
 //
 // Middleware to verify Kernel callback signatures and protect against replay.
+// Uses DB-backed kernel_nonces (via ../db) and fetches kernel public keys
+// via the centralized key_store (../key_store).
+//
 // Usage:
 //   const signatureVerify = require('./middleware/signatureVerify');
 //   app.post('/api/v1/kernel/callback', bodyParser.json({verify: captureRaw}), signatureVerify(), handler);
-//
-// Environment / options supported:
-// - KERNEL_SHARED_SECRET: if present, used for HMAC-SHA256 fallback (sha256=... header).
-// - KERNEL_PUBLIC_KEYS_JSON: JSON string mapping kid -> { alg: "ed25519"|"rsa-sha256"|"hmac-sha256", key: "<PEM or secret>" }
-// - KERNEL_PUBLIC_KEYS_URL: URL returning same JSON shape (auto-fetched and cached).
-//
-// Notes:
-// - This middleware uses an in-memory nonce cache (default TTL 300s). Replace with DB-backed store for production.
-// - It expects the raw request bytes to be available on `req.rawBody`. See `server/index.js` notes below.
 
 const crypto = require('crypto');
+const db = require('../db');
+const keyStore = require('../key_store');
 
 const DEFAULT_SKEW_SECONDS = 120; // +- allowed timestamp skew
 const DEFAULT_NONCE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -39,71 +35,22 @@ function constantTimeEqual(aBuf, bBuf) {
   }
 }
 
-// Simple in-memory nonce store with TTL
-const NONCE_STORE = new Map();
-function isReplay(nonce, ttlMs = DEFAULT_NONCE_TTL_MS) {
-  const entry = NONCE_STORE.get(nonce);
-  if (!entry) return false;
-  if (Date.now() > entry.expires) {
-    NONCE_STORE.delete(nonce);
-    return false;
-  }
-  return true;
-}
-function recordNonce(nonce, ttlMs = DEFAULT_NONCE_TTL_MS) {
-  NONCE_STORE.set(nonce, { expires: Date.now() + ttlMs });
-  // lazy cleanup (not necessary for small dev workloads)
-  setTimeout(() => {
-    const e = NONCE_STORE.get(nonce);
-    if (e && Date.now() > e.expires) NONCE_STORE.delete(nonce);
-  }, ttlMs + 1000);
-}
-
-// Key cache
-let KEY_CACHE = { keys: {}, fetchedAt: 0 };
-async function getKeyMapFromEnvOrUrl(opts = {}) {
+/* Key map cache backed by key_store.getKernelPublicKeys() */
+let KEY_MAP_CACHE = { keys: {}, fetchedAt: 0 };
+async function getKeyMapFromKeyStore(opts = {}) {
   const now = Date.now();
   const ttl = opts.keyCacheTtlMs || DEFAULT_KEY_CACHE_TTL_MS;
-  if (KEY_CACHE.fetchedAt && (now - KEY_CACHE.fetchedAt) < ttl) return KEY_CACHE.keys;
+  if (KEY_MAP_CACHE.fetchedAt && (now - KEY_MAP_CACHE.fetchedAt) < ttl) return KEY_MAP_CACHE.keys;
 
-  // 1) KERNEL_PUBLIC_KEYS_JSON
-  if (process.env.KERNEL_PUBLIC_KEYS_JSON) {
-    try {
-      const parsed = JSON.parse(process.env.KERNEL_PUBLIC_KEYS_JSON);
-      KEY_CACHE = { keys: parsed, fetchedAt: Date.now() };
-      return parsed;
-    } catch (e) {
-      // fallthrough
-      console.warn('KERNEL_PUBLIC_KEYS_JSON parse failed', e.message);
-    }
+  try {
+    const keys = await keyStore.getKernelPublicKeys();
+    KEY_MAP_CACHE = { keys: keys || {}, fetchedAt: Date.now() };
+    return KEY_MAP_CACHE.keys;
+  } catch (e) {
+    console.warn('getKernelPublicKeys failed', e && e.message ? e.message : e);
+    KEY_MAP_CACHE = { keys: {}, fetchedAt: Date.now() };
+    return {};
   }
-
-  // 2) KERNEL_PUBLIC_KEYS_URL
-  if (process.env.KERNEL_PUBLIC_KEYS_URL && typeof globalThis.fetch === 'function') {
-    try {
-      const resp = await fetch(process.env.KERNEL_PUBLIC_KEYS_URL);
-      if (resp.ok) {
-        const json = await resp.json();
-        KEY_CACHE = { keys: json, fetchedAt: Date.now() };
-        return json;
-      } else {
-        throw new Error(`failed fetching keys: ${resp.status}`);
-      }
-    } catch (e) {
-      console.warn('KERNEL_PUBLIC_KEYS_URL fetch failed', e.message);
-    }
-  }
-
-  // 3) fallback: if KERNEL_SHARED_SECRET present expose as implicit key 'shared'
-  if (process.env.KERNEL_SHARED_SECRET) {
-    const m = { shared: { alg: 'hmac-sha256', key: process.env.KERNEL_SHARED_SECRET } };
-    KEY_CACHE = { keys: m, fetchedAt: Date.now() };
-    return m;
-  }
-
-  // empty
-  KEY_CACHE = { keys: {}, fetchedAt: Date.now() };
-  return {};
 }
 
 function parseSignatureHeader(header) {
@@ -154,7 +101,6 @@ async function verifySignatureOnBody({ bodyBuffer, alg, keyMaterial, signature, 
   if (alg === 'hmac-sha256' || alg === 'sha256') {
     if (!keyMaterial) throw new Error('missing shared secret for hmac');
     const mac = crypto.createHmac('sha256', keyMaterial).update(bodyBuffer).digest('hex');
-    // compare hex string with hex sig or compare buffers
     if (sigBuf.length === Buffer.from(mac, 'hex').length) {
       return constantTimeEqual(Buffer.from(mac, 'hex'), sigBuf);
     }
@@ -163,23 +109,18 @@ async function verifySignatureOnBody({ bodyBuffer, alg, keyMaterial, signature, 
 
   if (alg === 'rsa-sha256' || alg === 'rsa' || alg === 'rsa-sha2-256') {
     if (!keyMaterial) throw new Error('missing RSA public key');
-    // keyMaterial expected PEM public key
-    // use crypto.verify with sha256
     try {
       return crypto.verify('sha256', bodyBuffer, keyMaterial, sigBuf);
     } catch (e) {
-      // older node or format issues: try different invocation
       return crypto.verify('RSA-SHA256', bodyBuffer, keyMaterial, sigBuf);
     }
   }
 
   if (alg === 'ed25519' || alg === 'ed25519-sha') {
     if (!keyMaterial) throw new Error('missing ed25519 public key');
-    // For ed25519, node supports verify(null, data, key, signature)
     try {
       return crypto.verify(null, bodyBuffer, keyMaterial, sigBuf);
     } catch (e) {
-      // fallback: try 'ed25519' as algorithm
       try {
         return crypto.verify('ed25519', bodyBuffer, keyMaterial, sigBuf);
       } catch (e2) {
@@ -203,8 +144,8 @@ function signatureVerify(opts = {}) {
   const allowedSkew = opts.allowedSkewSec || DEFAULT_SKEW_SECONDS;
   const nonceTtlMs = opts.nonceTtlMs || DEFAULT_NONCE_TTL_MS;
 
-  // allow custom keyMap fetcher
-  const getKeyMap = opts.getKeyMap || (async () => getKeyMapFromEnvOrUrl(opts));
+  // allow custom keyMap fetcher; default uses key_store
+  const getKeyMap = opts.getKeyMap || (async () => getKeyMapFromKeyStore(opts));
 
   return async function (req, res, next) {
     try {
@@ -226,9 +167,58 @@ function signatureVerify(opts = {}) {
         return res.status(401).json({ ok: false, error: { code: 'unauthorized', message: 'X-Kernel-Timestamp outside allowed skew' }});
       }
 
-      // nonce replay protection
-      if (isReplay(nonceHeader, nonceTtlMs)) {
-        return res.status(401).json({ ok: false, error: { code: 'unauthorized', message: 'replayed X-Kernel-Nonce' }});
+      // --- DB-backed nonce replay protection (try-insert pattern) ---
+      const expiresAtIso = new Date(Date.now() + nonceTtlMs).toISOString();
+
+      let inserted = null;
+      try {
+        inserted = await db.insertKernelNonce(nonceHeader, expiresAtIso, null);
+      } catch (e) {
+        console.error('insertKernelNonce error', e);
+        return res.status(500).json({ ok: false, error: { code: 'server_error', message: 'nonce storage error' }});
+      }
+
+      if (!inserted) {
+        let replay;
+        try {
+          replay = await db.isKernelNonceReplay(nonceHeader);
+        } catch (e) {
+          console.error('isKernelNonceReplay error', e);
+          return res.status(500).json({ ok: false, error: { code: 'server_error', message: 'nonce check error' }});
+        }
+
+        if (replay) {
+          return res.status(401).json({ ok: false, error: { code: 'unauthorized', message: 'replayed X-Kernel-Nonce' }});
+        }
+
+        try {
+          const qRes = await db.query(
+            `UPDATE kernel_nonces
+             SET expires_at = $2, created_at = now(), consumed_at = NULL, consumed_by = NULL
+             WHERE nonce = $1
+             RETURNING id, nonce, agent_id, created_at, expires_at, consumed_at, consumed_by`,
+            [nonceHeader, expiresAtIso]
+          );
+          if (!qRes.rows[0]) {
+            const reinserted = await db.insertKernelNonce(nonceHeader, expiresAtIso, null);
+            if (!reinserted) {
+              return res.status(500).json({ ok: false, error: { code: 'server_error', message: 'nonce refresh failed' }});
+            }
+          }
+        } catch (e) {
+          console.error('nonce refresh error', e);
+          return res.status(500).json({ ok: false, error: { code: 'server_error', message: 'nonce refresh failed' }});
+        }
+      }
+
+      // determine body buffer
+      let bodyBuffer = req.rawBody;
+      if (!bodyBuffer) {
+        try {
+          bodyBuffer = Buffer.from(JSON.stringify(req.body || {}), 'utf8');
+        } catch (e) {
+          bodyBuffer = Buffer.from('');
+        }
       }
 
       // parse signature header
@@ -252,17 +242,6 @@ function signatureVerify(opts = {}) {
         return res.status(401).json({ ok: false, error: { code: 'unauthorized', message: `unknown key id ${kid}` }});
       }
 
-      // determine body buffer
-      let bodyBuffer = req.rawBody;
-      if (!bodyBuffer) {
-        // fallback to canonical JSON stringification (not ideal for prod)
-        try {
-          bodyBuffer = Buffer.from(JSON.stringify(req.body || {}), 'utf8');
-        } catch (e) {
-          bodyBuffer = Buffer.from('');
-        }
-      }
-
       // verify signature
       const verified = await verifySignatureOnBody({
         bodyBuffer,
@@ -276,8 +255,12 @@ function signatureVerify(opts = {}) {
         return res.status(401).json({ ok: false, error: { code: 'unauthorized', message: 'invalid signature' }});
       }
 
-      // record nonce to prevent replay
-      recordNonce(nonceHeader, nonceTtlMs);
+      // mark consumed (best-effort)
+      try {
+        await db.consumeKernelNonce(nonceHeader, 'kernel-callback');
+      } catch (e) {
+        console.error('consumeKernelNonce error', e);
+      }
 
       // attach signature metadata to request for handlers
       req.kernelSignature = { kid, alg: alg.toLowerCase(), verified: true, timestamp: ts, nonce: nonceHeader };
@@ -291,4 +274,70 @@ function signatureVerify(opts = {}) {
 }
 
 module.exports = signatureVerify;
+
+/* ---------------------------------------------------------------------------
+   Quick self-test (HMAC / DB flow)
+   Usage:
+     From agent-manager directory:
+     DATABASE_URL="postgres://username:password@localhost:5432/agent_manager_db" \
+     KERNEL_SHARED_SECRET="mysecret" \
+     node server/middleware/signatureVerify.js
+-----------------------------------------------------------------------------*/
+if (require.main === module) {
+  (async () => {
+    try {
+      await db.init();
+      console.log('DB OK');
+
+      const factory = signatureVerify();
+
+      const body = { test: 'hello' };
+      const bodyBuffer = Buffer.from(JSON.stringify(body), 'utf8');
+
+      const ts = Math.floor(Date.now() / 1000);
+      const nonce = 'sigtest-' + Date.now();
+
+      const secret = process.env.KERNEL_SHARED_SECRET;
+      if (!secret) {
+        console.error('Please set KERNEL_SHARED_SECRET for the quick test.');
+        process.exit(1);
+      }
+
+      const mac = crypto.createHmac('sha256', secret).update(bodyBuffer).digest('hex');
+      const sigHeader = 'sha256=' + mac;
+
+      const headers = {
+        'x-kernel-signature': sigHeader,
+        'x-kernel-timestamp': String(ts),
+        'x-kernel-nonce': nonce
+      };
+
+      // minimal req/res/next mocks
+      const req = {
+        get: (name) => headers[name.toLowerCase()],
+        rawBody: bodyBuffer,
+        body: body
+      };
+
+      const res = {
+        status: function(code) { this._code = code; return this; },
+        json: function(obj) { console.log('RES JSON', this._code, obj); return this; }
+      };
+
+      await new Promise((resolve) => {
+        factory(req, res, () => {
+          console.log('middleware passed; req.kernelSignature=', req.kernelSignature);
+          resolve();
+        });
+      });
+
+    } catch (e) {
+      console.error('SELFTEST ERROR', e);
+      process.exit(2);
+    } finally {
+      try { await db.close(); } catch (e) {}
+      process.exit(0);
+    }
+  })();
+}
 

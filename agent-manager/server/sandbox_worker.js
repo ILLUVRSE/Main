@@ -1,17 +1,17 @@
 // agent-manager/server/sandbox_worker.js
 // Minimal Sandbox Worker (MVP simulation)
-//
 // - Polls sandbox_runs for status='queued'
 // - Claims a run by updating to status='running' and setting started_at
 // - Simulates a run (sleep + generate fake logs/results)
 // - Updates the run row with logs, test_results, artifacts, finished_at, and status
-// - Emits audit events via db.createAuditEvent when run starts/finishes
+// - Emits audit events via audit_signer.createSignedAuditEvent when possible
 //
 // NOTE: This is a simple single-worker simulator for local/dev testing.
 // For production: replace simulation with an isolated container runtime, resource limits,
 // proper locking (FOR UPDATE SKIP LOCKED) and better failure handling.
 
 const db = require('./db');
+const auditSigner = require('./audit_signer');
 const { v4: uuidv4 } = require('uuid');
 
 const POLL_INTERVAL_MS = Number(process.env.SANDBOX_POLL_MS || 2000);
@@ -52,8 +52,26 @@ async function finishRun(runId, status, logs = '', testResults = {}, artifacts =
     WHERE run_id = $5
     RETURNING *
   `;
-  const res = await db.query(q, [status, logs, testResults, JSON.stringify(artifacts), runId]);
+  const res = await db.query(q, [status, logs, testResults, artifacts, runId]);
   return res.rows[0];
+}
+
+async function safeEmitAuditEvent(actorId, eventType, payload) {
+  try {
+    const ev = await auditSigner.createSignedAuditEvent(actorId, eventType, payload);
+    console.log('AUDIT_EVENT_WORKER_SIGNED:', ev);
+    return ev;
+  } catch (e) {
+    console.error('AUDIT_SIGNER error, falling back to db.createAuditEvent', e);
+    try {
+      const ev2 = await db.createAuditEvent(actorId, eventType, payload, null, null, null);
+      console.log('AUDIT_EVENT_WORKER_DB_FALLBACK:', ev2);
+      return ev2;
+    } catch (e2) {
+      console.error('AUDIT_EVENT_WORKER fallback failed', e2);
+      return null;
+    }
+  }
 }
 
 async function processRun(row) {
@@ -61,8 +79,8 @@ async function processRun(row) {
   const agentId = row.agent_id;
   console.log(`Claimed run ${runId} for agent ${agentId}. Simulating run...`);
 
-  // Emit audit event: sandbox run started
-  await db.createAuditEvent('sandbox-worker', 'sandbox_run_started', { run_id: runId, agent_id: agentId });
+  // Emit audit event: sandbox run started (signed if possible)
+  await safeEmitAuditEvent('sandbox-worker', 'sandbox_run_started', { run_id: runId, agent_id: agentId });
 
   // Simulate running tests
   const start = new Date();
@@ -83,8 +101,8 @@ async function processRun(row) {
   const finished = await finishRun(runId, 'passed', logs, testResults, artifacts);
   console.log(`Run ${runId} finished: status=${finished.status}`);
 
-  // Emit audit event: sandbox run finished
-  await db.createAuditEvent('sandbox-worker', 'sandbox_run_finished', { run_id: runId, agent_id: agentId, status: finished.status });
+  // Emit audit event: sandbox run finished (signed if possible)
+  await safeEmitAuditEvent('sandbox-worker', 'sandbox_run_finished', { run_id: runId, agent_id: agentId, status: finished.status });
 }
 
 async function loop() {

@@ -12,6 +12,7 @@ dotenv.config();
 const PORT = process.env.PORT || 5176;
 
 const db = require('./db');
+const auditSigner = require('./audit_signer');
 const signatureVerify = require('./middleware/signatureVerify');
 
 const app = express();
@@ -37,13 +38,39 @@ function sendError(res, statusCode, code, message, details = null) {
   return res.status(statusCode).json(payload);
 }
 
-/* Emit audit event: try DB, otherwise console log */
+/* Emit audit event: try DB with signing, otherwise console log
+ *
+ * Uses auditSigner.createSignedAuditEvent when DB_AVAILABLE; falls back to
+ * db.createAuditEvent (unsigned) if signing fails for some reason. If DB is not
+ * available, logs a lightweight fallback event.
+ */
 async function emitAuditEvent(actorId, eventType, payload = {}, signature = null, signerKid = null, prevHash = null) {
   try {
     if (DB_AVAILABLE) {
-      const ev = await db.createAuditEvent(actorId, eventType, payload, signature, signerKid, prevHash);
-      console.log('AUDIT_EVENT_DB:', ev);
-      return ev;
+      try {
+        // Use audit_signer to create a signed, chained audit event.
+        const ev = await auditSigner.createSignedAuditEvent(actorId, eventType, payload);
+        console.log('AUDIT_EVENT_DB_SIGNED:', ev);
+        return ev;
+      } catch (signErr) {
+        // If signing fails for any reason, fall back to inserting an unsigned event so we don't lose auditability.
+        console.error('Failed to create signed audit event, falling back to unsigned createAuditEvent', signErr);
+        try {
+          const ev = await db.createAuditEvent(actorId, eventType, payload, signature, signerKid, prevHash);
+          console.log('AUDIT_EVENT_DB_FALLBACK:', ev);
+          return ev;
+        } catch (dbErr) {
+          console.error('Failed to create fallback audit event', dbErr);
+          // return lightweight fallback
+          return {
+            id: uuidv4(),
+            actor_id: actorId || 'system',
+            event_type: eventType,
+            payload,
+            created_at: new Date().toISOString()
+          };
+        }
+      }
     } else {
       const ev = {
         id: uuidv4(),
@@ -57,7 +84,6 @@ async function emitAuditEvent(actorId, eventType, payload = {}, signature = null
     }
   } catch (err) {
     console.error('Failed to emit audit event', err);
-    // still return lightweight event
     return {
       id: uuidv4(),
       actor_id: actorId || 'system',

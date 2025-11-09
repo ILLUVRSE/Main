@@ -1,49 +1,38 @@
 # AI & Infrastructure — Core Module
 
 ## # Purpose
-This directory contains the AI & Infrastructure artifacts for ILLUVRSE: model registry, training/fine-tuning pipelines, dataset lineage, model serving, drift detection, ModelOps, and cost-aware compute orchestration. This module enables reproducible model lifecycles, safe production promotion, and auditable model provenance.
+AI & Infrastructure provides the model registry, training orchestration, reproducible training runs, serving stack, promotion pipelines, canaries and rollback, drift detection, and artifact governance required by the platform. All model artifacts and promotions must be traceable and signed.
 
 ## # Location
-All files for the AI & Infrastructure module live under:
-
-~/ILLUVRSE/Main/ai-infra/
+All files for AI & Infrastructure live under:
+`~/ILLUVRSE/Main/ai-infra/`
 
 ## # Files in this module
-- `ai-infra-spec.md` — core specification covering responsibilities, APIs, models, training & serving patterns, governance, and acceptance criteria (already present).
-- `README.md` — this file.
-- `deployment.md` — deployment & infra guidance (to be created).
-- `api.md` — API surface and examples (to be created).
-- `acceptance-criteria.md` — testable checks for AI infra (to be created).
-- `.gitignore` — local ignores for runtime files (to be created).
+- `ai-infra-spec.md` — design doc and responsibilities.  
+- `README.md` — this file.  
+- `deployment.md` — infra and deployment guidance (to be created).  
+- `acceptance-criteria.md` — acceptance tests (already present).  
+- `model-registry/` — (to be created) registry API and metadata store.
 
 ## # How to use this module
-1. Read `ai-infra-spec.md` to understand the full model lifecycle: dataset lineage, reproducible training, artifact registration, promotion gates, serving and drift detection.
-2. Implement the model registry, training orchestration, artifact storage, and serving APIs following the spec. Ensure every production promotion is gated, signed, and audited.
-3. Integrate with Kernel, SentinelNet, Reasoning Graph, Eval Engine, Resource Allocator, Agent Manager, and Finance for provenance, policy checks, allocations, and cost accounting.
-4. Enforce PII, licensing, and safety rules during dataset registration, training, and promotion. Record all relevant provenance and audit events.
+1. Read `ai-infra-spec.md` and `ai-infra/acceptance-criteria.md`. The acceptance criteria require deterministic training runs, model registry lineage, secure promotion and signing, canary + rollback strategies, drift detection, checkpointing, and compliance with SentinelNet policies.  
+2. Implement pipelines that:
+   * Record full provenance for training (codeRef, container digest, dependency manifest, dataset checksums, hyperparams, seed, environment).  
+   * Store model artifacts in immutable storage with artifact checksum and signed manifest.  
+   * Register models in the model registry with lineage, metrics, and signerId.  
+   * Enforce SentinelNet gating and require ManifestSignature for promotion to staging/prod.  
+   * Support canary rollouts, automatic rollback on regressions, and drift detection with retrain suggestions.
 
 ## # Security & governance
-- Use KMS/HSM for model signing and artifact integrity proofs.
-- Enforce SentinelNet policy checks for dataset usage, PII, export controls, and safety.
-- Require multisig for promotion of high-risk models or changes to governance-critical model families.
-- Emit AuditEvents for every important model lifecycle action (register, train, evaluate, promote, deploy, retrain).
-
-## # Audit & compliance
-- Every training run, evaluation, promotion and deployment must be auditable with canonicalized metadata (codeRef, env, seed, dataset checksums, hyperparams, artifact checksums).
-- Model promotions to production must be accompanied by ManifestSignature and recorded in Kernel’s audit bus.
+- KMS/HSM for signing and key management.  
+- SentinelNet clearance required for promotions; multisig for high-risk promotions.  
+- Secure handling of datasets (PII detection, legal hold) and artifact immutability.
 
 ## # Acceptance & sign-off
-The AI & Infrastructure module is accepted when:
-- Training runs are reproducible and recorded with full provenance.
-- Model registry supports signed promotions and lineage queries.
-- Serving supports canary/A-B rollouts and automatic rollback on regressions.
-- Drift detection and retrain suggestions function and integrate with Eval/Resource Allocator.
-Final approver: **Ryan (SuperAdmin)**. Security Engineer and ML Lead must review model signing, PII handling, and resource accounting.
+AI & Infra is accepted when all items in `ai-infra/acceptance-criteria.md` pass in staging: reproducible training, model registry & lineage, secure promotion and signing, serving canary/rollback, drift detection, and audit integration.
+
+Final approver: **Ryan (SuperAdmin)**. Security Engineer and ML Lead must sign off.
 
 ## # Next single step
-Create `deployment.md` for the AI & Infrastructure module (one file). When you’re ready, reply **“next”** and I’ll give the exact content for that single file.
-
----
-
-End of README.
+Create `deployment.md` that covers training cluster provisioning, model registry DB and API, artifact storage policies, and sign/verify flow with KMS/HSM. When ready, reply **“next-ai-infra”** and I’ll provide the file content.
 

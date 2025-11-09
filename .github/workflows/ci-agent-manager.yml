@@ -1,0 +1,135 @@
+name: CI - Agent Manager
+
+on:
+  push:
+    paths:
+      - 'agent-manager/**'
+  pull_request:
+    paths:
+      - 'agent-manager/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: username
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: agent_manager_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U username" --health-interval 5s --health-timeout 2s --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install system deps (psql & jq)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client jq
+
+      - name: Install npm deps
+        working-directory: agent-manager
+        run: npm ci
+
+      - name: Run DB migrations
+        env:
+          DATABASE_URL: postgres://username:password@postgres:5432/agent_manager_db
+        working-directory: agent-manager
+        run: |
+          chmod +x ./scripts/run_migrations.sh
+          ./scripts/run_migrations.sh
+
+      - name: Start server (background)
+        env:
+          DATABASE_URL: postgres://username:password@postgres:5432/agent_manager_db
+        working-directory: agent-manager
+        run: |
+          nohup env DATABASE_URL="$DATABASE_URL" node server/index.js > server.log 2>&1 &
+          # wait for health to be ready
+          for i in $(seq 1 20); do
+            if curl -s http://127.0.0.1:5176/health | jq -e '.ok==true' >/dev/null 2>&1; then
+              echo "server healthy"
+              break
+            fi
+            echo "waiting for server..."
+            sleep 1
+          done
+          curl -s http://127.0.0.1:5176/health || (echo "health check failed"; cat server.log; exit 1)
+
+      - name: Start sandbox worker (background)
+        env:
+          DATABASE_URL: postgres://username:password@postgres:5432/agent_manager_db
+          SANDBOX_POLL_MS: 500
+          SIMULATED_RUN_SECONDS: 1
+        working-directory: agent-manager
+        run: |
+          nohup env DATABASE_URL="$DATABASE_URL" SANDBOX_POLL_MS="$SANDBOX_POLL_MS" SIMULATED_RUN_SECONDS="$SIMULATED_RUN_SECONDS" node server/sandbox_worker.js > worker.log 2>&1 &
+          sleep 1
+          tail -n +1 worker.log || true
+
+      - name: Run smoke test: spawn agent, run sandbox, assert pass
+        env:
+          DATABASE_URL: postgres://username:password@postgres:5432/agent_manager_db
+          PGPASSWORD: password
+        working-directory: agent-manager
+        run: |
+          set -euo pipefail
+
+          # Spawn agent
+          agent_id=$(curl -s -X POST http://127.0.0.1:5176/api/v1/agent/spawn \
+            -H 'Content-Type: application/json' \
+            -d '{"agent_config":{"name":"ci-agent","profile":"personal","metadata":{"owner":"ci"}}}' | jq -r .agent_id)
+          echo "spawned agent: $agent_id"
+          if [ -z "$agent_id" ] || [ "$agent_id" = "null" ]; then
+            echo "failed to spawn agent"; cat server.log; exit 1
+          fi
+
+          # Confirm agent exists in DB
+          psql -h postgres -U username -d agent_manager_db -t -c "SELECT agent_id FROM agents WHERE agent_id='${agent_id}';" | tr -d '[:space:]' | grep -q "$agent_id"
+
+          # Create sandbox run
+          runid=$(curl -s -X POST http://127.0.0.1:5176/api/v1/agent/${agent_id}/sandbox/run \
+            -H 'Content-Type: application/json' \
+            -d '{"tests":[{"name":"smoke","cmd":"echo hi"}],"timeout_seconds":60}' | jq -r .run_id)
+          echo "created run: $runid"
+
+          if [ -z "$runid" ] || [ "$runid" = "null" ]; then
+            echo "failed to create sandbox run"; cat server.log; tail -n 200 worker.log; exit 1
+          fi
+
+          # Poll until finished or timeout (30s)
+          for i in $(seq 1 30); do
+            out=$(curl -s http://127.0.0.1:5176/api/v1/sandbox/run/${runid})
+            echo "$out" | jq .
+            status=$(echo "$out" | jq -r .status)
+            if [ "$status" = "passed" ]; then
+              echo "sandbox passed"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "sandbox did not finish in time"
+          echo "server.log:"
+          cat server.log || true
+          echo "worker.log:"
+          cat worker.log || true
+          exit 1
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-manager-logs
+          path: agent-manager/{server.log,worker.log}
+

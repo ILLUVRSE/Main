@@ -1,32 +1,45 @@
-# Node / build
+# Node runtime
 node_modules/
-dist/
-coverage/
-.next/
-
-# Local runtime files (do NOT commit)
-db.json
-keys.json
-.env
-.env.local
-
-# Kubernetes / Helm
-.kube/
-charts/
-*.tgz
-
-# Editor / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Container / images
-docker-compose.override.yml
-docker-compose.*.yml
-
-# Logs
 npm-debug.log*
+.pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+.keys/
+.secrets/
+keys.json
+db.json
+
+# Build / artifacts
+dist/
+build/
+coverage/
+.nyc_output/
+*.tgz
+
+# Logs & temp
+logs/
+*.log
+tmp/
+temp/
+.cache/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docker / local infra
+docker-compose.override.yml
+.docker/
+*.compose
+
+# Misc
+.ssh/
+.vagrant/
 

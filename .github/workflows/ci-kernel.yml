@@ -1,0 +1,92 @@
+name: CI (kernel)
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  kernel:
+    name: Kernel CI
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      # Postgres service connection for tests
+      POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd kernel
+          npm ci
+
+      - name: Prepare OIDC & TLS fixtures
+        # Provide the client secret from repo secrets. Set a secret named TEST_CLIENT_SECRET in repo settings.
+        env:
+          CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          cd "$(pwd)"
+          # Run the script from repository root
+          bash devops/scripts/prepare_oidc.sh
+
+      - name: Run kernel migrations (if you have a migration command)
+        working-directory: kernel
+        run: |
+          # If you have migrations command, run them; otherwise skip
+          if npm run | grep -q migrate; then
+            npm run migrate || true
+          else
+            echo "No migrations command found; skipping."
+          fi
+
+      - name: Run tests
+        working-directory: kernel
+        env:
+          TEST_CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
+          SERVER_KEY_PATH: ${{ github.workspace }}/kernel/test/fixtures/oidc/server.key
+          SERVER_CERT_PATH: ${{ github.workspace }}/kernel/test/fixtures/oidc/server.crt
+          CA_PATH: ${{ github.workspace }}/kernel/test/fixtures/oidc/ca.crt
+          SECRET_JSON: ${{ github.workspace }}/kernel/test/fixtures/oidc/secret.json
+          POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: |
+          npm test --silent
+
+      - name: DAST - ZAP baseline scan
+        # Mount a temporary directory to /zap/wrk (ZAP expects it)
+        run: |
+          mkdir -p "${RUNNER_TEMP}/zap-wrk"
+          docker run --rm -v "${RUNNER_TEMP}/zap-wrk:/zap/wrk" ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t https://illuvrse.com -r zap-report.html -J zap-report.json -D 2
+        # The -D 2 increases passive scan time; adjust if needed.
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: kernel/zap-report.html
+

@@ -17,3 +17,5 @@
 
 # test binary and temp files
 *.test
+.vercel
+kernel/test/fixtures

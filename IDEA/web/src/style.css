@@ -1,0 +1,8 @@
+:root { color-scheme: dark; font-family: Inter, system-ui, Arial, sans-serif; }
+body { margin: 0; background: #0f1115; color: #e6e6e6; }
+.app { max-width: 960px; margin: 40px auto; padding: 16px; }
+.row { display: flex; gap: 8px; }
+input, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background:#12141a; color:#e6e6e6; }
+button { padding: 10px 14px; border-radius: 8px; border: 1px solid #333; background:#1c1f28; color:#e6e6e6; cursor: pointer; }
+.badge { font-size: 12px; opacity: 0.8; }
+.msg { padding: 8px 10px; border: 1px solid #2a2e39; border-radius: 10px; margin: 8px 0; }

@@ -1,0 +1,15 @@
+{
+  "$id": "https://idea.illuvrse/schema/agent_bundle",
+  "type": "object",
+  "required": ["artifact_id","artifact_url","sha256","agent_config","created_at"],
+  "properties": {
+    "artifact_id": { "type": "string", "format": "uuid" },
+    "artifact_url": { "type": "string", "format": "uri" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "agent_config": { "$ref": "https://idea.illuvrse/schema/agent_config" },
+    "created_by": {"type":"string"},
+    "created_at": {"type":"string", "format":"date-time"},
+    "size_bytes": {"type":"integer"}
+  }
+}
+

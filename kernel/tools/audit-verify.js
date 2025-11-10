@@ -8,283 +8,174 @@ const { Client } = require('pg');
 const ED25519_SPki_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
 function canonicalize(value) {
-  if (value === null || value === undefined) {
-    return Buffer.from('null');
-  }
-
-  if (typeof value === 'boolean') {
-    return Buffer.from(value ? 'true' : 'false');
-  }
-
+  if (value === null || value === undefined) return Buffer.from('null');
+  if (typeof value === 'boolean') return Buffer.from(value ? 'true' : 'false');
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new Error(`Non-finite number encountered during canonicalization: ${value}`);
-    }
+    if (!Number.isFinite(value)) throw new Error(`Non-finite number: ${value}`);
     return Buffer.from(JSON.stringify(value));
   }
-
-  if (typeof value === 'string') {
-    return Buffer.from(JSON.stringify(value));
-  }
-
+  if (typeof value === 'string') return Buffer.from(JSON.stringify(value));
   if (Array.isArray(value)) {
-    const parts = value.map((entry) => canonicalize(entry));
-    return Buffer.from(`[${parts.map((buf) => buf.toString('utf8')).join(',')}]`);
+    const parts = value.map((x) => canonicalize(x));
+    return Buffer.from(`[${parts.map((b) => b.toString('utf8')).join(',')}]`);
   }
-
   if (typeof value === 'object') {
     const entries = Object.keys(value)
       .sort()
-      .map((key) => {
-        const encodedKey = JSON.stringify(key);
-        const encodedValue = canonicalize(value[key]).toString('utf8');
-        return `${encodedKey}:${encodedValue}`;
-      });
+      .map((key) => `${JSON.stringify(key)}:${canonicalize(value[key]).toString('utf8')}`);
     return Buffer.from(`{${entries.join(',')}}`);
   }
-
-  // Fallback: serialize using JSON.stringify
   return Buffer.from(JSON.stringify(value));
 }
 
 function parseSignerRegistry(raw) {
-  if (!raw || (typeof raw !== 'object' && !Array.isArray(raw))) {
-    throw new Error('Signer registry must be an object or array');
-  }
-
+  if (!raw || (typeof raw !== 'object' && !Array.isArray(raw))) throw new Error('Signer registry must be object or array');
   let entries;
-  if (Array.isArray(raw)) {
-    entries = raw;
-  } else if (Array.isArray(raw.signers)) {
-    entries = raw.signers;
-  } else {
+  if (Array.isArray(raw)) entries = raw;
+  else if (Array.isArray(raw.signers)) entries = raw.signers;
+  else {
     entries = Object.keys(raw).map((id) => {
       const val = raw[id];
-      if (typeof val === 'string') {
-        return { signerId: id, publicKey: val, algorithm: 'Ed25519' };
-      }
-      return { signerId: id, ...(val || {}) };
+      return typeof val === 'string' ? { signerId: id, publicKey: val, algorithm: 'Ed25519' } : { signerId: id, ...(val || {}) };
     });
   }
 
   const map = new Map();
-  for (const entry of entries) {
-    if (!entry) continue;
-    const signerId = entry.signerId || entry.signer_id || entry.id;
-    const publicKey = entry.publicKey || entry.public_key;
-    const algorithm = entry.algorithm || entry.alg || 'Ed25519';
-    if (!signerId || !publicKey) {
-      throw new Error('Each signer entry must include signerId and publicKey');
+  for (const e of entries) {
+    if (!e) continue;
+    const signerId = e.signerId || e.signer_id || e.id;
+    let publicKey = e.publicKey || e.public_key;
+    let alg = (e.algorithm || e.alg || 'Ed25519').toLowerCase();
+    if (!signerId || !publicKey) throw new Error('Each signer needs signerId + publicKey');
+    alg = alg.includes('rsa') ? 'rsa-sha256' : alg.includes('ed25519') ? 'Ed25519' : (() => { throw new Error(`Bad alg ${alg}`); })();
+    publicKey = typeof publicKey === 'string' ? publicKey.trim() : publicKey;
+    if (alg === 'Ed25519') {
+      const buf = Buffer.from(publicKey, 'base64');
+      if (buf.length !== 32) throw new Error(`Ed25519 key for ${signerId} invalid length`);
     }
-    if (!/^Ed25519$/i.test(algorithm)) {
-      throw new Error(`Unsupported algorithm for signer ${signerId}: ${algorithm}`);
-    }
-    const normalizedKey = publicKey.trim();
-    // Validate base64
-    let decoded;
-    try {
-      decoded = Buffer.from(normalizedKey, 'base64');
-    } catch (err) {
-      throw new Error(`Invalid base64 public key for signer ${signerId}`);
-    }
-    if (decoded.length !== 32) {
-      throw new Error(`Public key for signer ${signerId} must be 32 bytes after base64 decoding`);
-    }
-    map.set(signerId, { publicKey: normalizedKey, algorithm: 'Ed25519' });
+    map.set(signerId, { publicKey, algorithm: alg });
   }
   return map;
 }
 
-function createKeyObject(publicKeyB64) {
-  const raw = Buffer.from(publicKeyB64, 'base64');
-  if (raw.length !== 32) {
-    throw new Error('Ed25519 public key must be 32 bytes');
+function createKeyObject(publicKeyStr, alg) {
+  if (alg === 'Ed25519') {
+    const raw = Buffer.from(publicKeyStr, 'base64');
+    const spki = Buffer.concat([ED25519_SPki_PREFIX, raw]);
+    return crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
   }
-  const spki = Buffer.concat([ED25519_SPki_PREFIX, raw]);
-  return crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
+  if (alg === 'rsa-sha256') {
+    const trimmed = publicKeyStr.trim();
+    if (trimmed.startsWith('-----BEGIN')) return crypto.createPublicKey(trimmed);
+    const der = Buffer.from(trimmed, 'base64');
+    return crypto.createPublicKey({ key: der, format: 'der', type: 'spki' });
+  }
+  throw new Error(`Unsupported algorithm: ${alg}`);
 }
 
 function verifyEvents(events, signerMap) {
-  if (!(signerMap instanceof Map)) {
-    throw new Error('signerMap must be a Map of signerId -> { publicKey }');
-  }
-
   const keyCache = new Map();
   let expectedPrev = '';
   let headHash = '';
 
-  events.forEach((row, index) => {
-    const id = row.id || row.ID;
-    const signerId = row.signer_id || row.signerId;
-    if (!signerId) {
-      throw new Error(`Missing signerId for event ${id || `#${index + 1}`}`);
-    }
-    const signerInfo = signerMap.get(signerId);
-    if (!signerInfo) {
-      throw new Error(`Unknown signer ${signerId} for event ${id || `#${index + 1}`}`);
-    }
+  for (const [i, row] of events.entries()) {
+    const id = row.id;
+    const signerId = row.signer_kid || row.signer_id;
+    if (!signerId) throw new Error(`Missing signerId for event ${id}`);
+    const signer = signerMap.get(signerId);
+    if (!signer) throw new Error(`Unknown signer ${signerId}`);
 
-    const storedPrev = row.prev_hash || row.prevHash || '';
-    const storedHash = row.hash;
-    const storedSignature = row.signature;
+    const storedPrev = row.prev_hash || '';
+    const sigB64 = row.signature;
+    if (!sigB64) throw new Error(`Missing signature for ${id}`);
 
-    if (!storedHash) {
-      throw new Error(`Missing hash for event ${id || `#${index + 1}`}`);
-    }
-    if (!storedSignature) {
-      throw new Error(`Missing signature for event ${id || `#${index + 1}`}`);
-    }
-
-    const payload = row.payload ?? null;
-    const canonical = canonicalize(payload);
+    const canonical = canonicalize(row.payload ?? null);
     const prevBytes = storedPrev ? Buffer.from(storedPrev, 'hex') : Buffer.alloc(0);
-    const hashBytes = crypto
-      .createHash('sha256')
-      .update(Buffer.concat([canonical, prevBytes]))
-      .digest();
+    const hashBytes = crypto.createHash('sha256').update(Buffer.concat([canonical, prevBytes])).digest();
     const computedHash = hashBytes.toString('hex');
 
-    if (expectedPrev && storedPrev !== expectedPrev) {
-      throw new Error(
-        `prevHash mismatch for event ${id || `#${index + 1}`}: expected ${expectedPrev} but got ${storedPrev || ''}`,
-      );
+    if (expectedPrev && storedPrev !== expectedPrev)
+      throw new Error(`prev_hash mismatch for ${id}: expected ${expectedPrev} got ${storedPrev}`);
+
+    let keyObj = keyCache.get(signerId);
+    if (!keyObj) {
+      keyObj = createKeyObject(signer.publicKey, signer.algorithm);
+      keyCache.set(signerId, keyObj);
     }
 
-    if (computedHash !== storedHash) {
-      throw new Error(
-        `Hash mismatch for event ${id || `#${index + 1}`}: computed ${computedHash} but stored ${storedHash}`,
-      );
+    const sig = Buffer.from(sigB64, 'base64');
+    if (signer.algorithm === 'Ed25519') {
+      if (!crypto.verify(null, hashBytes, keyObj, sig)) throw new Error(`Ed25519 verify failed for ${id}`);
+    } else if (signer.algorithm === 'rsa-sha256') {
+      const msg = Buffer.concat([canonical, prevBytes]);
+      const paddings = [
+        { pad: crypto.constants.RSA_PKCS1_PSS_PADDING, opts: { saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST } },
+        { pad: crypto.constants.RSA_PKCS1_PADDING, opts: {} },
+      ];
+      let ok = false;
+      for (const p of paddings) {
+        try {
+          const v = crypto.createVerify('RSA-SHA256');
+          v.update(msg);
+          v.end();
+          ok = v.verify({ key: keyObj, padding: p.pad, ...p.opts }, sig);
+          if (ok) break;
+        } catch (_) {}
+      }
+      if (!ok) throw new Error(`RSA-SHA256 verification failed for ${id} (PSS+PKCS1v1.5 both failed)`);
     }
 
-    let keyObject = keyCache.get(signerId);
-    if (!keyObject) {
-      keyObject = createKeyObject(signerInfo.publicKey);
-      keyCache.set(signerId, keyObject);
-    }
-
-    let signatureBytes;
-    try {
-      signatureBytes = Buffer.from(storedSignature, 'base64');
-    } catch (err) {
-      throw new Error(`Invalid signature encoding for event ${id || `#${index + 1}`}`);
-    }
-
-    const ok = crypto.verify(null, hashBytes, keyObject, signatureBytes);
-    if (!ok) {
-      throw new Error(`Signature verification failed for event ${id || `#${index + 1}`}`);
-    }
-
-    expectedPrev = storedHash;
-    headHash = storedHash;
-  });
+    expectedPrev = computedHash;
+    headHash = computedHash;
+  }
 
   return headHash;
 }
 
 async function fetchEvents(client) {
-  const query =
-    'SELECT id, event_type, payload, prev_hash, hash, signature, signer_id FROM audit_events ORDER BY ts ASC';
-  const res = await client.query(query);
+  const res = await client.query(`
+    SELECT id, event_type, payload, prev_hash, signature, signer_kid
+    FROM audit_events
+    ORDER BY created_at ASC
+  `);
   return res.rows;
 }
 
-async function verifyAuditChain(options = {}) {
-  const { databaseUrl = process.env.POSTGRES_URL, signerMap, client: providedClient } = options;
-  let signerRegistry = signerMap;
-  if (!signerRegistry) {
-    const signerSource = options.signerSource || process.env.AUDIT_SIGNERS_FILE || process.env.AUDIT_SIGNERS_JSON;
-    if (!signerSource) {
-      throw new Error('Signer registry not provided. Use --signers or set AUDIT_SIGNERS_FILE/AUDIT_SIGNERS_JSON.');
-    }
-    if (fs.existsSync(signerSource)) {
-      const fileContent = fs.readFileSync(path.resolve(signerSource), 'utf8');
-      signerRegistry = parseSignerRegistry(JSON.parse(fileContent));
-    } else {
-      signerRegistry = parseSignerRegistry(JSON.parse(signerSource));
-    }
-  }
-
-  if (!(signerRegistry instanceof Map)) {
-    throw new Error('signerRegistry must be a Map instance');
-  }
-
-  if (!databaseUrl && !providedClient) {
-    throw new Error('Database URL must be provided via --database-url or POSTGRES_URL');
-  }
-
-  const client = providedClient || new Client({ connectionString: databaseUrl });
-  let shouldClose = false;
-  if (!providedClient) {
-    await client.connect();
-    shouldClose = true;
-  }
-
+async function verifyAuditChain({ databaseUrl = process.env.POSTGRES_URL, signerMap }) {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
   try {
-    const rows = await fetchEvents(client);
-    const head = verifyEvents(rows, signerRegistry);
+    const events = await fetchEvents(client);
+    const head = verifyEvents(events, signerMap);
     return head;
   } finally {
-    if (shouldClose) {
-      await client.end();
-    }
+    await client.end();
   }
-}
-
-function printHelp() {
-  console.log(`Usage: node audit-verify.js [options]\n\nOptions:\n  -d, --database-url <url>   Postgres connection string (defaults to POSTGRES_URL)\n  -s, --signers <path|json>   Path to signer registry JSON or inline JSON string.\n  -h, --help                  Show this help message.\n\nSigner registry format:\n  {\n    "signers": [\n      { "signerId": "kernel-signer", "publicKey": "<base64>", "algorithm": "Ed25519" }\n    ]\n  }\n  // or a map: { "kernel-signer": "<base64>" }\n`);
 }
 
 async function main(argv) {
   const args = argv.slice(2);
-  if (args.includes('-h') || args.includes('--help')) {
-    printHelp();
-    return;
+  let dbUrl, signersPath;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-d' || args[i] === '--database-url') dbUrl = args[++i];
+    else if (args[i] === '-s' || args[i] === '--signers') signersPath = args[++i];
   }
-
-  let databaseUrl;
-  let signerSource;
-
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (arg === '-d' || arg === '--database-url') {
-      databaseUrl = args[i + 1];
-      i += 1;
-    } else if (arg === '-s' || arg === '--signers') {
-      signerSource = args[i + 1];
-      i += 1;
-    } else {
-      throw new Error(`Unknown argument: ${arg}`);
-    }
+  if (!dbUrl || !signersPath) {
+    console.error('Usage: node audit-verify.js -d <db_url> -s <signers.json>');
+    process.exit(1);
   }
-
+  const raw = JSON.parse(fs.readFileSync(path.resolve(signersPath), 'utf8'));
+  const signerMap = parseSignerRegistry(raw);
   try {
-    const signerMap = signerSource
-      ? parseSignerRegistry(
-          fs.existsSync(signerSource)
-            ? JSON.parse(fs.readFileSync(path.resolve(signerSource), 'utf8'))
-            : JSON.parse(signerSource),
-        )
-      : undefined;
-    const head = await verifyAuditChain({ databaseUrl, signerMap });
-    if (head) {
-      console.log(`Audit chain verified. Head hash: ${head}`);
-    } else {
-      console.log('Audit chain verified. No events found.');
-    }
-  } catch (err) {
-    console.error('Audit verification failed:', err.message || err);
+    const head = await verifyAuditChain({ databaseUrl: dbUrl, signerMap });
+    console.log(`Audit chain verified. Head hash: ${head}`);
+  } catch (e) {
+    console.error('Audit verification failed:', e.message);
     process.exitCode = 1;
   }
 }
 
-if (require.main === module) {
-  main(process.argv);
-}
+if (require.main === module) main(process.argv);
 
-module.exports = {
-  canonicalize,
-  parseSignerRegistry,
-  createKeyObject,
-  verifyEvents,
-  verifyAuditChain,
-};
+module.exports = { canonicalize, parseSignerRegistry, createKeyObject, verifyEvents, verifyAuditChain };
+

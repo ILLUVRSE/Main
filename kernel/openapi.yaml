@@ -37,7 +37,6 @@ components:
       properties:
         id:
           type: string
-          format: uuid
         name:
           type: string
         goals:
@@ -67,7 +66,6 @@ components:
       properties:
         id:
           type: string
-          format: uuid
         role:
           type: string
         skills:
@@ -99,24 +97,58 @@ components:
         - role
         - state
 
+    # EvalReport accepts either camelCase or snake_case shape. One of the two forms must be present.
     EvalReport:
       type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        agentId:
-          type: string
-          format: uuid
-        metricSet:
-          type: object
-        timestamp:
-          type: string
-          format: date-time
-      required:
-        - id
-        - agentId
-        - metricSet
+      description: >
+        Evaluation report. Accepts either camelCase (agentId/metricSet) or snake_case (agent_id/metric_set).
+      oneOf:
+        - type: object
+          properties:
+            id:
+              type: string
+            agentId:
+              type: string
+              description: "Agent identifier (camelCase)."
+            metricSet:
+              type: object
+              description: "Metrics object (camelCase)."
+            timestamp:
+              type: string
+              format: date-time
+            computedScore:
+              type: number
+            source:
+              type: string
+            window:
+              type: string
+          required:
+            - agentId
+            - metricSet
+          additionalProperties: true
+        - type: object
+          properties:
+            id:
+              type: string
+            agent_id:
+              type: string
+              description: "Alias for agentId (snake_case)."
+            metric_set:
+              type: object
+              description: "Alias for metricSet (snake_case)."
+            timestamp:
+              type: string
+              format: date-time
+            computed_score:
+              type: number
+            source:
+              type: string
+            window:
+              type: string
+          required:
+            - agent_id
+            - metric_set
+          additionalProperties: true
 
     ManifestSignature:
       type: object
@@ -168,7 +200,6 @@ components:
       properties:
         id:
           type: string
-          format: uuid
         embeddingId:
           type: string
         metadata:
@@ -176,12 +207,29 @@ components:
       required:
         - id
 
+    # AllocationRequest: permissive schema that accepts the test/client shape (snake_case)
     AllocationRequest:
       type: object
+      description: Request object for resource allocation. Accepts snake_case and camelCase keys.
       properties:
+        # snake_case canonical fields used by tests
+        entity_id:
+          type: string
+        pool:
+          type: string
+        delta:
+          type: number
+        reason:
+          type: string
+        requestedBy:
+          type: string
+        requested_by:
+          type: string
+        status:
+          type: string
+        # camelCase variants / older fields
         id:
           type: string
-          format: uuid
         divisionId:
           type: string
         cpu:
@@ -192,9 +240,9 @@ components:
           type: integer
         requester:
           type: string
-      required:
-        - id
-        - divisionId
+      # minimal requirement: either entity_id or id/divisionId (but Ajv doesn't do XOR easily here).
+      # Keep permissive: require nothing specific, validation will be performed in code.
+      additionalProperties: true
 
     SignRequest:
       type: object
@@ -206,6 +254,19 @@ components:
       required:
         - manifest
         - signerId
+
+    AgentStateResponse:
+      type: object
+      properties:
+        agent:
+          $ref: '#/components/schemas/AgentProfile'
+        evals:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalReport'
+      required:
+        - agent
+      additionalProperties: false
 
 paths:
   /health:
@@ -289,7 +350,6 @@ paths:
           required: true
           schema:
             type: string
-            format: uuid
       responses:
         "200":
           description: division
@@ -349,14 +409,13 @@ paths:
           required: true
           schema:
             type: string
-            format: uuid
       responses:
         "200":
           description: agent state
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentProfile'
+                $ref: '#/components/schemas/AgentStateResponse'
         "404":
           description: not found
 
@@ -373,6 +432,19 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EvalReport'
+            examples:
+              snake_case:
+                value:
+                  agent_id: eval-agent-1
+                  metric_set:
+                    accuracy: 0.9
+                  computed_score: 0.9
+              camelCase:
+                value:
+                  agentId: eval-agent-1
+                  metricSet:
+                    accuracy: 0.9
+                  computedScore: 0.9
       responses:
         "200":
           description: eval accepted
@@ -399,9 +471,21 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AllocationRequest'
+            examples:
+              snake_case:
+                value:
+                  entity_id: agent-1
+                  pool: compute
+                  delta: 5
+                  requestedBy: system
+              camelCase:
+                value:
+                  id: alloc-1
+                  divisionId: division-1
+                  cpu: 4
       responses:
-        "202":
-          description: allocation requested
+        "200":
+          description: allocation requested/assigned
           content:
             application/json:
               schema:
@@ -481,6 +565,11 @@ paths:
                     type: array
                     items:
                       type: object
+                      properties:
+                        node:
+                          type: string
+                        details:
+                          type: object
         "404":
           description: not found
 

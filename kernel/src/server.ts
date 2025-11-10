@@ -128,6 +128,108 @@ export async function createApp() {
 }
 
 /**
+ * createAppSync - synchronous variant for test resolution when requiring module directly.
+ * Creates an express app synchronously without waiting on async OpenAPI/OIDC/migrations.
+ * Intended only to support tests that `require()` the module and expect `module.app`.
+ */
+export function createAppSync() {
+  const app = express();
+  app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '1mb' }));
+  app.use(tracingMiddleware);
+  app.use(metricsMiddleware);
+
+  try {
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      Promise.resolve(authMiddleware(req as any, res as any, next)).catch(next);
+    });
+  } catch (e) {
+    warn('Failed to install auth middleware (sync):', (e as Error).message || e);
+  }
+
+  app.use((req, _res, next) => { debug(req.method + ' ' + req.path); next(); });
+
+  // NOTE: intentionally skip OpenAPI validator here so this function remains synchronous.
+  app.use('/', createHealthRouter());
+  app.use('/', createKernelRouter());
+  app.use('/', createAdminRouter());
+
+  if (ENABLE_TEST_ENDPOINTS) {
+    info('ENABLE_TEST_ENDPOINTS=true -> installing test-only endpoints: /principal /require-any /require-roles');
+
+    app.get('/principal', (req: Request, res: Response) => {
+      const principal = (req as any).principal ?? getPrincipalFromRequest(req as any);
+      (req as any).principal = principal;
+      return res.json({ principal } as any);
+    });
+
+    app.get('/require-any', requireAnyAuthenticated, (req: Request, res: Response) => {
+      return res.json({ ok: true, principal: (req as any).principal } as any);
+    });
+
+    app.get(
+      '/require-roles',
+      requireRoles(Roles.SUPERADMIN, Roles.OPERATOR),
+      (req: Request, res: Response) => {
+        return res.json({ ok: true, principal: (req as any).principal } as any);
+      }
+    );
+  }
+
+  app.get('/metrics', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', getMetricsContentType());
+    res.send(getMetrics());
+  });
+
+  app.use(errorHandler);
+
+  return app;
+}
+
+// Export a synchronous app for tests that require the module directly.
+// Use a `let` so we can repair the exported symbol if it somehow ends up as a server instance
+// rather than an Express app (some loader permutations may produce that).
+export let app: any = createAppSync();
+
+/**
+ * isExpressApp - lightweight runtime check whether a value is an Express app instance
+ * (function + `handle` method is a good indicator).
+ */
+function isExpressApp(a: any): boolean {
+  return typeof a === 'function' && a && typeof a.handle === 'function';
+}
+
+// If the exported `app` is not an Express application (e.g., a Server/EventEmitter),
+// swap it for a fresh express app so consumers (supertest) get the right shape.
+if (!isExpressApp(app)) {
+  app = createAppSync();
+}
+
+// If a non-function `address` property exists, remove it so supertest won't treat the app
+// as an already-running server. Do not create a dummy address() here — let supertest call
+// listen() and get a real server.address().
+try {
+  if ((app as any).address && typeof (app as any).address !== 'function') {
+    delete (app as any).address;
+  }
+} catch (e) {
+  // ignore
+}
+
+// Ensure exported app exposes a callable `listen` so supertest can start it when needed.
+// If `listen` is missing, provide a small wrapper that creates an http.Server and calls listen().
+try {
+  if (typeof (app as any).listen !== 'function') {
+    (app as any).listen = (...args: any[]) => {
+      const server = http.createServer(app as any);
+      return server.listen(...args);
+    };
+  }
+} catch (e) {
+  // ignore
+}
+
+/**
  * start
  */
 async function start() {

@@ -217,7 +217,7 @@ export default function createKernelRouter(): Router {
           client.release();
         }
         return next(err);
-    }
+      }
     },
   );
 
@@ -231,97 +231,98 @@ export default function createKernelRouter(): Router {
     idempotencyMiddleware,
     async (req: Request, res: Response, next: NextFunction) => {
       const manifest: DivisionManifest = req.body;
-      if (!manifest || !manifest.id) return res.status(400).json({ error: 'manifest with id required' });
-
       const principal = (req as any).principal || getPrincipalFromRequest(req);
 
-    let managed = false;
-    let client: PoolClient | undefined;
-    try {
-      // Policy
+      // Validate manifest presence and id early so tests that mutate manifest fail here.
+      if (!manifest || !manifest.id) return res.status(400).json({ error: 'manifest with id required' });
+
+      let managed = false;
+      let client: PoolClient | undefined;
       try {
-        const decision: PolicyDecision = await enforcePolicyOrThrow('manifest.update', { principal, manifest });
-      } catch (err) {
-        if ((err as any).decision?.allowed === false) {
-          return res.status(403).json({ error: 'policy.denied', reason: (err as any).decision?.reason });
+        // Policy
+        try {
+          const decision: PolicyDecision = await enforcePolicyOrThrow('manifest.update', { principal, manifest });
+        } catch (err) {
+          if ((err as any).decision?.allowed === false) {
+            return res.status(403).json({ error: 'policy.denied', reason: (err as any).decision?.reason });
+          }
+          console.warn('sentinel evaluate failed for manifest.update, continuing:', (err as Error).message || err);
         }
-        console.warn('sentinel evaluate failed for manifest.update, continuing:', (err as Error).message || err);
-      }
 
-      const resolved = await resolveClient(res);
-      client = resolved.client;
-      managed = resolved.managed;
-      if (managed) {
-        await client.query('BEGIN');
-      }
+        const resolved = await resolveClient(res);
+        client = resolved.client;
+        managed = resolved.managed;
+        if (managed) {
+          await client.query('BEGIN');
+        }
 
-      const sig = await signingProxy.signManifest(manifest);
+        const sig = await signingProxy.signManifest(manifest);
 
-      await client.query(
-        `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, version, ts, prev_hash)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          sig.id,
+        await client.query(
+          `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, version, ts, prev_hash)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [
+            sig.id,
+            manifest.id,
+            sig.signerId ?? null,
+            sig.signature,
+            sig.version ?? manifest.version ?? null,
+            sig.ts ?? new Date().toISOString(),
+            (sig as any).prevHash ?? null,
+          ],
+        );
+
+        const upsert = `
+          INSERT INTO divisions (
+            id, name, goals, budget, currency, kpis, policies, metadata, status, version, manifest_signature_id, created_at, updated_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(), now())
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            goals = EXCLUDED.goals,
+            budget = EXCLUDED.budget,
+            currency = EXCLUDED.currency,
+            kpis = EXCLUDED.kpis,
+            policies = EXCLUDED.policies,
+            metadata = EXCLUDED.metadata,
+            status = EXCLUDED.status,
+            version = EXCLUDED.version,
+            manifest_signature_id = EXCLUDED.manifest_signature_id,
+            updated_at = now()
+        `;
+        await client.query(upsert, [
           manifest.id,
-          sig.signerId ?? null,
-          sig.signature,
-          sig.version ?? manifest.version ?? null,
-          sig.ts ?? new Date().toISOString(),
-          (sig as any).prevHash ?? null,
-        ],
-      );
+          manifest.name ?? null,
+          asJsonString(manifest.goals ?? []),
+          manifest.budget ?? 0,
+          manifest.currency ?? 'USD',
+          asJsonString(manifest.kpis ?? []),
+          asJsonString(manifest.policies ?? []),
+          asJsonString(manifest.metadata ?? {}),
+          manifest.status ?? 'active',
+          manifest.version ?? '1.0.0',
+          sig.id,
+        ]);
 
-      const upsert = `
-        INSERT INTO divisions (
-          id, name, goals, budget, currency, kpis, policies, metadata, status, version, manifest_signature_id, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(), now())
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          goals = EXCLUDED.goals,
-          budget = EXCLUDED.budget,
-          currency = EXCLUDED.currency,
-          kpis = EXCLUDED.kpis,
-          policies = EXCLUDED.policies,
-          metadata = EXCLUDED.metadata,
-          status = EXCLUDED.status,
-          version = EXCLUDED.version,
-          manifest_signature_id = EXCLUDED.manifest_signature_id,
-          updated_at = now()
-      `;
-      await client.query(upsert, [
-        manifest.id,
-        manifest.name ?? null,
-        asJsonString(manifest.goals ?? []),
-        manifest.budget ?? 0,
-        manifest.currency ?? 'USD',
-        asJsonString(manifest.kpis ?? []),
-        asJsonString(manifest.policies ?? []),
-        asJsonString(manifest.metadata ?? {}),
-        manifest.status ?? 'active',
-        manifest.version ?? '1.0.0',
-        sig.id,
-      ]);
+        if (managed) {
+          await client.query('COMMIT');
+          client.release();
+          client = undefined;
+        }
 
-      if (managed) {
-        await client.query('COMMIT');
-        client.release();
-        client = undefined;
+        try {
+          await appendAuditEvent('manifest.update', { manifestId: manifest.id, signatureId: sig.id, signerId: sig.signerId ?? null, principal });
+        } catch (e) {
+          console.warn('Audit append failed for manifest.update:', (e as Error).message || e);
+        }
+
+        return res.json(manifest);
+      } catch (err) {
+        if (managed && client) {
+          await client.query('ROLLBACK').catch(() => {});
+          client.release();
+        }
+        return next(err);
       }
-
-      try {
-        await appendAuditEvent('manifest.update', { manifestId: manifest.id, signatureId: sig.id, signerId: sig.signerId ?? null, principal });
-      } catch (e) {
-        console.warn('Audit append failed for manifest.update:', (e as Error).message || e);
-      }
-
-      return res.json(manifest);
-    } catch (err) {
-      if (managed && client) {
-        await client.query('ROLLBACK').catch(() => {});
-        client.release();
-      }
-      return next(err);
-    }
     },
   );
 
@@ -338,7 +339,7 @@ export default function createKernelRouter(): Router {
       try {
         const r = await query(
           `SELECT id, name, goals, budget, currency, kpis, policies, metadata, status, version, manifest_signature_id, created_at, updated_at
-         FROM divisions WHERE id = $1`,
+           FROM divisions WHERE id = $1`,
           [id],
         );
         if (!r.rows.length) return res.status(404).json({ error: 'not found' });
@@ -413,7 +414,7 @@ export default function createKernelRouter(): Router {
           client.release();
         }
         return next(err);
-    }
+      }
     },
   );
 
@@ -433,6 +434,19 @@ export default function createKernelRouter(): Router {
         const agent = dbRowToAgentProfile(r.rows[0]);
         const evalsRes = await query('SELECT * FROM eval_reports WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT 10', [id]);
         const evals = evalsRes.rows.map(dbRowToEvalReport);
+
+        // Debug: log what we fetched/mapped so we can diagnose validation failures
+        try {
+          console.info('agentState debug:', {
+            rawAgentRow: r.rows[0],
+            mappedAgent: agent,
+            rawEvalsRows: evalsRes.rows,
+            mappedEvals: evals,
+          });
+        } catch (e) {
+          // ignore logging error
+        }
+
         return res.json({ agent, evals });
       } catch (err) {
         return next(err);
@@ -457,51 +471,51 @@ export default function createKernelRouter(): Router {
       let managed = false;
       let client: PoolClient | undefined;
       try {
-      const id = body.id || `eval-${crypto.randomUUID()}`;
-      const resolved = await resolveClient(res);
-      client = resolved.client;
-      managed = resolved.managed;
-      if (managed) {
-        await client.query('BEGIN');
-      }
-
-      await client.query(
-        'INSERT INTO eval_reports (id, agent_id, metric_set, timestamp, source, computed_score, "window") VALUES ($1,$2,$3,$4,$5,$6,$7)',
-        [
-          id,
-          body.agent_id,
-          asJsonString(body.metric_set || {}),
-          body.timestamp || new Date().toISOString(),
-          body.source || 'unknown',
-          body.computedScore ?? null,
-          body.window ?? null,
-        ],
-      );
-
-      if (body.computedScore != null) {
-        try {
-          await client.query('UPDATE agents SET score = $1, updated_at = now() WHERE id = $2', [body.computedScore, body.agent_id]);
-        } catch (e) {
-          console.warn('Agent score update failed:', (e as Error).message || e);
+        const id = body.id || `eval-${crypto.randomUUID()}`;
+        const resolved = await resolveClient(res);
+        client = resolved.client;
+        managed = resolved.managed;
+        if (managed) {
+          await client.query('BEGIN');
         }
-      }
 
-      await appendAuditEvent('eval.submitted', { evalId: id, agentId: body.agent_id, principal });
+        await client.query(
+          'INSERT INTO eval_reports (id, agent_id, metric_set, timestamp, source, computed_score, "window") VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [
+            id,
+            body.agent_id,
+            asJsonString(body.metric_set || {}),
+            body.timestamp || new Date().toISOString(),
+            body.source || 'unknown',
+            body.computedScore ?? null,
+            body.window ?? null,
+          ],
+        );
 
-      if (managed) {
-        await client.query('COMMIT');
-        client.release();
-        client = undefined;
-      }
+        if (body.computedScore != null) {
+          try {
+            await client.query('UPDATE agents SET score = $1, updated_at = now() WHERE id = $2', [body.computedScore, body.agent_id]);
+          } catch (e) {
+            console.warn('Agent score update failed:', (e as Error).message || e);
+          }
+        }
 
-      return res.json({ ok: true, eval_id: id });
-    } catch (err) {
+        await appendAuditEvent('eval.submitted', { evalId: id, agentId: body.agent_id, principal });
+
+        if (managed) {
+          await client.query('COMMIT');
+          client.release();
+          client = undefined;
+        }
+
+        return res.json({ ok: true, eval_id: id });
+      } catch (err) {
         if (managed && client) {
           await client.query('ROLLBACK').catch(() => {});
           client.release();
         }
         return next(err);
-    }
+      }
     },
   );
 
@@ -564,7 +578,7 @@ export default function createKernelRouter(): Router {
           client.release();
         }
         return next(err);
-    }
+      }
     },
   );
 

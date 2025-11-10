@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AWSCloudTrailAclCheck20150319",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudtrail.amazonaws.com" },
+      "Action": "s3:GetBucketAcl",
+      "Resource": "arn:aws:s3:::BUCKET_NAME_HERE"
+    },
+    {
+      "Sid": "AWSCloudTrailWrite20150319",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudtrail.amazonaws.com" },
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::BUCKET_NAME_HERE/AWSLogs/ACCOUNT_ID_HERE/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-acl": "bucket-owner-full-control",
+          "aws:SourceAccount": "ACCOUNT_ID_HERE"
+        },
+        "ArnLike": {
+          "aws:SourceArn": "arn:aws:cloudtrail:*:ACCOUNT_ID_HERE:trail/*"
+        }
+      }
+    },
+    {
+      "Sid": "AWSCloudTrailGetBucketLocation",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudtrail.amazonaws.com" },
+      "Action": "s3:GetBucketLocation",
+      "Resource": "arn:aws:s3:::BUCKET_NAME_HERE"
+    }
+  ]
+}
+

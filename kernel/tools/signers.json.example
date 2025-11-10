@@ -1,0 +1,15 @@
+{
+  "signers": [
+    {
+      "signerId": "rsa-signer-1",
+      "algorithm": "rsa-sha256",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnExamplePublicKeyDataGoesHere\nReplaceThisWithYourBase64OrPEMEncodedPublicKeyMaterial\n-----END PUBLIC KEY-----"
+    },
+    {
+      "signerId": "ed25519-signer-1",
+      "algorithm": "ed25519",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAExampleEd25519PublicKeyBase64OrDER+\n-----END PUBLIC KEY-----"
+    }
+  ]
+}
+

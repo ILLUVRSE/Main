@@ -1,122 +1,173 @@
-# Kernel — Acceptance Criteria
+# Kernel — Acceptance Criteria (Agent-Manager Signing & Verification)
 
-Purpose: clear, testable checks that prove the Kernel API & Governance module is correct, secure, and ready for upstream modules to depend on. Each criterion is short and verifiable.
+This document defines the **kernel-side acceptance criteria** for the agent-manager signing and verification work (RSA/KMS signing, digest verification, canonical parity, CI, and runbooks). Each item is a testable check with commands to validate locally or in CI.
 
----
-
-## # 1) API surface & contract
-- **Endpoints implemented:** The kernel exposes the documented endpoints (division, agent, agent state, eval, allocate, sign, audit, reason, security/status).
-- **Schema matches spec:** Request and response shapes follow `openapi.yaml` and `data-models.md`. Schema validation rejects malformed requests with `400`.
-- **Idempotency:** Mutation endpoints accept an idempotency key header to avoid duplicate events.
-
-**How to verify:** Run a contract validator (OpenAPI tool) against `openapi.yaml` and exercise endpoints with valid/invalid payloads. Confirm `400` on validation failures.
+> **Key Summary:**
+>
+> * Agent-manager signs a digest: `SHA256(canonical(payload) || prevHashBytes)`.
+> * Kernel verifier must verify RSA and Ed25519 signatures using the digest flow.
+> * Canonicalization parity between Node and Go must match byte-for-byte.
+> * CI must enforce `require_kms_check.sh` and run end-to-end tests.
 
 ---
 
-## # 2) RBAC & Authentication
-- **RBAC enforced:** Each endpoint enforces role checks. SuperAdmin, DivisionLead, Operator, Auditor have the appropriate rights.
-- **Human auth via OIDC:** Interactive flows require SSO/OIDC.
-- **Service auth via mTLS:** Services authenticate with mTLS certs and are mapped to service roles.
+## Files That Must Exist
 
-**How to verify:** Test calls with different role credentials to confirm allowed vs denied; verify `401`/`403` codes for unauthenticated/unauthorized attempts.
+Ensure the following kernel-side files exist and are updated:
 
----
+* `kernel/tools/audit-verify.js` — verifies digest flow and RSA/Ed25519 signatures.
+* `kernel/tools/signers.json` (or example) — RSA and Ed25519 signer entries:
 
-## # 3) Manifest signing & key management
-- **Signing works:** Kernel produces `ManifestSignature` records for manifests and returns them on `POST /kernel/sign`. Signatures are Ed25519 and verifiable with the public key.
-- **KMS/HSM usage described:** Signing keys referenced by `signerId` and not stored in plaintext in repo.
-- **Key rotation procedure present:** A documented rotation flow exists and rotation events are auditable.
+  ```json
+  { "signers": [ { "signerId": "...", "algorithm": "rsa-sha256", "publicKey": "PEM or base64 DER" } ] }
+  ```
+* `kernel/test/node_canonical_parity.test.js` — Node ↔ Go canonical parity test.
+* `kernel/test/audit_verify.test.ts` — RSA verifier unit test.
+* `kernel/test/mocks/mockKmsServer.ts` — mock KMS server for tests.
+* `kernel/ci/require_kms_check.sh` — CI guard script.
+* `.github/workflows/agent-manager-ci.yml` — CI workflow.
 
-**How to verify:** Create a manifest, call `/kernel/sign`, retrieve the signature, verify signature with public key via standard Ed25519 verification. Review `security-governance.md` for rotation steps.
-
----
-
-## # 4) Audit log integrity
-- **Append-only events:** Audit events are generated for every critical change and stored append-only.
-- **Hash chain & signatures:** Each `AuditEvent` includes `prevHash`, `hash`, and `signature`. Chain verification succeeds end-to-end.
-- **Export/proof tool:** A verification tool or documented process can validate chain integrity and produce a head hash proof.
-
-**How to verify:** Produce 10-20 audit events, run chain verification to confirm hashes and signatures match; attempt tamper and confirm verification fails.
+If any file is missing, the PR fails acceptance.
 
 ---
 
-## # 5) Multi-sig upgrade workflow
-- **3-of-5 enforced:** Kernel accepts approval records, validates signatures, and only applies upgrades with 3 distinct valid approvals.
-- **Upgrade artifacts stored:** Upgrade manifest, approvals, and applied record are in the upgrade registry and emitted as audit events.
-- **Emergency flow:** Emergency apply and retroactive ratification logic works as documented.
+## Canonicalization Parity
 
-**How to verify:** Simulate an upgrade: create manifest, submit approvals from three approvers, confirm Kernel applies upgrade and emits `upgrade.applied`. Test emergency apply path and retroactive ratification.
+**Goal:** Node and Go canonicalizers must produce identical byte outputs.
 
----
+**Command:**
 
-## # 6) SentinelNet policy integration
-- **Policy checks enforced:** SentinelNet can block or quarantine requests; Kernel respects SentinelNet responses for allocations and critical actions.
-- **Policy decisions audited:** Every SentinelNet decision emits an audit event with policy id and rationale.
+```bash
+npx jest kernel/test/node_canonical_parity.test.js --runInBand
+```
 
-**How to verify:** Deploy a test policy that rejects allocations beyond a small threshold. Attempt an allocation beyond the threshold and confirm a `403` with policy details and an audit event logged.
+**Expected:** Test passes (byte-for-byte equality) or skips if `go` is unavailable.
 
----
-
-## # 7) Eval ingestion & scoring hook
-- **Eval accepted:** Kernel stores EvalReports and exposes them to the Eval Engine.
-- **Agent score updated:** Submitting evals updates agent’s computed or cached score as per the model in `data-models.md`.
-
-**How to verify:** Submit evals for an agent and confirm the agent’s `score` changes and `POST /kernel/eval` returns `ok` with `eval_id`.
+If it fails, inspect differences in numeric encoding, string quoting, and key ordering.
 
 ---
 
-## # 8) Reasoning trace retrieval
-- **Trace accessible:** `GET /kernel/reason/{node}` returns a readable trace with steps and timestamps.
-- **PII redaction:** Sensitive data is redacted per SentinelNet rules before returning traces to UI.
+## Verifier RSA & Ed25519 Support
 
-**How to verify:** Create a sample reasoning node and confirm the trace is returned and any PII flagged by SentinelNet is redacted.
+**Goal:** `audit-verify.js` verifies RSA (rsa-sha256) and Ed25519 (ed25519) signatures correctly.
 
----
+**Commands:**
 
-## # 9) Storage & durability
-- **Durable sink for audit:** Audit events are persisted to a durable storage and archived (S3 or equivalent).
-- **DB schema present:** Postgres schema matches `data-models.md` and includes required indexes.
-- **Embeddings stored in vector DB:** MemoryNode references exist and vector DB contains embeddings.
+```bash
+npx jest kernel/test/audit_verify.test.ts --runInBand
+```
 
-**How to verify:** Inspect storage sinks for audit events and confirm Postgres tables and indexes exist. Check vector DB contains test embeddings and can be joined via `embeddingId`.
+Manual DB verification:
 
----
+```bash
+node kernel/tools/audit-verify.js -d "postgres://<user>:<pw>@<host>:<port>/<db>" -s kernel/tools/signers.json
+```
 
-## # 10) Tests & automation
-- **Unit tests:** Core modules (signature validation, audit chaining, multisig validator) have unit tests with at least 80% coverage.
-- **Integration tests:** End-to-end tests for: create division → sign → spawn agent → submit eval → allocation.
-- **Security tests:** Static analysis and a basic DAST scan performed; secrets are not checked into repo.
+**Expected:** `Audit chain verified. Head hash: <hex>` and exit code 0.
 
-**How to verify:** Run test suite and security scans; ensure all pass. Check coverage report.
+If it fails, verify signers, `prev_hash` chain, and algorithm/padding.
 
 ---
 
-## # 11) Operational & monitoring checks
-- **Health endpoint:** `/health` returns ok and timestamp.
-- **Metrics & logs:** Kernel exports Prometheus metrics for p95/p99 latency, request rate, error rate, sign operations/sec.
-- **Alerting:** SLO breaches and key rotation failures trigger alerts.
+## Mock KMS & Integration Tests
 
-**How to verify:** Call `/health`, check metrics endpoint, and simulate an SLO violation to confirm alerting flow (or review alert rules documentation).
+**Goal:** Mock KMS server simulates key exports and signatures.
 
----
+**Command:**
 
-## # 12) Compliance & docs
-- **Documentation present:** `kernel-api-spec.md`, `openapi.yaml`, `data-models.md`, `security-governance.md`, `audit-log-spec.md`, `multisig-workflow.md`, `api-examples.md`, and this acceptance criteria file are present in the `kernel` folder.
-- **Sign-off:** Ryan (SuperAdmin) and Security Engineer must sign off on the module before it’s considered live.
+```bash
+npx jest kernel/test/signingProxy.test.ts --runInBand
+```
 
-**How to verify:** Confirm files exist and obtain sign-off.
+**Expected:** All tests pass and mock returns a valid PEM/base64 DER public key.
 
 ---
 
-## # 13) Performance & scale baseline
-- **Latency:** API p95 < 200ms for core read endpoints under baseline load.
-- **Throughput:** Audit event pipeline can sustain X events/sec (define X during implementation).
-- **Scaling:** Document how to scale Kafka partitions, DB replicas, and vector DB shards.
+## Agent-Manager → Kernel E2E Verification
 
-**How to verify:** Run a baseline load test and confirm metrics; document scaling steps.
+**Goal:** Ensure agent-manager signing and kernel verification work end-to-end.
+
+**Command:**
+
+```bash
+chmod +x kernel/integration/e2e_agent_manager_sign_and_audit.sh
+./kernel/integration/e2e_agent_manager_sign_and_audit.sh
+```
+
+**Expected:** `Audit verification succeeded.` printed; exit code 0.
 
 ---
 
-## # Final acceptance statement
-The Kernel API & Governance module is accepted when all above checks pass, automated tests are green, audit integrity verified, and Ryan + Security Engineer formally approve. At that point, downstream modules (Agent Manager, Memory Layer, Eval Engine) may be implemented against the Kernel contract.
+## CI / Policy Enforcement
+
+**Goal:** CI runs tests, parity checks, KMS guard, and integration.
+
+**Requirements:**
+
+* `.github/workflows/agent-manager-ci.yml` runs:
+
+  * Node tests
+  * Go parity tests
+  * `require_kms_check.sh`
+  * e2e script
+* `require_kms_check.sh`:
+
+  * Fails if `REQUIRE_KMS=true` and `KMS_ENDPOINT` unset.
+  * Passes if `REQUIRE_KMS` false or unset.
+
+**Validation:**
+
+```bash
+REQUIRE_KMS=true KMS_ENDPOINT= node kernel/ci/require_kms_check.sh  # should fail
+REQUIRE_KMS=false node kernel/ci/require_kms_check.sh  # should pass
+```
+
+---
+
+## Signers Registry Format
+
+**Goal:** `audit-verify.js` must accept PEM or base64 DER keys.
+
+**Command:**
+
+```bash
+node -e "const fs=require('fs'); const { parseSignerRegistry }=require('./kernel/tools/audit-verify'); const raw=JSON.parse(fs.readFileSync('kernel/tools/signers.json','utf8')); parseSignerRegistry(raw); console.log('ok');"
+```
+
+**Expected:** No exceptions; prints `ok`.
+
+---
+
+## Documentation & Runbooks
+
+Ensure presence and accuracy of:
+
+* `docs/kms_iam_policy.md`
+* `docs/key_rotation.md`
+* `agent-manager/deployment.md`
+* `agent-manager/acceptance-criteria.md`
+
+Reviewer should confirm all docs match code behavior (digest, KMS, verification flow).
+
+---
+
+## Security Acceptance
+
+* IAM policy shows least-privilege permissions.
+* No private keys in repo.
+* CI guard enforced on protected branches.
+
+---
+
+## Final Sign-Off Checklist
+
+* [ ] All kernel tests pass.
+* [ ] E2E verification passes.
+* [ ] `audit-verify.js` validates RSA & Ed25519 digests.
+* [ ] Signers registry schema valid.
+* [ ] CI guard + integration jobs configured.
+* [ ] Docs present and accurate.
+* [ ] No private keys in repo.
+
+---
 

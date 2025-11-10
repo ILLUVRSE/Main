@@ -1,0 +1,25 @@
+{
+  "vectors": [
+    {
+      "name": "object key ordering (simple)",
+      "value": { "b": 1, "a": 2 }
+    },
+    {
+      "name": "nested objects and arrays",
+      "value": { "z": ["z", "a"], "obj": { "c": 3, "b": 2, "a": [2, 1] } }
+    },
+    {
+      "name": "null, booleans and numbers",
+      "value": { "flag": true, "nothing": null, "neg": -5, "float": 1.2345 }
+    },
+    {
+      "name": "strings needing escaping",
+      "value": { "s": "quote \" and backslash \\\\ and unicode \\u2603", "arr": ["a", "b", { "x": 1 }] }
+    },
+    {
+      "name": "array ordering preserved",
+      "value": [3, 1, 2, { "b": "B", "a": "A" }, [2, 1]]
+    }
+  ]
+}
+

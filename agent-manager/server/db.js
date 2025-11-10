@@ -13,13 +13,13 @@
 //  - createSandboxRun(run)
 //  - getSandboxRun(run_id)
 //  - query(text, params)
+//  //
+//  - insertKernelNonce, getKernelNonce, consumeKernelNonce, isKernelNonceReplay
 //
-// Kernel nonce helpers (for DB-backed replay protection):
-//  - insertKernelNonce(nonce, expiresAtIso, agentId = null)
-//      -> tries to insert a nonce row; returns the inserted row or null if conflict
-//  - getKernelNonce(nonce) -> returns row or null
-//  - consumeKernelNonce(nonce, consumedBy = null) -> marks consumed_at if not already consumed; returns updated row or null
-//  - isKernelNonceReplay(nonce) -> boolean: true==replay (exists & not expired or consumed), false==not replay
+// NOTES:
+//  - createAuditEvent normalizes signature and prev_hash for the new digest signing flow:
+//      * signature can be Buffer -> stored as base64, or string -> stored as provided.
+//      * prev_hash can be Buffer -> stored as hex lowercase, or string -> stored as provided.
 
 const { Pool } = require('pg');
 
@@ -111,13 +111,50 @@ async function listTemplates(limit = 100) {
 }
 
 /* Audit events */
+/**
+ * createAuditEvent
+ * Inserts an audit event row.
+ *
+ * Normalizes:
+ *  - signature: Buffer -> base64 string; string unchanged; null allowed
+ *  - prev_hash: Buffer -> hex lowercase string; string unchanged; null allowed
+ *
+ * Returns: { id, created_at }
+ */
 async function createAuditEvent(actor_id = null, event_type, payload = {}, signature = null, signer_kid = null, prev_hash = null) {
+  if (!event_type) throw new Error('event_type is required for createAuditEvent');
+
+  // normalize signature
+  let sigToStore = null;
+  if (Buffer.isBuffer(signature)) {
+    sigToStore = signature.toString('base64');
+  } else if (signature === null || signature === undefined) {
+    sigToStore = null;
+  } else if (typeof signature === 'string') {
+    sigToStore = signature;
+  } else {
+    // unknown type - coerce to string
+    sigToStore = String(signature);
+  }
+
+  // normalize prev_hash
+  let prevHashToStore = null;
+  if (Buffer.isBuffer(prev_hash)) {
+    prevHashToStore = prev_hash.toString('hex').toLowerCase();
+  } else if (prev_hash === null || prev_hash === undefined) {
+    prevHashToStore = null;
+  } else if (typeof prev_hash === 'string') {
+    prevHashToStore = prev_hash;
+  } else {
+    prevHashToStore = String(prev_hash);
+  }
+
   const q = `
     INSERT INTO audit_events (actor_id, event_type, payload, signature, signer_kid, prev_hash, created_at)
     VALUES ($1,$2,$3,$4,$5,$6, now())
     RETURNING id, created_at
   `;
-  const res = await query(q, [actor_id, event_type, payload, signature, signer_kid, prev_hash]);
+  const res = await query(q, [actor_id, event_type, payload, sigToStore, signer_kid, prevHashToStore]);
   return res.rows[0];
 }
 

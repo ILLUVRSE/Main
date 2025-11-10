@@ -1,0 +1,9 @@
+{
+  "signers": [
+    {
+      "signerId": "arn:aws:kms:us-east-1:470956719036:key/608d7bab-9107-4a41-ab43-5bcb660d5494",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAvX4bMLGzepVslARvx4/z\nSdAqqrdZyj8doYbOF3Yherv9Tl6dV95UnzhFXaV+/Ljt6Kq3epLRbOoxuwk9z5ng\nov3Vi7pYc8bzRAszqWk/HgRPT10d0x2m+vliexu6vNuu4r3hQJph26v+XXG6DPkn\n+BQ6lz4Z405zAqXx6FZK4Rc3OxcYH/BJQnYFGomtPId+cOuF+01IdZDFfWvY+0qh\n5l9ErqqnzaKQFosGQ8TUU+BKG8cRDkoLsDOxjALPKiKdo3Jxa7NrEPJ0CmgvYtB+\na+waVw/9DYeZzuo2RD4wbOm0NRpKD0HAXHrketNgypN9pn90OBeaD/u31EP4itMV\nrkswOXfGmudLUVb9C7nQJzo3ZhiY0psXUwdM6mg+PlpA/CqcCMaXAYITZ8+wvyDE\nj13ZpKO8jssjOw3IUj4A/0xddzdFXox9x6tSOR9AbsXKRpaF3a7ceTMJIQJbeSRg\n3nr2QvAuRKOGfhmWUq4J9VR/6jyTx9lgd80H2wZ5VkVxAgMBAAE=\n-----END PUBLIC KEY-----\n",
+      "algorithm": "rsa-sha256"
+    }
+  ]
+}

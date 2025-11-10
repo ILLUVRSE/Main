@@ -1,0 +1,70 @@
+name: Auto Update Signers Registry
+
+# Triggers:
+#  - daily schedule (UTC)
+#  - manual (workflow_dispatch)
+#  - repository_dispatch with type 'kms-key-rotation' (optional: triggered by AWS EventBridge)
+on:
+  schedule:
+    - cron: '0 3 * * *'   # daily at 03:00 UTC (change if you want)
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - kms-key-rotation
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  id-token: write
+
+jobs:
+  update-signers:
+    name: Update signers from KMS (safe PR)
+    runs-on: ubuntu-latest
+    needs: kms-signing-check
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      id-token: write
+    env:
+      AUDIT_SIGNING_KMS_KEY_ID: ${{ secrets.AUDIT_SIGNING_KMS_KEY_ID }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      # If you want to auto-merge (NOT recommended), set AUTO_MERGE=true as a secret and modify script.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure required system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq openssl ca-certificates
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure GH CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # login (idempotent)
+          echo "${GITHUB_TOKEN}" | gh auth login --with-token
+
+      - name: Run update-signers-from-kms.sh
+        env:
+          AUDIT_SIGNING_KMS_KEY_ID: ${{ secrets.AUDIT_SIGNING_KMS_KEY_ID }}
+        run: |
+          chmod +x scripts/update-signers-from-kms.sh
+          ./scripts/update-signers-from-kms.sh || {
+            echo "update-signers-from-kms.sh failed; exiting with non-zero status"
+            exit 1
+          }
+
+      - name: Post-run summary
+        run: |
+          echo "update-signers-from-kms.sh completed. If a PR was created, please review it in the repo."
+

@@ -146,13 +146,14 @@ function verifyEvents(events, signerMap) {
     const hashBytes = crypto.createHash('sha256').update(concat).digest();
     const computedHash = hashBytes.toString('hex');
 
+    // First check prev_hash chain integrity (so tests that mutate prev_hash trigger this).
+    if (expectedPrev && storedPrev !== expectedPrev)
+      throw new Error(`prevHash mismatch for ${id}: expected ${expectedPrev} got ${storedPrev}`);
+
     // If test/row includes a stored 'hash' field, ensure it matches computed value.
     if (row.hash && row.hash !== computedHash) {
       throw new Error(`Hash mismatch for ${id}: stored=${row.hash} computed=${computedHash}`);
     }
-
-    if (expectedPrev && storedPrev !== expectedPrev)
-      throw new Error(`prev_hash mismatch for ${id}: expected ${expectedPrev} got ${storedPrev}`);
 
     // Create or reuse KeyObject
     let keyObj = keyCache.get(signerId);

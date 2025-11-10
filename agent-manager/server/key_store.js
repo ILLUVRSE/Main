@@ -1,12 +1,12 @@
 // agent-manager/server/key_store.js
 // Pluggable key provider / KMS adapter (local dev + simple remote)
-// Purpose: centralize where signing keys and public keys come from so we can
-// replace env-based keys with a KMS/HSM implementation later.
+// Extended to provide signAuditHash(hash) for digest signing semantics.
 //
 // Exports:
 //  - getAuditSigningKey() -> { kid, alg, key }  (key is string or PEM or null for KMS)
 //  - getKernelPublicKeys() -> { kid: { alg, key }, ... }
 //  - signAuditCanonical(canonical) -> { kid, alg, signature } (base64)
+//  - signAuditHash(hash) -> { kid, alg, signature } (base64)  <-- NEW
 //
 // Configuration (env):
 //  - AUDIT_SIGNING_KEY_SOURCE: "env" | "file" | "url" | "kms" (default: env)
@@ -18,9 +18,7 @@
 //  - KERNEL_PUBLIC_KEYS_PATH: file path to JSON with same shape
 //  - KERNEL_PUBLIC_KEYS_URL: URL returning same JSON shape (fetched)
 //  - KERNEL_SHARED_SECRET: fallback secret (shared hmac) if none supplied
-//
-// NOTE: This is intentionally small. Replace or extend this module with a real
-// KMS/HSM integration later (AWS KMS, GCP KMS, HashiCorp Vault, YubiHSM, etc).
+
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -189,6 +187,88 @@ async function getKernelPublicKeys() {
 
 /* ---------- Signing helper backed by configured provider ---------- */
 
+/**
+ * Helper: normalize hash input to Buffer.
+ * Accepts Buffer or hex/base64 string.
+ */
+function normalizeHashInput(hash) {
+  if (!hash) throw new Error('hash is required');
+  if (Buffer.isBuffer(hash)) return hash;
+  if (typeof hash === 'string') {
+    if (/^[0-9a-fA-F]+$/.test(hash) && (hash.length === 64)) {
+      return Buffer.from(hash, 'hex');
+    }
+    if (/^[A-Za-z0-9+/=]+$/.test(hash)) {
+      return Buffer.from(hash, 'base64');
+    }
+  }
+  throw new Error('Unsupported hash input type — provide a Buffer or hex/base64 string');
+}
+
+/**
+ * signAuditHash(hash)
+ * - hash: Buffer or hex/base64 string of the 32-byte SHA-256 digest to sign
+ * Returns: { kid, alg, signature }  (signature is base64 string) or { kid, alg, signature: null } if unsigned
+ */
+async function signAuditHash(hash) {
+  const hashBuf = normalizeHashInput(hash);
+
+  // Try KMS adapter digest signing first if configured
+  const src = (process.env.AUDIT_SIGNING_KEY_SOURCE || 'env').toLowerCase();
+  const keyInfo = await getAuditSigningKey();
+  const configuredKid = (keyInfo && keyInfo.kid) ? keyInfo.kid : (process.env.AUDIT_SIGNER_KID || null);
+  const alg = (keyInfo && keyInfo.alg) ? keyInfo.alg.toLowerCase() : ((process.env.AUDIT_SIGNING_ALG || 'hmac-sha256').toLowerCase());
+  const kid = configuredKid || null;
+
+  // 1) KMS path via adapter (adapter should implement signAuditHash for digest semantics)
+  if ((src === 'kms' || src === 'aws-kms') && kmsAdapter && typeof kmsAdapter.signAuditHash === 'function') {
+    return await kmsAdapter.signAuditHash(hashBuf);
+  }
+
+  // 2) If KMS is configured but adapter doesn't expose signAuditHash, attempt to call adapter.signAuditCanonical?
+  //    We do NOT want to sign canonical here; that would be a different shape. So if adapter lacks digest-signing
+  //    support, prefer to defer to local helper or return unsigned marker.
+  if ((src === 'kms' || src === 'aws-kms') && kmsAdapter && typeof kmsAdapter.signAuditHash !== 'function') {
+    // If adapter exposes signAuditCanonical only, we refuse to use it here because it signs message not digest.
+    // Return a marker indicating KMS is expected but signing not available locally (caller should fallback).
+    return { kid, alg, signature: null };
+  }
+
+  // 3) Local key material signing (env/file/url)
+  if (keyInfo && keyInfo.key) {
+    const keyMaterial = keyInfo.key;
+    if (alg === 'hmac-sha256') {
+      const sig = crypto.createHmac('sha256', keyMaterial).update(hashBuf).digest('base64');
+      return { kid, alg: 'hmac-sha256', signature: sig };
+    }
+    if (alg === 'ed25519') {
+      // Node's crypto.sign with null alg uses Ed25519 when key is Ed25519 keypair PEM
+      const sig = crypto.sign(null, hashBuf, keyMaterial).toString('base64');
+      return { kid, alg: 'ed25519', signature: sig };
+    }
+    if (alg === 'rsa-sha256' || alg === 'rsa') {
+      // Wrap digest in DigestInfo for PKCS#1 v1.5 and perform private-key operation
+      const SHA256_DIGESTINFO_PREFIX_HEX = '3031300d060960864801650304020105000420';
+      const SHA256_DIGESTINFO_PREFIX = Buffer.from(SHA256_DIGESTINFO_PREFIX_HEX, 'hex');
+      const toSign = Buffer.concat([SHA256_DIGESTINFO_PREFIX, hashBuf]);
+
+      // Use privateEncrypt (RSA private operation) with PKCS1 padding to generate signature buffer.
+      const signatureBuf = crypto.privateEncrypt(
+        { key: keyMaterial, padding: crypto.constants.RSA_PKCS1_PADDING },
+        toSign
+      );
+
+      return { kid, alg: 'rsa-sha256', signature: signatureBuf.toString('base64') };
+    }
+    throw new Error(`Unsupported local signing alg: ${alg}`);
+  }
+
+  // 4) Fallback: if no key material and no KMS adapter, attempt env fallbacks (already covered above)
+  // If nothing available, return unsigned marker
+  return { kid, alg, signature: null };
+}
+
+/* ---------- Existing signAuditCanonical retained for message signing path ---------- */
 async function signAuditCanonical(canonical) {
   const src = (process.env.AUDIT_SIGNING_KEY_SOURCE || 'env').toLowerCase();
 
@@ -230,6 +310,7 @@ async function signAuditCanonical(canonical) {
 module.exports = {
   getAuditSigningKey,
   getKernelPublicKeys,
-  signAuditCanonical
+  signAuditCanonical,
+  signAuditHash
 };
 

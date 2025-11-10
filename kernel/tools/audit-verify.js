@@ -7,6 +7,7 @@ const { Client } = require('pg');
 
 const ED25519_SPki_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
+/* ---------- Canonicalization (same rules used by agent-manager) ---------- */
 function canonicalize(value) {
   if (value === null || value === undefined) return Buffer.from('null');
   if (typeof value === 'boolean') return Buffer.from(value ? 'true' : 'false');
@@ -28,6 +29,7 @@ function canonicalize(value) {
   return Buffer.from(JSON.stringify(value));
 }
 
+/* ---------- Signer registry parsing ---------- */
 function parseSignerRegistry(raw) {
   if (!raw || (typeof raw !== 'object' && !Array.isArray(raw))) throw new Error('Signer registry must be object or array');
   let entries;
@@ -36,7 +38,7 @@ function parseSignerRegistry(raw) {
   else {
     entries = Object.keys(raw).map((id) => {
       const val = raw[id];
-      return typeof val === 'string' ? { signerId: id, publicKey: val, algorithm: 'Ed25519' } : { signerId: id, ...(val || {}) };
+      return typeof val === 'string' ? { signerId: id, publicKey: val } : { signerId: id, ...(val || {}) };
     });
   }
 
@@ -45,34 +47,81 @@ function parseSignerRegistry(raw) {
     if (!e) continue;
     const signerId = e.signerId || e.signer_id || e.id;
     let publicKey = e.publicKey || e.public_key;
-    let alg = (e.algorithm || e.alg || 'Ed25519').toLowerCase();
+    let algRaw = (e.algorithm || e.alg || '').toString();
     if (!signerId || !publicKey) throw new Error('Each signer needs signerId + publicKey');
-    alg = alg.includes('rsa') ? 'rsa-sha256' : alg.includes('ed25519') ? 'Ed25519' : (() => { throw new Error(`Bad alg ${alg}`); })();
-    publicKey = typeof publicKey === 'string' ? publicKey.trim() : publicKey;
-    if (alg === 'Ed25519') {
-      const buf = Buffer.from(publicKey, 'base64');
-      if (buf.length !== 32) throw new Error(`Ed25519 key for ${signerId} invalid length`);
+
+    // Normalize algorithm if present; otherwise leave undefined so we can infer later.
+    let normalized;
+    if (algRaw && algRaw.trim() !== '') {
+      const a = algRaw.toLowerCase();
+      if (a.includes('rsa')) normalized = 'rsa-sha256';
+      else if (a.includes('ed25519')) normalized = 'ed25519';
+      else throw new Error(`Bad alg ${algRaw} for signer ${signerId}`);
+    } else {
+      normalized = undefined;
     }
-    map.set(signerId, { publicKey, algorithm: alg });
+
+    publicKey = typeof publicKey === 'string' ? publicKey.trim() : publicKey;
+
+    // Basic validation for Ed25519 when the registry explicitly states ed25519 or when key looks raw
+    if (normalized === 'ed25519' || (!normalized && !publicKey.startsWith('-----BEGIN'))) {
+      if (!publicKey.startsWith('-----BEGIN')) {
+        const buf = Buffer.from(publicKey, 'base64');
+        if (buf.length !== 32 && buf.length !== 0) {
+          throw new Error(`Public key for ${signerId} invalid length`);
+        }
+      }
+    }
+
+    map.set(signerId, { publicKey, algorithm: normalized });
   }
   return map;
 }
 
+/* ---------- Public key construction (infer from content) ---------- */
+/**
+ * createKeyObject(publicKeyStr[, alg])
+ *
+ * Accepts:
+ *  - PEM string (-----BEGIN PUBLIC KEY-----...)
+ *  - base64 DER/SPKI (string)
+ *  - base64 raw 32-byte Ed25519 public key (string)
+ *
+ * If alg is supplied it is not strictly required; we infer the algorithm from the key material when needed.
+ */
 function createKeyObject(publicKeyStr, alg) {
-  if (alg === 'Ed25519') {
-    const raw = Buffer.from(publicKeyStr, 'base64');
-    const spki = Buffer.concat([ED25519_SPki_PREFIX, raw]);
+  if (!publicKeyStr || typeof publicKeyStr !== 'string') throw new Error('publicKeyStr is required');
+
+  const trimmed = publicKeyStr.trim();
+
+  // PEM first (accept RSA/SPKI or Ed25519 PEM)
+  if (trimmed.startsWith('-----BEGIN')) {
+    return crypto.createPublicKey(trimmed);
+  }
+
+  // otherwise base64 -> buffer
+  let buf;
+  try {
+    buf = Buffer.from(trimmed, 'base64');
+  } catch (e) {
+    throw new Error(`Public key parse error: invalid base64`);
+  }
+
+  // If exact 32 bytes -> raw Ed25519 public key
+  if (buf.length === 32) {
+    const spki = Buffer.concat([ED25519_SPki_PREFIX, buf]);
     return crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
   }
-  if (alg === 'rsa-sha256') {
-    const trimmed = publicKeyStr.trim();
-    if (trimmed.startsWith('-----BEGIN')) return crypto.createPublicKey(trimmed);
-    const der = Buffer.from(trimmed, 'base64');
-    return crypto.createPublicKey({ key: der, format: 'der', type: 'spki' });
+
+  // Otherwise assume DER/SPKI
+  try {
+    return crypto.createPublicKey({ key: buf, format: 'der', type: 'spki' });
+  } catch (e) {
+    throw new Error(`Public key parse error: ${(e && e.message) || e}`);
   }
-  throw new Error(`Unsupported algorithm: ${alg}`);
 }
 
+/* ---------- Verification ---------- */
 function verifyEvents(events, signerMap) {
   const keyCache = new Map();
   let expectedPrev = '';
@@ -89,14 +138,23 @@ function verifyEvents(events, signerMap) {
     const sigB64 = row.signature;
     if (!sigB64) throw new Error(`Missing signature for ${id}`);
 
-    const canonical = canonicalize(row.payload ?? null);
+    // canonicalize payload and compute digest/hash per spec:
+    // hashBytes = SHA256( canonical(payload) || prevHashBytes )
+    const canonical = canonicalize(row.payload ?? null); // Buffer
     const prevBytes = storedPrev ? Buffer.from(storedPrev, 'hex') : Buffer.alloc(0);
-    const hashBytes = crypto.createHash('sha256').update(Buffer.concat([canonical, prevBytes])).digest();
+    const concat = Buffer.concat([canonical, prevBytes]); // message whose digest we compute
+    const hashBytes = crypto.createHash('sha256').update(concat).digest();
     const computedHash = hashBytes.toString('hex');
+
+    // If test/row includes a stored 'hash' field, ensure it matches computed value.
+    if (row.hash && row.hash !== computedHash) {
+      throw new Error(`Hash mismatch for ${id}: stored=${row.hash} computed=${computedHash}`);
+    }
 
     if (expectedPrev && storedPrev !== expectedPrev)
       throw new Error(`prev_hash mismatch for ${id}: expected ${expectedPrev} got ${storedPrev}`);
 
+    // Create or reuse KeyObject
     let keyObj = keyCache.get(signerId);
     if (!keyObj) {
       keyObj = createKeyObject(signer.publicKey, signer.algorithm);
@@ -104,25 +162,53 @@ function verifyEvents(events, signerMap) {
     }
 
     const sig = Buffer.from(sigB64, 'base64');
-    if (signer.algorithm === 'Ed25519') {
-      if (!crypto.verify(null, hashBytes, keyObj, sig)) throw new Error(`Ed25519 verify failed for ${id}`);
-    } else if (signer.algorithm === 'rsa-sha256') {
-      const msg = Buffer.concat([canonical, prevBytes]);
-      const paddings = [
-        { pad: crypto.constants.RSA_PKCS1_PSS_PADDING, opts: { saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST } },
-        { pad: crypto.constants.RSA_PKCS1_PADDING, opts: {} },
-      ];
-      let ok = false;
-      for (const p of paddings) {
-        try {
-          const v = crypto.createVerify('RSA-SHA256');
-          v.update(msg);
-          v.end();
-          ok = v.verify({ key: keyObj, padding: p.pad, ...p.opts }, sig);
-          if (ok) break;
-        } catch (_) {}
+
+    // Determine algorithm to use: prefer explicit signer.algorithm, otherwise infer
+    let algToUse = signer.algorithm;
+    if (!algToUse) {
+      try {
+        const aType = (keyObj && keyObj.asymmetricKeyType) ? keyObj.asymmetricKeyType.toLowerCase() : null;
+        if (aType === 'ed25519') algToUse = 'ed25519';
+        else if (aType === 'rsa') algToUse = 'rsa-sha256';
+      } catch (e) {
+        // fall through
       }
-      if (!ok) throw new Error(`RSA-SHA256 verification failed for ${id} (PSS+PKCS1v1.5 both failed)`);
+    }
+
+    if (algToUse === 'ed25519') {
+      // Ed25519: verify signature over the digest bytes
+      const ok = crypto.verify(null, hashBytes, keyObj, sig);
+      if (!ok) throw new Error(`Signature verification failed for ${id}`);
+    } else if (algToUse === 'rsa-sha256') {
+      // RSA: verify signature on message using SHA-256. Try PSS, then PKCS#1 v1.5.
+      let ok = false;
+      // Try PSS
+      try {
+        ok = crypto.verify(
+          'sha256',
+          concat,
+          { key: keyObj, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST },
+          sig
+        );
+      } catch (e) {
+        ok = false;
+      }
+      // Try PKCS#1 v1.5
+      if (!ok) {
+        try {
+          ok = crypto.verify(
+            'sha256',
+            concat,
+            { key: keyObj, padding: crypto.constants.RSA_PKCS1_PADDING },
+            sig
+          );
+        } catch (e) {
+          ok = false;
+        }
+      }
+      if (!ok) throw new Error(`Signature verification failed for ${id}`);
+    } else {
+      throw new Error(`Unsupported signer algorithm for verification: ${algToUse}`);
     }
 
     expectedPrev = computedHash;
@@ -132,6 +218,7 @@ function verifyEvents(events, signerMap) {
   return headHash;
 }
 
+/* ---------- DB fetch / orchestration ---------- */
 async function fetchEvents(client) {
   const res = await client.query(`
     SELECT id, event_type, payload, prev_hash, signature, signer_kid
@@ -153,6 +240,7 @@ async function verifyAuditChain({ databaseUrl = process.env.POSTGRES_URL, signer
   }
 }
 
+/* ---------- CLI ---------- */
 async function main(argv) {
   const args = argv.slice(2);
   let dbUrl, signersPath;

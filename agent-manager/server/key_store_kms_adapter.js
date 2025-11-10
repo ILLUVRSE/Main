@@ -1,16 +1,19 @@
 // agent-manager/server/key_store_kms_adapter.js
-// Adapter that uses AWS KMS to sign canonical audit payloads.
+// Adapter that uses AWS KMS to sign canonical audit payloads (message) and digests (digest).
 // Supports:
 //  - HMAC (GenerateMac) when AUDIT_SIGNING_ALG = "hmac-sha256" and KeyId points to HMAC key
 //  - RSA-SHA256 (Sign) when AUDIT_SIGNING_ALG = "rsa-sha256" and KeyId is RSA key
 //  - ED25519 (Sign) when AUDIT_SIGNING_ALG = "ed25519" and KeyId is Ed25519 asymmetric key
 //
+// Exports:
+//  - signAuditCanonical(canonical)  -- existing behavior (signs the canonical string/message)
+//  - signAuditHash(hashBuf)         -- NEW: signs the 32-byte SHA-256 digest (digest semantics)
+//
 // Required env:
 //  - AUDIT_SIGNING_KMS_KEY_ID  (KMS KeyId or ARN)
 //  - AWS_REGION or AWS_DEFAULT_REGION (optional; defaults to us-east-1)
 //
-// NOTE: this requires @aws-sdk/client-kms to be installed and AWS credentials to be available
-// via env / ~/.aws/credentials / IAM role. This adapter returns base64 signatures.
+// NOTE: this requires @aws-sdk/client-kms to be installed and AWS credentials available.
 
 const { KMSClient, SignCommand, GenerateMacCommand } = require('@aws-sdk/client-kms');
 
@@ -38,11 +41,12 @@ async function signAuditCanonicalWithKms(canonical) {
   }
 
   if (alg === 'rsa-sha256' || alg === 'rsa') {
-    // Sign with RSA PKCS#1 v1.5 + SHA-256
+    // Sign with RSA PKCS#1 v1.5 + SHA-256 (message signing)
     const cmd = new SignCommand({
       KeyId: keyId,
       Message: Buffer.from(canonical),
       SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256'
+      // MessageType omitted => KMS will hash the message internally
     });
     const resp = await client.send(cmd);
     if (!resp || !resp.Signature) throw new Error('KMS Sign returned no Signature');
@@ -50,7 +54,7 @@ async function signAuditCanonicalWithKms(canonical) {
   }
 
   if (alg === 'ed25519' || alg === 'ed25519-sha') {
-    // Sign with ED25519
+    // Sign with ED25519 (message signing)
     const cmd = new SignCommand({
       KeyId: keyId,
       Message: Buffer.from(canonical),
@@ -64,7 +68,73 @@ async function signAuditCanonicalWithKms(canonical) {
   throw new Error(`Unsupported AUDIT_SIGNING_ALG for KMS adapter: ${alg}`);
 }
 
+/**
+ * signAuditHashWithKms(hashBuf)
+ * - hashBuf: Buffer (expected 32 bytes SHA-256 digest)
+ *
+ * Uses digest semantics:
+ *  - HMAC: GenerateMac with Message=hashBuf
+ *  - RSA: Sign with Message=hashBuf and MessageType='DIGEST' so KMS does not rehash
+ *  - ED25519: Sign with Message=hashBuf (Ed25519 signs arbitrary bytes)
+ *
+ * Returns { kid, alg, signature } where signature is base64.
+ */
+async function signAuditHashWithKms(hashBuf) {
+  const keyId = process.env.AUDIT_SIGNING_KMS_KEY_ID;
+  if (!keyId) {
+    throw new Error('AUDIT_SIGNING_KMS_KEY_ID is not set (required for KMS signing)');
+  }
+
+  if (!Buffer.isBuffer(hashBuf)) {
+    throw new Error('hash must be a Buffer');
+  }
+
+  const alg = (process.env.AUDIT_SIGNING_ALG || 'hmac-sha256').toLowerCase();
+
+  if (alg === 'hmac-sha256') {
+    const cmd = new GenerateMacCommand({
+      KeyId: keyId,
+      Message: hashBuf,
+      MacAlgorithm: 'HMAC_SHA_256'
+    });
+    const resp = await client.send(cmd);
+    if (!resp || !resp.Mac) throw new Error('KMS GenerateMac returned no Mac');
+    return { kid: keyId, alg: 'hmac-sha256', signature: Buffer.from(resp.Mac).toString('base64') };
+  }
+
+  if (alg === 'rsa-sha256' || alg === 'rsa') {
+    // Sign using the digest (MessageType: 'DIGEST') so KMS doesn't re-hash.
+    const params = {
+      KeyId: keyId,
+      Message: hashBuf,
+      SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256',
+      MessageType: 'DIGEST'
+    };
+    const cmd = new SignCommand(params);
+    const resp = await client.send(cmd);
+    if (!resp || !resp.Signature) throw new Error('KMS Sign returned no Signature');
+    return { kid: keyId, alg: 'rsa-sha256', signature: Buffer.from(resp.Signature).toString('base64') };
+  }
+
+  if (alg === 'ed25519') {
+    // For Ed25519 we pass the precomputed digest bytes as the message.
+    const params = {
+      KeyId: keyId,
+      Message: hashBuf,
+      SigningAlgorithm: 'ED25519'
+      // MessageType left unset; KMS will sign bytes as provided.
+    };
+    const cmd = new SignCommand(params);
+    const resp = await client.send(cmd);
+    if (!resp || !resp.Signature) throw new Error('KMS Sign returned no Signature');
+    return { kid: keyId, alg: 'ed25519', signature: Buffer.from(resp.Signature).toString('base64') };
+  }
+
+  throw new Error(`Unsupported AUDIT_SIGNING_ALG for KMS adapter (digest path): ${alg}`);
+}
+
 module.exports = {
-  signAuditCanonical: signAuditCanonicalWithKms
+  signAuditCanonical: signAuditCanonicalWithKms,
+  signAuditHash: signAuditHashWithKms
 };
 

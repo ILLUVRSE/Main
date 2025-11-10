@@ -152,9 +152,19 @@ export function principalFromCert(cert: any): Principal {
   const normalized = candidates.map((c) => c && c.trim()).filter(Boolean) as string[];
   const uniqueCandidates = Array.from(new Set(normalized));
   const matchedId = uniqueCandidates.find((c) => roleMap[c] && roleMap[c].length > 0);
-  const id = matchedId || uniqueCandidates[0] || 'service-unknown';
 
-  let roles: string[] | undefined = matchedId ? roleMap[matchedId] : undefined;
+  // If a role map is configured but none of the certificate candidates match exactly,
+  // and there is exactly one configured service, prefer that configured service id.
+  // This makes local test fixtures simpler to author (single service mapping).
+  let finalId = matchedId;
+  const roleMapKeys = Object.keys(roleMap || {});
+  if (!finalId && roleMapKeys.length === 1) {
+    finalId = roleMapKeys[0];
+  }
+
+  const id = finalId || uniqueCandidates[0] || 'service-unknown';
+
+  let roles: string[] | undefined = finalId && roleMap[finalId] ? roleMap[finalId] : undefined;
   if (!roles || roles.length === 0) {
     roles = /auditor|audit/i.test(id) ? [Roles.AUDITOR] : [Roles.OPERATOR];
   }

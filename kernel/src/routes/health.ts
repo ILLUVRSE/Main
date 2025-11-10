@@ -73,7 +73,9 @@ export function resolveSloMetadata(): SloMetadata {
 }
 
 export async function buildHealthResponse(): Promise<HealthResponse> {
-  const [dbReachable, kmsReachable] = await Promise.all([probeDatabase(), probeKms()]);
+  // Import the module at runtime so jest.spyOn on exported functions affects these calls.
+  const m = await import('./health') as typeof import('./health');
+  const [dbReachable, kmsReachable] = await Promise.all([m.probeDatabase(), m.probeKms()]);
   const { signerId } = loadKmsConfig();
 
   return {
@@ -95,7 +97,10 @@ export interface ReadinessResult {
 export async function readinessCheck(): Promise<ReadinessResult> {
   const { requireKms, endpoint } = loadKmsConfig();
 
-  const dbReachable = await probeDatabase(5_000);
+  // Call the probe via the module namespace so tests that spy on the exported functions work.
+  const m = await import('./health') as typeof import('./health');
+
+  const dbReachable = await m.probeDatabase(5_000);
   if (!dbReachable) {
     incrementReadinessFailure();
     return { ok: false, details: 'db.unreachable' };

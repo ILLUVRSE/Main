@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: am_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespw
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d am_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  agent-manager:
+    build: ./agent-manager
+    environment:
+      # Point at the postgres service above
+      DATABASE_URL: postgres://postgres:postgrespw@postgres:5432/am_test
+
+      # Use a file-backed private key so we avoid multiline env issues
+      AUDIT_SIGNING_KEY_SOURCE: file
+      AUDIT_SIGNING_KEY_PATH: /secrets/tmp_rsa_priv.pem
+      AUDIT_SIGNING_ALG: rsa-sha256
+      AUDIT_SIGNER_KID: integration-rsa-test
+
+      PORT: 5176
+    # Mount the private key we created locally into the container (read-only)
+    volumes:
+      - ./tmp_rsa_priv.pem:/secrets/tmp_rsa_priv.pem:ro
+    ports:
+      - "5176:5176"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:
+

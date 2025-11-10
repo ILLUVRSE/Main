@@ -401,8 +401,8 @@ async function start() {
       console.warn('DB not available; falling back to in-memory stores. Error:', err.message || err);
     }
 
-    app.listen(PORT, () => {
-      console.log(`Agent Manager listening at http://127.0.0.1:${PORT} (db=${DB_AVAILABLE})`);
+    app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+      const _bindHost = process.env.HOST || '0.0.0.0'; console.log(`Agent Manager listening at http://${_bindHost}:${PORT} (db=${DB_AVAILABLE})`);
     });
   } catch (err) {
     console.error('Failed to start server', err);

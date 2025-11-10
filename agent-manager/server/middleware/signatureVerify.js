@@ -280,7 +280,7 @@ module.exports = signatureVerify;
    Usage:
      From agent-manager directory:
      DATABASE_URL="postgres://username:password@localhost:5432/agent_manager_db" \
-     KERNEL_SHARED_SECRET="mysecret" \
+     KERNEL_SHARED_SECRET: "<REPLACE_WITH_SECRET_FROM_ENV>" \
      node server/middleware/signatureVerify.js
 -----------------------------------------------------------------------------*/
 if (require.main === module) {

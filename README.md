@@ -44,7 +44,6 @@ We follow a strict workflow to keep the platform correct and auditable:
 
 ## # Quick commands
 Create a module folder and a file (example):
-```bash
 cd ~/ILLUVRSE/Main
 mkdir -p kernel
 cat > kernel/README.md <<'EOF'
@@ -59,3 +58,5 @@ Final approver: Ryan (SuperAdmin)
 Security contact: Security Engineer (assigned)
 
 Finance contact: Finance Lead (assigned)
+
+Codex CLI test successful.

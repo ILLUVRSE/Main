@@ -1,0 +1,149 @@
+:root{
+  --bg:#f8fafc;
+  --panel:#ffffff;
+  --muted:#64748b;
+  --accent:#2563eb;
+  --success:#16a34a;
+  --danger:#ef4444;
+  --mono: Menlo, Monaco, "Courier New", monospace;
+  --radius:6px;
+  --border: #e6eef3;
+}
+
+/* Page layout */
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: var(--bg);
+  color: #0f172a;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 20px auto;
+  padding: 12px;
+}
+
+/* Panels */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  box-shadow: 0 1px 0 rgba(15,23,42,0.02);
+}
+
+/* Buttons */
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+/* Inputs and textareas */
+input, textarea, select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13px;
+  background: #fff;
+  color: #0f172a;
+}
+
+/* Small metadata text */
+.meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Editor container */
+.editor-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #fff;
+}
+
+/* Diff viewer adjustments for consistency */
+.diff-viewer {
+  border-radius: var(--radius);
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/* Stream box */
+.stream-box {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  min-height: 120px;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/* Plan list */
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: #fff;
+}
+
+/* Repo browser */
+.repo-list {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* Status badges */
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge.ok { background: var(--success); color: #fff; }
+.badge.warn { background: #f59e0b; color: #fff; }
+.badge.err { background: var(--danger); color: #fff; }
+
+/* Utilities */
+.flex { display:flex; }
+.col { display:flex; flex-direction:column; }
+.row { display:flex; flex-direction:row; }
+.gap { gap: 12px; }
+
+.small { font-size:12px; color: var(--muted); }
+.center { display:flex; align-items:center; justify-content:center; }
+

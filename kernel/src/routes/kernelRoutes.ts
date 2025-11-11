@@ -439,7 +439,7 @@ export default function createKernelRouter(): Router {
         }
 
         // Return created agent id in canonical shape for tests
-        return res.status(201).json({ id });
+        console.debug("[agent] returning response", { id });\n        return res.status(201).json({ id });
       } catch (err) {
         if (managed && client) {
           await client.query('ROLLBACK').catch(() => {});

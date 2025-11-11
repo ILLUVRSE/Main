@@ -10,7 +10,7 @@ export async function chatJson(system: string, user: string): Promise<any> {
   const headers: Record<string, string> = {
     "Authorization": `Bearer ${apiKey}`,
     "Content-Type": "application/json",
-    "OpenAI-Project": projectId
+    "OpenAI-Project": projectId!
   };
 
   const body = {

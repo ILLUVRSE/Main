@@ -1,17 +1,8 @@
-import "dotenv/config";
-
-const apiKey = process.env.OPENAI_API_KEY;
-const projectId = process.env.OPENAI_PROJECT_ID;
-
-if (!apiKey) throw new Error("Missing OPENAI_API_KEY in .env");
-if (!projectId) throw new Error("Missing OPENAI_PROJECT_ID in .env");
+import { getOpenAIHeaders } from '../config.js';
 
 export async function chatJson(system: string, user: string): Promise<any> {
-  const headers: Record<string, string> = {
-    "Authorization": `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    "OpenAI-Project": projectId!
-  };
+  const headers: Record<string,string> = getOpenAIHeaders();
+  const OPENAI_BASE = process.env.OPENAI_API_URL || "https://api.openai.com";
 
   const body = {
     model: "gpt-4o-mini",
@@ -23,7 +14,7 @@ export async function chatJson(system: string, user: string): Promise<any> {
     ]
   };
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const res = await fetch(`${OPENAI_BASE}/v1/chat/completions`, {
     method: "POST",
     headers,
     body: JSON.stringify(body)

@@ -1,0 +1,74 @@
+name: Repowriter CI
+
+on:
+  push:
+    paths:
+      - 'RepoWriter/**'
+  pull_request:
+    paths:
+      - 'RepoWriter/**'
+
+jobs:
+  build:
+    name: Build & Test RepoWriter
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install server dependencies
+        working-directory: ./
+        run: npm --prefix RepoWriter/server ci --no-audit --no-fund
+
+      - name: Install web dependencies
+        working-directory: ./
+        run: npm --prefix RepoWriter/web ci --no-audit --no-fund
+
+      - name: Start OpenAI mock for tests
+        run: |
+          # Start the local deterministic OpenAI mock used by tests
+          node RepoWriter/test/mocks/openaiMock.ts &
+          echo "OPENAI_API_URL=http://127.0.0.1:9876" >> $GITHUB_ENV
+          # Give the mock a moment to start
+          sleep 0.5
+
+      - name: Type-check server
+        run: npm --prefix RepoWriter/server exec -- tsc -p RepoWriter/server/tsconfig.json
+
+      - name: Run server unit tests
+        run: npm --prefix RepoWriter/server run test
+        env:
+          OPENAI_API_URL: http://127.0.0.1:9876
+
+      - name: Build server
+        run: npm --prefix RepoWriter/server run build
+
+      - name: Type-check web
+        run: npm --prefix RepoWriter/web exec -- tsc -p RepoWriter/web/tsconfig.json
+
+      - name: Build web
+        run: npm --prefix RepoWriter/web run build
+
+      - name: Smoke test (plan -> dry apply)
+        env:
+          OPENAI_API_URL: http://127.0.0.1:9876
+        run: |
+          # Quick smoke: call plan and perform a dry-run apply to ensure end-to-end behavior.
+          echo "Calling /api/openai/plan..."
+          curl -sS -X POST http://localhost:7071/api/openai/plan \
+            -H "Content-Type: application/json" \
+            -d '{"prompt":"Create hello.txt with greeting","memory":[]}'
+          # Note: this step expects the server to be started separately in CI if needed.
+

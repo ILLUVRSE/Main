@@ -362,7 +362,7 @@ export default function createKernelRouter(): Router {
    * Minimal implementation:
    *  - Validate body
    *  - Optionally sign agent manifest/record via signingProxy
-   *  - Insert agent row, return created agent id (202 accepted)
+   *  - Insert agent row, return created agent id (201 created)
    */
   router.post(
     '/kernel/agent',
@@ -374,10 +374,12 @@ export default function createKernelRouter(): Router {
 
       const principal = (req as any).principal || getPrincipalFromRequest(req);
 
+      // Determine id (plain UUID only)
       const id = body.id || crypto.randomUUID();
       const templateId = body.templateId ?? body.template_id;
+
+      // Accept divisionId as a UUID or as a human-friendly name (resolve name -> uuid)
       let divisionId = body.divisionId ?? body.division_id;
-      // Resolve human-friendly division names to UUIDs when necessary
       if (divisionId && typeof divisionId === 'string') {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
         if (!uuidRegex.test(divisionId)) {
@@ -392,27 +394,9 @@ export default function createKernelRouter(): Router {
         }
       }
 
-    // If client provided a non-UUID (e.g., the human name 'division-1'), attempt to resolve it by name.
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        try {
-          if (r && r.rows && r.rows.length) {
-          }
-        } catch (e) {
-          // ignore lookup failure and let validation below reject the request
-        }
-      }
-    }
-    // If client provided a non-UUID (e.g., the human name 'division-1'), attempt to resolve it by name.
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        try {
-          if (r && r.rows && r.rows.length) {
-          }
-        } catch (e) {
-          // ignore lookup failure and let validation below reject the request
-        }
-      }
-    }
       const requester = body.requester ?? body.requestedBy ?? body.requested_by ?? 'unknown';
+
+      if (!templateId || !divisionId) return res.status(400).json({ error: 'templateId and divisionId required' });
 
       let managed = false;
       let client: PoolClient | undefined;
@@ -437,15 +421,10 @@ export default function createKernelRouter(): Router {
         await client.query(insertSql, [
           id,
           templateId,
+          divisionId,
           requester,
           asJsonString(body.metadata ?? {}),
         ]);
-
-        try {
-          // Append an audit event for agent.create
-        } catch (e) {
-          console.warn('audit append failed for agent.create:', (e as Error).message || e);
-        }
 
         if (managed) {
           await client.query('COMMIT');
@@ -453,7 +432,14 @@ export default function createKernelRouter(): Router {
           client = undefined;
         }
 
-        return res.status(202).json({ agentId: id });
+        try {
+          await appendAuditEvent('agent.create', { agentId: id, templateId, divisionId, requester, principal });
+        } catch (e) {
+          console.warn('audit append failed for agent.create:', (e as Error).message || e);
+        }
+
+        // Return created agent id in canonical shape for tests
+        return res.status(201).json({ id });
       } catch (err) {
         if (managed && client) {
           await client.query('ROLLBACK').catch(() => {});
@@ -461,10 +447,6 @@ export default function createKernelRouter(): Router {
         }
         return next(err);
       }
-    
-        return res.status(201).json({ id });
-
-        return res.status(201).json({ id });
     },
   );
 

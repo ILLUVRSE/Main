@@ -151,7 +151,7 @@ export function getPrincipalFromRequest(req: Request): Principal {
           const p = mapper.principalFromOidcClaims(payload) as Principal;
           p.roles = normalizeRoles(p.roles || []);
           // Ensure id fallback
-          p.id = p.id || String(payload.sub || payload.sid || payload.subject || 'user.dev');
+          p.id = p.id || String((payload as any).sub || (payload as any).sid || (payload as any).subject || 'user.dev');
           return p;
         } catch {
           // fallthrough to basic payload extraction
@@ -159,18 +159,18 @@ export function getPrincipalFromRequest(req: Request): Principal {
       }
 
       // Build minimal principal from payload
-      const id = String(payload.sub || payload.sid || payload.subject || 'user.dev');
+      const id = String((payload as any).sub || (payload as any).sid || (payload as any).subject || 'user.dev');
       let roles: string[] = [];
-      if (payload?.realm_access && Array.isArray(payload.realm_access.roles)) roles = roles.concat(payload.realm_access.roles);
-      if (payload?.resource_access && typeof payload.resource_access === 'object') {
-        for (const k of Object.keys(payload.resource_access || {})) {
-          const r = payload.resource_access[k]?.roles;
+      if ((payload as any)?.realm_access && Array.isArray((payload as any).realm_access.roles)) roles = roles.concat((payload as any).realm_access.roles);
+      if ((payload as any)?.resource_access && typeof (payload as any).resource_access === 'object') {
+        for (const k of Object.keys((payload as any).resource_access || {})) {
+          const r = (payload as any).resource_access[k]?.roles;
           if (Array.isArray(r)) roles.push(...r);
         }
       }
-      if (Array.isArray(payload?.roles)) roles = roles.concat(payload.roles);
-      if (typeof payload?.roles === 'string') roles = roles.concat(payload.roles.split(/[,\s]+/).filter(Boolean));
-      if (typeof payload?.scope === 'string') roles = roles.concat(payload.scope.split(/\s+/).filter(Boolean));
+      if (Array.isArray((payload as any)?.roles)) roles = roles.concat((payload as any).roles);
+      if (typeof (payload as any)?.roles === 'string') roles = roles.concat(((payload as any).roles as string).split(/[,\s]+/).filter(Boolean));
+      if (typeof (payload as any)?.scope === 'string') roles = roles.concat(((payload as any).scope as string).split(/\s+/).filter(Boolean));
       // normalize and return
       return { type: 'human', id, roles: normalizeRoles(roles) };
     }
@@ -338,14 +338,16 @@ export const requireAuthenticated = middlewareRequireAuthenticated;
  * Example usage notes:
  *
  * - For division creation, require DivisionLead or SuperAdmin:
- *     app.post('/kernel/division', requireRoles(Roles.SUPERADMIN, Roles.DIVISION_LEAD), handler);
+ *     app.post('/kernel/division', requireRoles(Roles.SUPERADMIN, Roles.DIVISION_LEAD), handler)
  *
- * - For audit read-only access, require Auditor or SuperAdmin:
- *     app.get('/kernel/audit/:id', requireRoles(Roles.SUPERADMIN, Roles.AUDITOR), handler);
+ * - For audit reads, require Auditor or SuperAdmin:
+ *     app.get('/kernel/audit/:id', requireRoles(Roles.AUDITOR, Roles.SUPERADMIN), handler)
  *
- * Integration guidance for production:
- * - Validate OIDC ID tokens server-side (do not accept roles from headers).
- * - For services, validate mTLS client certs and map cert identity to service roles.
- * - Consider caching principal lookups (token introspection, authz calls) to reduce latency.
+ * - For endpoints that accept either authenticated human or service principals,
+ *   prefer `requireAnyAuthenticated`.
+ *
+ * Finally: this module is intentionally light-weight for local dev. Replace the
+ * roleMapping & principal extraction with robust OIDC and mTLS verification in
+ * production.
  */
 

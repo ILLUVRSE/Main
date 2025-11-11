@@ -1,210 +1,259 @@
-# Key rotation runbook — Agent Manager audit signing
+# Key Rotation & Deprecation — KMS / Signing Keys
 
-**Goal:** rotate an audit-signing key (RSA/Ed25519 or HMAC) with no verification gaps, minimal downtime, and a clear rollback plan. This runbook assumes the system signs audit **digests** (`SHA256(canonical || prevHashBytes)`) and verifiers use `kernel/tools/signers.json`.
+## Purpose
 
-> Important: prefer **asymmetric** keys (RSA/Ed25519) for public verification. HMAC keys require KMS verify calls or sharing secrets and are more complex to rotate publicly.
+This document defines an operational, auditable, and reversible process to rotate signing keys used by ILLUVRSE services (Agent Manager, Kernel, IDEA, etc.). It covers routine rotation, emergency rotation, publishing public keys to the signers registry, updating service configurations, and verification steps. The process assumes keys are managed in KMS/HSM where possible; fallbacks are described for local/dev keys.
 
----
+**Goals**
 
-## Overview (high level)
-
-1. Create a *new* KMS key (asymmetric RSA/Ed25519 or HMAC).
-2. Export the new public key and add it to `kernel/tools/signers.json` as a new signer entry **before** switching the signer used by agent-manager.
-3. Deploy agent-manager configured to use the *new* key ID (env: `AUDIT_SIGNING_KMS_KEY_ID`, `AUDIT_SIGNING_ALG`, `AUDIT_SIGNER_KID`).
-4. Verify new audit events are signed with the new signer id and accepted by `kernel/tools/audit-verify.js`.
-5. After a safe overlap period, remove the old signer entry from `signers.json` and optionally disable the old KMS key.
+* Maintain verifiable audit chains during rotation (no gaps).
+* Ensure verifiers (Kernel/tools) can verify signatures across overlapping key windows.
+* Provide clear rollback steps when rotation fails.
+* Automate verification and CI checks where possible.
 
 ---
 
-## Preconditions & safety
+## Concepts & Terminology
 
-* Have a verified, current `kernel/tools/signers.json` committed (or stored securely) with the **old** signer entry.
-* Ensure CI and verifiers run `kernel/tools/audit-verify.js` against the same `signers.json` or that they can fetch the updated registry from a canonical source.
-* Ensure you have the IAM ability to create and describe KMS keys and to update deployments.
-* Run the steps in a staging/test environment first. Use the e2e script (`kernel/integration/e2e_agent_manager_sign_and_audit.sh`) to validate before production.
-
----
-
-## Detailed rotation steps
-
-### 0) Choose a rotation window & communication
-
-* Pick a maintenance window or low-traffic time.
-* Notify stakeholders (security, oncall, consumers) and record the planned start, rollback point, and contact.
+* **Active Key** — key currently used to sign new artifacts/audit events.
+* **Verifier Set** — list of public keys known to verifiers, stored in `kernel/tools/signers.json`.
+* **Overlap Window** — timeframe when both old and new keys are accepted for verification (recommended).
+* **Signer KID** — unique key identifier stored with signatures (e.g., `auditor-signing-v1`).
+* **ManifestSignature** — `{ manifest, signature, signer_kid, signed_at }` returned by Kernel sign endpoints.
 
 ---
 
-### 1) Create a new KMS key
+## Rotation Types
 
-**Asymmetric RSA (example):**
+1. **Planned Rotation (Routine)** — rotate keys on schedule (e.g., annually or per policy).
+2. **Rolling Rotation (Service-by-service)** — rotate one service at a time (recommended for minimal blast radius).
+3. **Emergency Rotation** — immediate rotation when a key is suspected compromised; requires multisig approval.
+
+---
+
+## High-level Rotation Principle
+
+1. **Create new key(s)** in KMS/HSM (asymmetric RSA/Ed25519 or symmetric HMAC).
+2. **Publish new public key** to verifiers (add to `kernel/tools/signers.json`), **before** switching signers to use the new key. This enables verification of artifacts signed by the new key once used.
+3. **Switch signer(s)** to use new key. Signer must stamp signatures with the new `signer_kid`.
+4. **Allow overlap** for a predetermined window where verifiers accept both old and new keys.
+5. **Deprecate old key** (remove from signer registry) *only after* all verification of new-key-signed artifacts succeeds and after the overlap window passes.
+6. **Document & audit** the rotation event as an AuditEvent logged in the platform.
+
+---
+
+## Detailed Routine Rotation Steps (recommended)
+
+> **Assumptions:** You have AWS KMS configured and agent-manager/kernel IAM roles with `kms:Sign` & `kms:GetPublicKey`. Replace placeholders with your values.
+
+### A. Preparation
+
+1. Select `NEW_SIGNER_KID` and `NEW_KEY_DESCRIPTION`.
+2. Create the new key in KMS:
 
 ```bash
 aws kms create-key \
-  --description "Audit signing RSA_2048 key (rotation)" \
+  --description "ILLUVRSE audit signing key - new rotation" \
   --key-usage SIGN_VERIFY \
-  --customer-master-key-spec RSA_2048 \
-  --origin AWS_KMS
+  --customer-master-key-spec RSA_2048
 ```
 
-**Ed25519 (example):**
+Save the returned KeyId/ARN as `NEW_KEY_ID`.
+
+3. Export public key:
 
 ```bash
-aws kms create-key \
-  --description "Audit signing ED25519 key (rotation)" \
-  --key-usage SIGN_VERIFY \
-  --customer-master-key-spec ED25519 \
-  --origin AWS_KMS
+aws kms get-public-key --key-id "$NEW_KEY_ID" --query PublicKey --output text | base64 --decode > new_public_key.der
+# Convert to PEM if needed
+openssl rsa -pubin -inform DER -in new_public_key.der -pubout -out new_public_key.pem
 ```
 
-**HMAC (symmetric) (example):**
-
-```bash
-aws kms create-key \
-  --description "Audit HMAC key (rotation)" \
-  --key-usage GENERATE_VERIFY_MAC \
-  --origin AWS_KMS
-```
-
-Record the returned `KeyId` / `ARN`. This will be `NEW_KEY_ID`.
-
----
-
-### 2) Extract the new public key (asymmetric only)
-
-For asymmetric keys, fetch the public key DER and convert as needed:
-
-```bash
-aws kms get-public-key --key-id "$NEW_KEY_ID" --output text --query PublicKey | base64 --decode > new_pub.der
-# Convert to PEM (RSA)
-openssl rsa -pubin -inform DER -in new_pub.der -pubout -out new_pub.pem
-# Or for Ed25519, keep DER or create PEM with OpenSSL >=3.0
-```
-
-**Note:** `kernel/tools/audit-verify.js` accepts PEM or base64-DER.
-
----
-
-### 3) Add new signer entry to signers.json (DO NOT remove old entry yet)
-
-Open `kernel/tools/signers.json` and add an entry:
+4. Add the new signer to a staging copy of the signers registry: `kernel/tools/signers.json.staging`:
 
 ```json
 {
-  "signerId": "audit-rotation-2025-11-09",
-  "algorithm": "rsa-sha256",
-  "publicKey": "-----BEGIN PUBLIC KEY-----\n...PEM DATA...\n-----END PUBLIC KEY-----"
+  "signers": [
+    {
+      "signerId": "auditor-signing-v2",
+      "algorithm": "rsa-sha256",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+    }
+  ]
 }
 ```
 
-* `signerId` should be unique (e.g., `audit-rotation-YYYYMMDD` or `key-v2`).
-* Commit and publish this update before deploying the new key.
+Use the exact PEM text produced in `new_public_key.pem`.
+
+### B. Publish new signer to verifiers
+
+5. Update the canonical registry used by verifiers (`kernel/tools/signers.json`) in a single, auditable PR/commit. Include:
+
+   * new signer entry (publicKey in PEM)
+   * metadata: `deployed_at` and `note` describing rotation
+6. CI should validate new `signers.json` parses and that `kernel/tools/audit-verify.js` can load it. The PR should reference the audit event or ticket documenting rotation.
+
+### C. Switch signers to new key (service-by-service)
+
+7. For each signing service (Agent Manager, Kernel if it signs, IDEA if applicable):
+
+   * Update environment variables or KMS configuration to use `NEW_KEY_ID` (`AUDIT_SIGNING_KMS_KEY_ID` or equivalent).
+   * Update `AUDIT_SIGNER_KID` to the new `signerId` (e.g., `auditor-signing-v2`).
+   * Deploy the service.
+   * Emit a test AuditEvent signed with the new key and record its `id` and `signer_kid` in your runbook.
+
+8. Verify the test AuditEvent can be verified by `kernel/tools/audit-verify.js` against `kernel/tools/signers.json`.
+
+### D. Overlap & monitoring
+
+9. Maintain an **overlap window** (e.g., 48–72 hours) during which verifiers accept both old and new signers. Track:
+
+   * frequency of signatures from old vs new key (monitor KMS `Sign` metrics).
+   * any verification errors in `audit-verify` or CI.
+
+10. After the overlap window and after confirming new-key signatures verify without issue and old-key usage is negligible:
+
+* Remove old signer from `kernel/tools/signers.json` with a PR that documents the rotation completion.
+* Update runbook and close ticket.
 
 ---
 
-### 4) Deploy agent-manager with new key configuration
+## Emergency Rotation (compromise)
 
-Update configuration:
+1. **Immediate actions**
 
-* `AUDIT_SIGNING_KEY_SOURCE=kms`
-* `AUDIT_SIGNING_KMS_KEY_ID=<NEW_KEY_ID>`
-* `AUDIT_SIGNING_ALG=rsa-sha256`
-* `AUDIT_SIGNER_KID=<NEW_SIGNER_ID>`
+   * Revoke or schedule key destruction in KMS (or disable key). If KMS-managed key cannot be disabled quickly, rotate to new key immediately.
+   * Publish new signer entry in `kernel/tools/signers.json` (follow publish steps) and roll signing services to new key (as above).
+2. **Replay & forensic**
 
-Then redeploy agent-manager.
+   * Mark all artifacts signed by the compromised `signer_kid` for review. Use audit queries to list events by `signer_kid`.
+   * If necessary, perform a wider security revocation (revoke keys, rotate other keys).
+3. **Post-rotation**
+
+   * Run a full end-to-end audit chain verification using `kernel/tools/audit-verify.js` to validate unaffected chains and to qualify impacted ones.
+4. **Governance**
+
+   * Emergency rotation must be recorded as an AuditEvent and require postmortem review and multisig sign-off (if configured).
 
 ---
 
-### 5) Smoke test & verification
+## Signer Registry Update Process
 
-1. Generate new audit events.
-2. Confirm new events show the new `signer_kid`.
-3. Verify signatures locally:
+1. **Create PR**: Add new signer to `kernel/tools/signers.json` (or staging file). Include public key PEM and `signerId`, `algorithm`, `deployed_at`, and `notes`.
+2. **CI checks**:
+
+   * `audit-verify` parsing test: `node kernel/tools/audit-verify.js -s kernel/tools/signers.json` must parse without exception (can run in mock mode).
+   * Unit tests for canonicalization parity should pass.
+3. **Approval**: Reviewer (Security Engineer) merges PR into main branch.
+4. **Deployment**: After PR is merged, update service `AUDIT_SIGNER_KID` and `AUDIT_SIGNING_KMS_KEY_ID` and deploy the service with canary and monitor.
+5. **Deprecation**: When safe, remove old signer in a similar PR and document the removal.
+
+---
+
+## CI / Automation Recommendations
+
+* **Automate public key export**: provide a script `agent-manager/scripts/build_signers_from_db_kms_pubkeys.js` that reads KMS ARNs and auto-generates the signers registry entry (PEM + metadata).
+* **CI Guard**: `kernel/ci/require_kms_check.sh` should fail builds on protected branches when `REQUIRE_KMS=true` and `KMS_ENDPOINT` absent.
+* **Automated verification**: Add a nightly CI job that:
+
+  * pulls recent audit events,
+  * runs `kernel/tools/audit-verify.js` against current `signers.json`,
+  * flags any events that fail verification.
+* **Alerting**: create alerts for spikes in `kms:Sign` errors, or unusual drops in new signer usage during rotation.
+
+---
+
+## Verification & Acceptance Criteria
+
+To consider a rotation successful, perform and document the following checks:
+
+1. **Signer published**: `kernel/tools/signers.json` contains the new signer PEM and `signerId`. (PR + commit ID recorded)
+2. **Service switched**: Each signing service has been updated to use `NEW_KEY_ID` and `AUDIT_SIGNER_KID` and produces test signatures using the new signer. (Record example AuditEvent IDs.)
+3. **Audit verification**: `kernel/tools/audit-verify.js` validates test AuditEvent(s) signed by the new key. Example:
 
 ```bash
 node kernel/tools/audit-verify.js -d "postgres://..." -s kernel/tools/signers.json
+# Expected: "Audit chain verified" (or the event you created verifies)
 ```
 
-If verification fails, roll back immediately.
+4. **Overlap & monitoring**: Overlap window completed without verification regressions; metrics show new key usage dominant and old key usage near zero.
+5. **Remove old signer**: Old signer removed from `signers.json` only after acceptance checks and overlap window completion.
+6. **Documented audit**: Rotation recorded as an AuditEvent and signed; the PR(s) and runbook entries are linked in the rotation ticket.
 
 ---
 
-### 6) Overlap period
+## Rollback / Troubleshooting
 
-Keep both signers active for 24–72 hours to ensure safe verification.
+* **If new signatures fail verification**:
 
-* Monitor verification logs.
-* Confirm `kms:Sign` and `kms:GetPublicKey` success in CloudTrail.
+  * Revert service change to old key while investigating (if old key still valid).
+  * Run `audit-verify` locally vs staging signers to debug canonicalization or publicKey formatting issues.
+* **If public key is malformed**:
 
----
-
-### 7) Remove old signer and finalize rotation
-
-After the overlap:
-
-1. Remove the old signer from `signers.json`.
-2. Commit and publish.
-3. Optionally disable the old KMS key:
+  * Convert DER→PEM properly:
 
 ```bash
-aws kms disable-key --key-id "$OLD_KEY_ID"
+# DER to PEM for RSA
+openssl rsa -pubin -inform DER -in public_key.der -pubout -out public_key.pem
+```
+
+* **If KMS Sign fails**:
+
+  * Confirm `kms:Sign` permission, key state (Enabled), and that the signer role has the correct IAM policy.
+  * Check CloudTrail logs for `kms:Sign` errors (access denied or key disabled).
+
+---
+
+## Example Commands (quick reference)
+
+**Create new key (AWS KMS RSA)**
+
+```bash
+aws kms create-key --description "ILLUVRSE audit signing v2" --key-usage SIGN_VERIFY --customer-master-key-spec RSA_2048
+```
+
+**Export public key**
+
+```bash
+aws kms get-public-key --key-id "$NEW_KEY_ID" --query PublicKey --output text | base64 --decode > new_public_key.der
+openssl rsa -pubin -inform DER -in new_public_key.der -pubout -out new_public_key.pem
+```
+
+**Sign digest with KMS**
+
+```bash
+# produce 32 byte digest
+echo -n '{"payload":1}' | jq -c . | openssl dgst -sha256 -binary > digest.bin
+aws kms sign --key-id "$NEW_KEY_ID" --message-type DIGEST --message fileb://digest.bin --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 --query Signature --output text | base64 --decode > sig.bin
+```
+
+**Verify with OpenSSL**
+
+```bash
+openssl dgst -sha256 -verify new_public_key.pem -signature sig.bin <(echo -n '{"payload":1}' | jq -c .)
 ```
 
 ---
 
-## Rollback plan
+## Governance & Audit Notes
 
-1. Restore old configuration:
-
-   ```bash
-   AUDIT_SIGNING_KMS_KEY_ID=<OLD_KEY_ID>
-   AUDIT_SIGNER_KID=<OLD_SIGNER_ID>
-   ```
-2. Redeploy agent-manager.
-3. Re-add old signer entry if removed.
-4. Verify via `audit-verify.js`.
+* Record every rotation as an AuditEvent (who initiated, who approved, PRs merged, PR IDs, affected services, overlap window, verification outcome).
+* For multi-account setups, include cross-account principals explicitly in the key policy.
+* Rotate keys on a schedule that balances operational risk and cryptographic hygiene (e.g., annually for asymmetric keys; more frequently for HMAC keys).
 
 ---
 
-## Acceptance checks
+## Next steps after committing this doc
 
-* `signers.json` includes new signer.
-* agent-manager writes new `signer_kid`.
-* Verification succeeds for all events.
-* No verification errors in logs.
-* CloudTrail shows successful signing activity.
+1. Commit `docs/key_rotation.md`.
+2. Create automation scripts referenced above (`agent-manager/scripts/build_signers_from_db_kms_pubkeys.js`, `kernel/ci/require_kms_check.sh` if missing).
+3. Schedule a planned rotation in a low-traffic window and run the steps in a staging environment before production.
 
 ---
 
-## Automation ideas
+## Quick acceptance checklist (for this doc)
 
-* Script to fetch and append new signer entry automatically.
-* CI check validating key schema and PEM format.
-* Automated verification job post-rotation.
-
----
-
-## Notes & gotchas
-
-* Use `MessageType: 'DIGEST'` for RSA signatures.
-* HMAC keys cannot export public keys — coordinate carefully.
-* Ensure Ed25519 support in SDKs.
-* Confirm IAM policies allow `Sign` and `GetPublicKey`.
-
----
-
-## Quick summary
-
-1. Create new KMS key.
-2. Extract public key, add to `signers.json`.
-3. Deploy with new key vars.
-4. Verify signatures.
-5. Wait overlap, then remove old signer.
-
----
-
-## Post-rotation auditing
-
-* Record who/when/why of the rotation.
-* Keep previous `signers.json` for audit retention.
-* Monitor CloudTrail for expected signing behavior.
+* [ ] Documented rotation steps exist in `docs/key_rotation.md`.
+* [ ] A sample rotation has been executed in staging and recorded as an AuditEvent.
+* [ ] Automation script to export public keys and produce signers JSON is drafted.
+* [ ] CI is configured to validate new signers and run `audit-verify` smoke checks.
 

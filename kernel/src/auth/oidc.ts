@@ -3,11 +3,11 @@
 // Uses the OIDC discovery endpoint to find jwks_uri and verifies JWTs using `jose`.
 //
 // Usage:
-//   import { oidcClient, initOidc, getJwtClaims, parseOidcClaims } from './auth/oidc';
+//   import { oidcClient, initOidc, getJwtClaims, parseOidcClaims, jwksReady } from './auth/oidc';
 //   await initOidc(); // once at startup
 //   const payload = await getJwtClaims(token); // throws if invalid
 //   const claims = parseOidcClaims(payload); // normalized claim shape
-//
+
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
 
 const OIDC_ISSUER = process.env.OIDC_ISSUER || '';
@@ -182,4 +182,12 @@ export function parseOidcClaims(payload: JWTPayload): Record<string, any> {
 }
 
 export type OidcClaims = ReturnType<typeof parseOidcClaims>;
+
+/**
+ * Helper: jwksReady()
+ * Tests/startup can check whether the JWKs have been prepared without calling init()
+ */
+export function jwksReady(): boolean {
+  return !!oidcClient.jwks;
+}
 

@@ -1,0 +1,48 @@
+
+> dev
+> nodemon --watch src --ext ts --exec node --loader ts-node/esm src/index.ts
+
+[33m[nodemon] 3.1.11[39m
+[33m[nodemon] to restart at any time, enter `rs`[39m
+[33m[nodemon] watching path(s): src/**/*[39m
+[33m[nodemon] watching extensions: ts[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:125487) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/services/openaiClient.ts(13,5): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:125770) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/services/openaiClient.ts(13,5): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:125848) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/services/openaiClient.ts(13,5): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:126210) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071

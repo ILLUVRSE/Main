@@ -37,3 +37,6 @@ IDEA/server/tmp/*.tgz
 # local keys & env
 /tmp_rsa_priv.pem
 agent-manager/.env.local
+
+# RepoWriter secrets
+RepoWriter/server/.env

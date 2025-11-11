@@ -57,7 +57,6 @@ components:
         metadata:
           type: object
       required:
-        - id
         - name
         - goals
 
@@ -514,58 +513,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  allocationId:
+                  allocation_id:
                     type: string
         "400":
           description: validation error
 
-  /kernel/sign:
-    post:
-      tags:
-        - kernel
-      summary: Request a signature for a manifest
-      security:
-        - mutualTLS: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SignRequest'
-      responses:
-        "200":
-          description: signature returned
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ManifestSignature'
-        "400":
-          description: validation error
-
-  /kernel/audit/{id}:
-    get:
-      tags:
-        - kernel
-      summary: Fetch an audit event by id
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: audit event
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuditEvent'
-        "404":
-          description: not found
-
-# Optional tag descriptions (keeps UI/X-refs clear)
-tags:
-  - name: kernel
-    description: Kernel API endpoints for agent/division/eval/control
-
+# (Further paths / definitions may exist below -- keep file consistent with upstream)
 

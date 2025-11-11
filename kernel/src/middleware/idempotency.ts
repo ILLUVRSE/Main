@@ -223,10 +223,14 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
 
       const status = row.response_status != null ? Number(row.response_status) : 200;
       const body = parseStoredBody(row.response_body ? String(row.response_body) : null);
+
+      // NORMALIZE stored response before sending it to the client.
+      const normalized = normalizeResponseShape(body);
+
       await client.query('ROLLBACK').catch(() => {});
       client.release();
       res.setHeader('Idempotency-Key', trimmedKey);
-      res.status(status).json(body);
+      res.status(status).json(normalized);
       return;
     }
 

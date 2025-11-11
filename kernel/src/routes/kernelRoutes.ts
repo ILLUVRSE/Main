@@ -374,7 +374,7 @@ export default function createKernelRouter(): Router {
 
       const principal = (req as any).principal || getPrincipalFromRequest(req);
 
-      const id = body.id || `agent-${crypto.randomUUID()}`;
+      const id = body.id || crypto.randomUUID();
       const templateId = body.templateId ?? body.template_id;
       const divisionId = body.divisionId ?? body.division_id;
       const requester = body.requester ?? body.requestedBy ?? body.requested_by ?? 'unknown';

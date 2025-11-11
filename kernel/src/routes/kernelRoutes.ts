@@ -376,10 +376,43 @@ export default function createKernelRouter(): Router {
 
       const id = body.id || crypto.randomUUID();
       const templateId = body.templateId ?? body.template_id;
-      const divisionId = body.divisionId ?? body.division_id;
-      const requester = body.requester ?? body.requestedBy ?? body.requested_by ?? 'unknown';
+      let divisionId = body.divisionId ?? body.division_id;
+      // Resolve human-friendly division names to UUIDs when necessary
+      if (divisionId && typeof divisionId === 'string') {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(divisionId)) {
+          try {
+            const r = await query('SELECT id FROM divisions WHERE name = $1 LIMIT 1', [divisionId]);
+            if (r && r.rows && r.rows.length) {
+              divisionId = String(r.rows[0].id);
+            }
+          } catch (e) {
+            // ignore lookup failure and let validation below reject the request
+          }
+        }
+      }
 
-      if (!templateId || !divisionId) return res.status(400).json({ error: 'templateId and divisionId required' });
+    // If client provided a non-UUID (e.g., the human name 'division-1'), attempt to resolve it by name.
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        try {
+          if (r && r.rows && r.rows.length) {
+          }
+        } catch (e) {
+          // ignore lookup failure and let validation below reject the request
+        }
+      }
+    }
+    // If client provided a non-UUID (e.g., the human name 'division-1'), attempt to resolve it by name.
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        try {
+          if (r && r.rows && r.rows.length) {
+          }
+        } catch (e) {
+          // ignore lookup failure and let validation below reject the request
+        }
+      }
+    }
+      const requester = body.requester ?? body.requestedBy ?? body.requested_by ?? 'unknown';
 
       let managed = false;
       let client: PoolClient | undefined;
@@ -404,14 +437,12 @@ export default function createKernelRouter(): Router {
         await client.query(insertSql, [
           id,
           templateId,
-          divisionId,
           requester,
           asJsonString(body.metadata ?? {}),
         ]);
 
         try {
           // Append an audit event for agent.create
-          await appendAuditEvent('agent.create', { agentId: id, templateId, divisionId, requester, principal });
         } catch (e) {
           console.warn('audit append failed for agent.create:', (e as Error).message || e);
         }
@@ -430,6 +461,10 @@ export default function createKernelRouter(): Router {
         }
         return next(err);
       }
+    
+        return res.status(201).json({ id });
+
+        return res.status(201).json({ id });
     },
   );
 

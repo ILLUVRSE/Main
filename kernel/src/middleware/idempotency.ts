@@ -13,6 +13,9 @@ interface IdempotencyContext {
 const DEFAULT_LIMIT = 1024 * 1024; // 1MB
 const TABLE_NAME = getIdempotencyTableName();
 
+/**
+ * Produce a stable JSON string for request body comparison
+ */
 function stableStringify(value: any): string {
   const normalize = (input: any): any => {
     if (input === null || typeof input !== 'object') {
@@ -35,6 +38,9 @@ function stableStringify(value: any): string {
   }
 }
 
+/**
+ * Compute a request hash based on method, path, and normalized body
+ */
 function computeRequestHash(req: Request): string {
   const bodyString = stableStringify(req.body ?? null);
   const path = req.originalUrl || req.path;
@@ -48,6 +54,9 @@ function computeRequestHash(req: Request): string {
     .digest('hex');
 }
 
+/**
+ * Parse stored body value (may be JSON string or raw)
+ */
 function parseStoredBody(raw: string | null): any {
   if (!raw) return null;
   try {
@@ -66,6 +75,7 @@ function getLimit(): number {
   return parsed;
 }
 
+/** Serialize response body to string for storage */
 function serializeBody(body: any): string {
   if (body === undefined) return 'null';
   if (body === null) return 'null';
@@ -78,6 +88,15 @@ function serializeBody(body: any): string {
   }
 }
 
+/**
+ * Idempotency middleware
+ *
+ * - Only handles POST requests.
+ * - Expects header 'Idempotency-Key'.
+ * - Stores method, path, request_hash at the beginning of processing.
+ * - On subsequent requests with same key, returns stored response (if hash matches),
+ *   or 412 when request hash differs (conflicting body).
+ */
 export async function idempotencyMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (req.method.toUpperCase() !== 'POST') {
     return next();
@@ -133,6 +152,7 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
       return;
     }
 
+    // Insert a placeholder row recording method/path/hash and expires_at
     const expiresAtIso = getIdempotencyTtlIso();
     await client.query(
       `INSERT INTO ${TABLE_NAME} (key, method, path, request_hash, created_at, expires_at) VALUES ($1,$2,$3,$4, now(), $5)`,
@@ -181,6 +201,7 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
       return sender(body);
     };
 
+    // Override response methods to capture output and persist
     res.json = ((body?: any) => {
       return finalizeAndSend(body, originalJson);
     }) as any;
@@ -202,3 +223,4 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
 }
 
 export default idempotencyMiddleware;
+

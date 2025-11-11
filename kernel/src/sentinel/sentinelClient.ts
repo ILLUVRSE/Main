@@ -131,21 +131,21 @@ function normalizeDecision(policyName: string, decision: PolicyDecision): Normal
     ensureString(decision.policyCheckId) ||
     ensureString(decision.id) ||
     ensureString(decision.policyId) ||
-    ensureString(decision.policy_id) ||
+    ensureString((decision as any).policy_id) ||
     fallbackId;
 
   const ruleId =
     ensureString(decision.ruleId) ||
-    ensureString(decision.rule_id) ||
-    ensureString(decision.policyRuleId) ||
+    ensureString((decision as any).rule_id) ||
+    ensureString((decision as any).policyRuleId) ||
     ensureString(decision.policyId) ||
-    ensureString(decision.policy_id) ||
+    ensureString((decision as any).policy_id) ||
     null;
 
   const rationale =
     ensureString(decision.rationale) ||
     ensureString(decision.reason) ||
-    ensureString(decision.explanation) ||
+    ensureString((decision as any).explanation) ||
     null;
 
   const ts =
@@ -172,7 +172,7 @@ function summarizeContext(ctx?: any): Record<string, any> | undefined {
     summary.allocation = {
       entityId:
         ensureString(allocation.entityId) ||
-        ensureString(allocation.entity_id) ||
+        ensureString((allocation as any).entity_id) ||
         null,
       delta: typeof allocation.delta === 'number' ? allocation.delta : Number(allocation.delta ?? 0) || 0,
       pool: ensureString(allocation.pool) || null,
@@ -181,7 +181,7 @@ function summarizeContext(ctx?: any): Record<string, any> | undefined {
 
   const manifest = ctx.manifest;
   if (manifest && typeof manifest === 'object') {
-    summary.manifestId = ensureString(manifest.id) || ensureString(manifest.manifestId) || null;
+    summary.manifestId = ensureString((manifest as any).id) || ensureString((manifest as any).manifestId) || null;
   }
 
   const agent = ctx.agent;
@@ -191,7 +191,7 @@ function summarizeContext(ctx?: any): Record<string, any> | undefined {
 
   const requestId =
     ensureString(ctx.requestId) ||
-    ensureString(ctx.request_id) ||
+    ensureString((ctx as any).request_id) ||
     ensureString(ctx.request?.id);
   if (requestId) {
     summary.requestId = requestId;
@@ -277,3 +277,4 @@ export default {
   recordEvent,
   enforcePolicyOrThrow,
 } as const;
+

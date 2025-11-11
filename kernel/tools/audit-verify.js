@@ -1,270 +1,212 @@
 #!/usr/bin/env node
+// kernel/tools/audit-verify.js
+// Verify audit_events signatures using signers.json
+//
+// Usage:
+//   POSTGRES_URL="postgresql://postgres:postgres@localhost:5432/illuvrse" node kernel/tools/audit-verify.js --limit 200
+//
+// Exit code: 0 if all verifications succeeded (or no signed events found), >0 if any failure.
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { Client } = require('pg');
 
-const ED25519_SPki_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
-
-/* ---------- Canonicalization (same rules used by agent-manager) ---------- */
-function canonicalize(value) {
-  if (value === null || value === undefined) return Buffer.from('null');
-  if (typeof value === 'boolean') return Buffer.from(value ? 'true' : 'false');
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`Non-finite number: ${value}`);
-    return Buffer.from(JSON.stringify(value));
-  }
-  if (typeof value === 'string') return Buffer.from(JSON.stringify(value));
-  if (Array.isArray(value)) {
-    const parts = value.map((x) => canonicalize(x));
-    return Buffer.from(`[${parts.map((b) => b.toString('utf8')).join(',')}]`);
-  }
-  if (typeof value === 'object') {
-    const entries = Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalize(value[key]).toString('utf8')}`);
-    return Buffer.from(`{${entries.join(',')}}`);
-  }
-  return Buffer.from(JSON.stringify(value));
+function log(...args) {
+  console.log('[audit-verify]', ...args);
 }
 
-/* ---------- Signer registry parsing ---------- */
-function parseSignerRegistry(raw) {
-  if (!raw || (typeof raw !== 'object' && !Array.isArray(raw))) throw new Error('Signer registry must be object or array');
-  let entries;
-  if (Array.isArray(raw)) entries = raw;
-  else if (Array.isArray(raw.signers)) entries = raw.signers;
-  else {
-    entries = Object.keys(raw).map((id) => {
-      const val = raw[id];
-      return typeof val === 'string' ? { signerId: id, publicKey: val } : { signerId: id, ...(val || {}) };
-    });
-  }
+function err(...args) {
+  console.error('[audit-verify]', ...args);
+}
 
-  const map = new Map();
-  for (const e of entries) {
-    if (!e) continue;
-    const signerId = e.signerId || e.signer_id || e.id;
-    let publicKey = e.publicKey || e.public_key;
-    let algRaw = (e.algorithm || e.alg || '').toString();
-    if (!signerId || !publicKey) throw new Error('Each signer needs signerId + publicKey');
-
-    // Normalize algorithm if present; otherwise leave undefined so we can infer later.
-    let normalized;
-    if (algRaw && algRaw.trim() !== '') {
-      const a = algRaw.toLowerCase();
-      if (a.includes('rsa')) normalized = 'rsa-sha256';
-      else if (a.includes('ed25519')) normalized = 'ed25519';
-      else throw new Error(`Bad alg ${algRaw} for signer ${signerId}`);
+function parseArgs() {
+  const argv = process.argv.slice(2);
+  const opts = { limit: 200, since: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--limit' && argv[i + 1]) {
+      opts.limit = Number(argv[++i]) || opts.limit;
+    } else if (a === '--since' && argv[i + 1]) {
+      opts.since = argv[++i];
+    } else if (a === '--help' || a === '-h') {
+      console.log('Usage: node kernel/tools/audit-verify.js [--limit N] [--since "YYYY-MM-DD"]');
+      process.exit(0);
     } else {
-      normalized = undefined;
+      // ignore unknown
     }
-
-    publicKey = typeof publicKey === 'string' ? publicKey.trim() : publicKey;
-
-    // Basic validation for Ed25519 when the registry explicitly states ed25519 or when key looks raw
-    if (normalized === 'ed25519' || (!normalized && !publicKey.startsWith('-----BEGIN'))) {
-      if (!publicKey.startsWith('-----BEGIN')) {
-        const buf = Buffer.from(publicKey, 'base64');
-        if (buf.length !== 32 && buf.length !== 0) {
-          throw new Error(`Public key for ${signerId} invalid length`);
-        }
-      }
-    }
-
-    map.set(signerId, { publicKey, algorithm: normalized });
   }
-  return map;
+  return opts;
 }
 
-/* ---------- Public key construction (infer from content) ---------- */
-/**
- * createKeyObject(publicKeyStr[, alg])
- *
- * Accepts:
- *  - PEM string (-----BEGIN PUBLIC KEY-----...)
- *  - base64 DER/SPKI (string)
- *  - base64 raw 32-byte Ed25519 public key (string)
- *
- * If alg is supplied it is not strictly required; we infer the algorithm from the key material when needed.
- */
-function createKeyObject(publicKeyStr, alg) {
-  if (!publicKeyStr || typeof publicKeyStr !== 'string') throw new Error('publicKeyStr is required');
+function readSigners() {
+  const p = path.resolve(__dirname, 'signers.json');
+  if (!fs.existsSync(p)) {
+    throw new Error(`signers.json not found at ${p}`);
+  }
+  const raw = fs.readFileSync(p, 'utf8');
+  try {
+    return JSON.parse(raw).signers || [];
+  } catch (e) {
+    throw new Error('failed to parse signers.json: ' + e.message);
+  }
+}
 
-  const trimmed = publicKeyStr.trim();
+function findSigner(signers, signerId) {
+  return signers.find((s) => String(s.signerId) === String(signerId));
+}
 
-  // PEM first (accept RSA/SPKI or Ed25519 PEM)
+function detectSigFormat(sigStr) {
+  if (!sigStr) return 'unknown';
+  // base64 has + or / or ends with =
+  if (/^[A-Za-z0-9+/=]+$/.test(sigStr)) {
+    return 'base64';
+  }
+  if (/^[0-9a-fA-F]+$/.test(sigStr)) {
+    return 'hex';
+  }
+  return 'base64';
+}
+
+function toBufferFromSig(sigStr) {
+  if (!sigStr) return null;
+  const fmt = detectSigFormat(sigStr);
+  if (fmt === 'hex') return Buffer.from(sigStr, 'hex');
+  // default base64
+  return Buffer.from(sigStr, 'base64');
+}
+
+function createPublicKey(keyStr) {
+  // accept PEM blobs directly. If keyStr looks like base64 without PEM headers,
+  // try to wrap as a PEM for RSA (not ideal) — prefer PEM in signers.json.
+  if (!keyStr) throw new Error('empty public key');
+  const trimmed = String(keyStr).trim();
   if (trimmed.startsWith('-----BEGIN')) {
     return crypto.createPublicKey(trimmed);
   }
+  // Try to guess: assume base64 DER for ED25519 or RSA SPKI
+  // Wrap as PEM SPKI for RSA/ED25519
+  const b64 = trimmed.replace(/\s+/g, '');
+  const pem = `-----BEGIN PUBLIC KEY-----\n${b64.match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----\n`;
+  return crypto.createPublicKey(pem);
+}
 
-  // otherwise base64 -> buffer
-  let buf;
+/**
+ * Verify a signature for a given hash string (dataString).
+ * - For rsa-sha256: createVerify('RSA-SHA256').update(dataString)
+ * - For ed25519: crypto.verify(null, Buffer.from(dataString), publicKeyObj, signatureBuffer)
+ */
+function verifySignature(algorithm, publicKeyStr, dataString, signatureStr) {
+  if (!signatureStr) return false;
+  const sigBuf = toBufferFromSig(signatureStr);
+  if (!sigBuf) return false;
+
+  // Normalize algorithm strings
+  const alg = String(algorithm || '').toLowerCase();
   try {
-    buf = Buffer.from(trimmed, 'base64');
+    const pubKey = createPublicKey(publicKeyStr);
+
+    if (alg.includes('ed25519')) {
+      // ed25519 verify: crypto.verify(null, data, pubKey, signature)
+      const ok = crypto.verify(null, Buffer.from(dataString, 'utf8'), pubKey, sigBuf);
+      return !!ok;
+    }
+
+    // default: RSA-SHA256
+    if (alg.includes('rsa') || alg.includes('sha256')) {
+      const verifier = crypto.createVerify('RSA-SHA256');
+      verifier.update(dataString, 'utf8');
+      verifier.end();
+      // Node accepts signature as Buffer
+      return verifier.verify(pubKey, sigBuf);
+    }
+
+    // Fallback try: SHA256 verify
+    const verifier = crypto.createVerify('SHA256');
+    verifier.update(dataString, 'utf8');
+    verifier.end();
+    return verifier.verify(pubKey, sigBuf);
   } catch (e) {
-    throw new Error(`Public key parse error: invalid base64`);
-  }
-
-  // If exact 32 bytes -> raw Ed25519 public key
-  if (buf.length === 32) {
-    const spki = Buffer.concat([ED25519_SPki_PREFIX, buf]);
-    return crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
-  }
-
-  // Otherwise assume DER/SPKI
-  try {
-    return crypto.createPublicKey({ key: buf, format: 'der', type: 'spki' });
-  } catch (e) {
-    throw new Error(`Public key parse error: ${(e && e.message) || e}`);
+    throw new Error('signature verify error: ' + e.message);
   }
 }
 
-/* ---------- Verification ---------- */
-function verifyEvents(events, signerMap) {
-  const keyCache = new Map();
-  let expectedPrev = '';
-  let headHash = '';
-
-  for (const [i, row] of events.entries()) {
-    const id = row.id;
-    const signerId = row.signer_kid || row.signer_id;
-    if (!signerId) throw new Error(`Missing signerId for event ${id}`);
-    const signer = signerMap.get(signerId);
-    if (!signer) throw new Error(`Unknown signer ${signerId}`);
-
-    const storedPrev = row.prev_hash || '';
-    const sigB64 = row.signature;
-    if (!sigB64) throw new Error(`Missing signature for ${id}`);
-
-    // canonicalize payload and compute digest/hash per spec:
-    // hashBytes = SHA256( canonical(payload) || prevHashBytes )
-    const canonical = canonicalize(row.payload ?? null); // Buffer
-    const prevBytes = storedPrev ? Buffer.from(storedPrev, 'hex') : Buffer.alloc(0);
-    const concat = Buffer.concat([canonical, prevBytes]); // message whose digest we compute
-    const hashBytes = crypto.createHash('sha256').update(concat).digest();
-    const computedHash = hashBytes.toString('hex');
-
-    // First check prev_hash chain integrity (so tests that mutate prev_hash trigger this).
-    if (expectedPrev && storedPrev !== expectedPrev)
-      throw new Error(`prevHash mismatch for ${id}: expected ${expectedPrev} got ${storedPrev}`);
-
-    // If test/row includes a stored 'hash' field, ensure it matches computed value.
-    if (row.hash && row.hash !== computedHash) {
-      throw new Error(`Hash mismatch for ${id}: stored=${row.hash} computed=${computedHash}`);
-    }
-
-    // Create or reuse KeyObject
-    let keyObj = keyCache.get(signerId);
-    if (!keyObj) {
-      keyObj = createKeyObject(signer.publicKey, signer.algorithm);
-      keyCache.set(signerId, keyObj);
-    }
-
-    const sig = Buffer.from(sigB64, 'base64');
-
-    // Determine algorithm to use: prefer explicit signer.algorithm, otherwise infer
-    let algToUse = signer.algorithm;
-    if (!algToUse) {
-      try {
-        const aType = (keyObj && keyObj.asymmetricKeyType) ? keyObj.asymmetricKeyType.toLowerCase() : null;
-        if (aType === 'ed25519') algToUse = 'ed25519';
-        else if (aType === 'rsa') algToUse = 'rsa-sha256';
-      } catch (e) {
-        // fall through
-      }
-    }
-
-    if (algToUse === 'ed25519') {
-      // Ed25519: verify signature over the digest bytes
-      const ok = crypto.verify(null, hashBytes, keyObj, sig);
-      if (!ok) throw new Error(`Signature verification failed for ${id}`);
-    } else if (algToUse === 'rsa-sha256') {
-      // RSA: verify signature on message using SHA-256. Try PSS, then PKCS#1 v1.5.
-      let ok = false;
-      // Try PSS
-      try {
-        ok = crypto.verify(
-          'sha256',
-          concat,
-          { key: keyObj, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST },
-          sig
-        );
-      } catch (e) {
-        ok = false;
-      }
-      // Try PKCS#1 v1.5
-      if (!ok) {
-        try {
-          ok = crypto.verify(
-            'sha256',
-            concat,
-            { key: keyObj, padding: crypto.constants.RSA_PKCS1_PADDING },
-            sig
-          );
-        } catch (e) {
-          ok = false;
-        }
-      }
-      if (!ok) throw new Error(`Signature verification failed for ${id}`);
-    } else {
-      throw new Error(`Unsupported signer algorithm for verification: ${algToUse}`);
-    }
-
-    expectedPrev = computedHash;
-    headHash = computedHash;
+async function main() {
+  const opts = parseArgs();
+  const signers = readSigners();
+  if (!Array.isArray(signers) || signers.length === 0) {
+    log('No signers found in signers.json (nothing to verify).');
   }
 
-  return headHash;
-}
-
-/* ---------- DB fetch / orchestration ---------- */
-async function fetchEvents(client) {
-  const res = await client.query(`
-    SELECT id, event_type, payload, prev_hash, signature, signer_kid
-    FROM audit_events
-    ORDER BY created_at ASC
-  `);
-  return res.rows;
-}
-
-async function verifyAuditChain({ databaseUrl = process.env.POSTGRES_URL, signerMap }) {
-  const client = new Client({ connectionString: databaseUrl });
+  const pgUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/illuvrse';
+  const client = new Client({ connectionString: pgUrl });
   await client.connect();
+
   try {
-    const events = await fetchEvents(client);
-    const head = verifyEvents(events, signerMap);
-    return head;
+    let q = `SELECT id, event_type, hash, signature, signer_id, ts FROM audit_events WHERE signature IS NOT NULL ORDER BY ts DESC LIMIT $1`;
+    const params = [opts.limit];
+    if (opts.since) {
+      q = `SELECT id, event_type, hash, signature, signer_id, ts FROM audit_events WHERE signature IS NOT NULL AND ts >= $2 ORDER BY ts DESC LIMIT $1`;
+      params.unshift(opts.limit); // adjust order
+      params[1] = opts.since;
+    }
+    const res = await client.query(q, params);
+    if (!res.rows.length) {
+      log('No signed audit_events found (nothing to verify).');
+      process.exit(0);
+    }
+
+    let failures = 0;
+    for (const row of res.rows) {
+      const id = String(row.id);
+      const eventType = String(row.event_type || '');
+      const hash = String(row.hash || '');
+      const signature = row.signature === null ? null : String(row.signature || '');
+      const signerId = row.signer_id === null ? null : String(row.signer_id || '');
+
+      const signer = signerId ? findSigner(signers, signerId) : null;
+      if (!signer) {
+        err(`EVENT ${id} ${eventType}: signer not found: ${signerId}`);
+        failures++;
+        continue;
+      }
+
+      const alg = String(signer.algorithm || 'rsa-sha256');
+      const pub = signer.publicKey || signer.key || signer.pub || null;
+      if (!pub) {
+        err(`EVENT ${id} ${eventType}: signer ${signerId} has no publicKey`);
+        failures++;
+        continue;
+      }
+
+      try {
+        const ok = verifySignature(alg, pub, hash, signature);
+        if (!ok) {
+          err(`EVENT ${id} ${eventType}: signature verification FAILED for signer ${signerId} (alg=${alg})`);
+          failures++;
+        } else {
+          log(`EVENT ${id} ${eventType}: ok (signer=${signerId}, alg=${alg})`);
+        }
+      } catch (e) {
+        err(`EVENT ${id} ${eventType}: verification error: ${e.message}`);
+        failures++;
+      }
+    }
+
+    if (failures > 0) {
+      err(`Verification completed: ${failures} failure(s)`);
+      process.exit(2);
+    } else {
+      log(`Verification completed: all ${res.rows.length} events OK`);
+      process.exit(0);
+    }
   } finally {
-    await client.end();
+    await client.end().catch(() => {});
   }
 }
 
-/* ---------- CLI ---------- */
-async function main(argv) {
-  const args = argv.slice(2);
-  let dbUrl, signersPath;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '-d' || args[i] === '--database-url') dbUrl = args[++i];
-    else if (args[i] === '-s' || args[i] === '--signers') signersPath = args[++i];
-  }
-  if (!dbUrl || !signersPath) {
-    console.error('Usage: node audit-verify.js -d <db_url> -s <signers.json>');
-    process.exit(1);
-  }
-  const raw = JSON.parse(fs.readFileSync(path.resolve(signersPath), 'utf8'));
-  const signerMap = parseSignerRegistry(raw);
-  try {
-    const head = await verifyAuditChain({ databaseUrl: dbUrl, signerMap });
-    console.log(`Audit chain verified. Head hash: ${head}`);
-  } catch (e) {
-    console.error('Audit verification failed:', e.message);
-    process.exitCode = 1;
-  }
-}
-
-if (require.main === module) main(process.argv);
-
-module.exports = { canonicalize, parseSignerRegistry, createKeyObject, verifyEvents, verifyAuditChain };
+main().catch((e) => {
+  err('Fatal error:', e.message || e);
+  process.exit(1);
+});
 

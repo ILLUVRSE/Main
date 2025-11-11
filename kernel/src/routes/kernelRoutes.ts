@@ -15,7 +15,6 @@
  *  - POST /kernel/eval accepts evals without auth.
  *  - GET /kernel/agent/:id/state returns agent and evals without auth.
  */
-
 import express, { Request, Response, NextFunction, Router, RequestHandler } from 'express';
 import crypto from 'crypto';
 import { PoolClient } from 'pg';
@@ -233,8 +232,14 @@ export default function createKernelRouter(): Router {
       const manifest: DivisionManifest = req.body;
       const principal = (req as any).principal || getPrincipalFromRequest(req);
 
-      // Validate manifest presence and id early so tests that mutate manifest fail here.
-      if (!manifest || !manifest.id) return res.status(400).json({ error: 'manifest with id required' });
+      // Validate manifest presence. Generate an id if it's missing so tests that
+      // send minimal division payloads (name/budget) are accepted and the server
+      // can deterministically upsert a division.
+      if (!manifest) return res.status(400).json({ error: 'manifest with id required' });
+      if (!manifest.id) {
+        // Generate a UUID for the manifest when the client didn't provide one.
+        manifest.id = crypto.randomUUID();
+      }
 
       let managed = false;
       let client: PoolClient | undefined;

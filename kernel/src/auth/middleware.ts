@@ -49,10 +49,15 @@ function verifyHs256Token(token: string, secret: string): any {
   const signingInput = parts[0] + '.' + parts[1];
   const sig = parts[2];
 
+  // Compute expected signature in base64url
   const h = crypto.createHmac('sha256', secret).update(signingInput).digest();
   const expected = h.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-  if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) {
+  // Timing-safe compare: lengths must match
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const sigBuf = Buffer.from(sig, 'utf8');
+  if (expectedBuf.length !== sigBuf.length) throw new Error('invalid signature');
+  if (!crypto.timingSafeEqual(expectedBuf, sigBuf)) {
     throw new Error('invalid signature');
   }
 
@@ -65,6 +70,7 @@ function verifyHs256Token(token: string, secret: string): any {
  */
 function extractCNFromCert(cert: any): string | undefined {
   if (!cert) return undefined;
+  // Node's getPeerCertificate returns either an object with subject or a string or nested structures.
   const subj = cert.subject || cert.subjectCertificate || cert.issuerCertificate;
   if (subj) {
     if (typeof subj === 'object') {
@@ -127,7 +133,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
                 try {
                   roles = mapper.mapOidcRolesToCanonical(roles || []);
                 } catch {
-                  // ignore
+                  // ignore mapper errors
                 }
               }
 
@@ -137,9 +143,10 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
                 roles: roles || [],
               };
 
-              req.principal = principal;
+              (req as any).principal = principal;
               return next();
             } catch (e) {
+              // HS256 verification failed — continue to other auth paths
               console.warn('authMiddleware: HS256 token verification failed — continuing unauthenticated:', (e as Error).message || e);
             }
           } else {
@@ -161,7 +168,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
                 const p = mapper.principalFromOidcClaims(payload) as Principal;
                 p.id = String(p.id || payload.sub || payload.sid || 'unknown');
                 p.roles = p.roles || [];
-                req.principal = p;
+                (req as any).principal = p;
                 return next();
               } catch (e) {
                 console.warn('authMiddleware: roleMapper.principalFromOidcClaims failed, falling back:', (e as Error).message || e);
@@ -189,7 +196,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
               try {
                 roles = mapper.mapOidcRolesToCanonical(roles || []);
               } catch {
-                // ignore
+                // ignore mapping errors
               }
             }
 
@@ -199,7 +206,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
               roles: roles || [],
             };
 
-            req.principal = principal;
+            (req as any).principal = principal;
             return next();
           } catch (err) {
             console.warn('authMiddleware: oidc token verify failed — continuing unauthenticated:', (err as Error).message || err);
@@ -222,7 +229,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
             try {
               const p = mapper.principalFromCert(cert) as Principal;
               p.roles = p.roles || [];
-              req.principal = p;
+              (req as any).principal = p;
               return next();
             } catch (e) {
               console.warn('authMiddleware: roleMapper.principalFromCert failed, falling back:', (e as Error).message || e);
@@ -238,7 +245,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
             id,
             roles: [],
           };
-          req.principal = principal;
+          (req as any).principal = principal;
           return next();
         }
       }

@@ -13,7 +13,6 @@
  *   in production: map tokens/certs to canonical roles and principals.
  * - DO NOT COMMIT SECRETS. Production must verify tokens / certs server-side (not from headers).
  */
-
 import { Request, Response, NextFunction } from 'express';
 import { logger } from './logger';
 import {
@@ -88,6 +87,24 @@ function normalizeRoles(rawRoles: string[]): string[] {
 }
 
 /**
+ * Try to parse a JWT payload **without verifying**. Used only as a dev/test fallback.
+ * This decodes the middle JWT segment (payload) as base64url and parses JSON.
+ */
+function tryDecodeJwtPayload(token: string): Record<string, any> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    let b = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4 !== 0) b += '=';
+    const buf = Buffer.from(b, 'base64');
+    const json = buf.toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * getPrincipalFromRequest
  *
  * Lightweight principal extractor for development and local testing.
@@ -98,6 +115,7 @@ function normalizeRoles(rawRoles: string[]): string[] {
  * - If header `x-oidc-claims` (JSON) present -> use principalFromOidcClaims(claims) if mapper available
  * - Else if header `x-oidc-sub` is present => human principal (roles from x-oidc-roles or x-roles)
  * - Else if header `x-service-id` present => service principal (roles from x-service-roles)
+ * - Else try Authorization: Bearer <JWT> decode (dev/test fallback)
  * - Else fallback to anonymous principal
  *
  * NOTE: These headers are for development only and should not be trusted in production.
@@ -119,14 +137,62 @@ export function getPrincipalFromRequest(req: Request): Principal {
     }
   }
 
+  // 1.b) Authorization: Bearer <JWT> — test/dev fallback: decode payload without verifying.
+  // This is intentionally permissive and only intended for local integration tests.
+  const authHeader = (req.header('authorization') || req.header('Authorization') || '').toString();
+  const m = authHeader.match(/^\s*Bearer\s+(.+)\s*$/i);
+  if (m) {
+    const token = m[1];
+    const payload = tryDecodeJwtPayload(token);
+    if (payload) {
+      // If a mapper exists, prefer it to construct canonical principal
+      if (mapper && typeof mapper.principalFromOidcClaims === 'function') {
+        try {
+          const p = mapper.principalFromOidcClaims(payload) as Principal;
+          p.roles = normalizeRoles(p.roles || []);
+          // Ensure id fallback
+          p.id = p.id || String(payload.sub || payload.sid || payload.subject || 'user.dev');
+          return p;
+        } catch {
+          // fallthrough to basic payload extraction
+        }
+      }
+
+      // Build minimal principal from payload
+      const id = String(payload.sub || payload.sid || payload.subject || 'user.dev');
+      let roles: string[] = [];
+      if (payload?.realm_access && Array.isArray(payload.realm_access.roles)) roles = roles.concat(payload.realm_access.roles);
+      if (payload?.resource_access && typeof payload.resource_access === 'object') {
+        for (const k of Object.keys(payload.resource_access || {})) {
+          const r = payload.resource_access[k]?.roles;
+          if (Array.isArray(r)) roles.push(...r);
+        }
+      }
+      if (Array.isArray(payload?.roles)) roles = roles.concat(payload.roles);
+      if (typeof payload?.roles === 'string') roles = roles.concat(payload.roles.split(/[,\s]+/).filter(Boolean));
+      if (typeof payload?.scope === 'string') roles = roles.concat(payload.scope.split(/\s+/).filter(Boolean));
+      // normalize and return
+      return { type: 'human', id, roles: normalizeRoles(roles) };
+    }
+  }
+
   // Human/OIDC-style headers (development-only)
   const oidcSub = req.header('x-oidc-sub') || req.header('x-user-id');
-  const oidcRoles = req.header('x-oidc-roles') || req.header('x-roles');
+  const oidcRolesHeader = req.header('x-oidc-roles') || req.header('x-roles');
 
   if (oidcSub) {
-    const parsed = parseRolesHeader(oidcRoles);
+    const parsed = parseRolesHeader(oidcRolesHeader);
     const roles = normalizeRoles(parsed);
-    return { type: 'human', id: oidcSub, roles: roles.length ? roles : [] };
+    return { type: 'human', id: String(oidcSub), roles: roles.length ? roles : [] };
+  }
+
+  // NEW: tolerate `x-oidc-roles` alone (no subject) as a test/dev convenience.
+  // Some tests set only roles header and expect /principal to return a principal with roles.
+  if (!oidcSub && oidcRolesHeader) {
+    const parsed = parseRolesHeader(oidcRolesHeader);
+    const roles = normalizeRoles(parsed);
+    // Use a stable dev id so tests asserting on principal shape get a reasonable id.
+    return { type: 'human', id: 'user.dev', roles: roles.length ? roles : [] };
   }
 
   // Service / mTLS-style headers (development-only)
@@ -282,5 +348,4 @@ export const requireAuthenticated = middlewareRequireAuthenticated;
  * - For services, validate mTLS client certs and map cert identity to service roles.
  * - Consider caching principal lookups (token introspection, authz calls) to reduce latency.
  */
-
 

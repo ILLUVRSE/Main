@@ -92,6 +92,8 @@ components:
         createdAt:
           type: string
           format: date-time
+        metadata:
+          type: object
       required:
         - id
         - role
@@ -419,6 +421,27 @@ paths:
         "404":
           description: not found
 
+  /kernel/agent/{id}:
+    get:
+      tags:
+        - kernel
+      summary: Fetch agent profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: agent profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProfile'
+        "404":
+          description: not found
+
   /kernel/eval:
     post:
       tags:
@@ -523,7 +546,7 @@ paths:
     get:
       tags:
         - kernel
-      summary: Fetch a signed audit event
+      summary: Fetch an audit event by id
       parameters:
         - name: id
           in: path
@@ -540,40 +563,9 @@ paths:
         "404":
           description: not found
 
-  /kernel/reason/{node}:
-    get:
-      tags:
-        - kernel
-      summary: Retrieve a reasoning trace for a graph node
-      parameters:
-        - name: node
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: reasoning trace
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  node:
-                    type: string
-                  trace:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        node:
-                          type: string
-                        details:
-                          type: object
-        "404":
-          description: not found
-
+# Optional tag descriptions (keeps UI/X-refs clear)
 tags:
   - name: kernel
-    description: Kernel API endpoints
+    description: Kernel API endpoints for agent/division/eval/control
+
 

@@ -33,3 +33,7 @@ IDEA/server/data/artifacts/
 IDEA/server/data/*.json
 IDEA/server/data/*.log
 IDEA/server/tmp/*.tgz
+
+# local keys & env
+/tmp_rsa_priv.pem
+agent-manager/.env.local

@@ -70,7 +70,7 @@ export class LocalSigningProvider implements SigningProvider {
     const { privateKey } = getOrCreateKeyPair(this.signerId);
     const signature = crypto.sign(null as any, Buffer.from(prepared.payload), privateKey).toString('base64');
     return {
-      id: `sig-${crypto.randomUUID()}`,
+      id: crypto.randomUUID(),
       manifestId: prepared.manifestId,
       signerId: this.signerId,
       signature,
@@ -220,7 +220,7 @@ export class FakeKmsSigningProvider implements SigningProvider {
   async signManifest(manifest: any, request?: SigningRequest): Promise<ManifestSignature> {
     const prepared = request ?? prepareManifestSigningRequest(manifest);
     return {
-      id: prepared.manifestId ? `fake-${prepared.manifestId}` : `sig-${crypto.randomUUID()}`,
+      id: crypto.randomUUID(),
       manifestId: this.options.manifestId ?? prepared.manifestId,
       signerId: this.options.signerId ?? 'fake-kms-signer',
       signature: this.options.signature ?? Buffer.from('fake-signature').toString('base64'),

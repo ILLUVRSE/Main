@@ -1,152 +1,215 @@
-KMS IAM policy & guidance for Agent-Manager audit signing
+# KMS / IAM Policy (Minimal, Least-Privilege)
 
-Goal: allow the Agent Manager service (or a CI job) to sign audit event digests and to let verifiers retrieve public key material. Use asymmetric keys for RSA/Ed25519 signing and symmetric HMAC keys for HMAC signing. Keep privileges minimal: kms:Sign, kms:Verify, kms:GetPublicKey, kms:GenerateMac, kms:VerifyMac, kms:DescribeKey only on the selected key ARN.
-TL;DR: create an asymmetric key (KeyUsage=SIGN_VERIFY, CustomerMasterKeySpec=RSA_2048 or ED25519) for RSA/Ed25519. Grant your Agent Manager IAM role the KMS API permissions below limited to that key ARN. Store the key id/ARN in AUDIT_SIGNING_KMS_KEY_ID and fetch the public key (via GetPublicKey) to populate your kernel/tools/signers.json.
+## Purpose
 
-Key types & AWS KMS notes
+This document prescribes the recommended IAM and KMS key-policy configuration for services that need to:
 
-RSA (PKCS#1 v1.5 or PSS) — create an asymmetric key with KeyUsage: SIGN_VERIFY and CustomerMasterKeySpec: RSA_2048 (or RSA_3072 / RSA_4096 if you need larger keys). Use KMS signing algorithm RSASSA_PKCS1_V1_5_SHA_256 for PKCS#1 v1.5 or RSASSA_PSS_SHA_256 for PSS. When signing a precomputed digest, pass MessageType: 'DIGEST' to Sign.
+* **Sign** audit events or manifests (asymmetric RSA or Ed25519),
+* **Generate/verify MACs** for HMAC-based signatures,
+* **Export public keys** (to populate `kernel/tools/signers.json`) for verifiers.
 
-Ed25519 — create an asymmetric key with CustomerMasterKeySpec: ED25519 and KeyUsage: SIGN_VERIFY. Use SigningAlgorithm: 'ED25519'.
+The goal is *least-privilege access*, auditable usage, and clear operational steps to rotate/replace keys without breaking the audit chain.
 
-HMAC (symmetric) — create a symmetric KMS key for HMAC operations and use GenerateMac / VerifyMac with MacAlgorithm: 'HMAC_SHA_256'. HMAC keys are KeyUsage: GENERATE_VERIFY_MAC in newer APIs.
+---
 
-Public key retrieval — GetPublicKey returns the public key bytes (DER). Use that to populate kernel/tools/signers.json so kernel verifier can create a Node crypto publicKey object or the Go verifier can read DER.
+## Roles / Principals (example)
 
-Minimal IAM policy for the Agent Manager service (example)
+Create a dedicated IAM role for each service that needs to sign or generate MACs:
 
-Replace REGION, ACCOUNT_ID, and KEY_ID with your values. Limit Resource to the specific KMS key ARN (or alias ARN). This policy allows the service principal (IAM role used by agent-manager) to call the necessary KMS methods on the key.
+* `role/illuvrse-agent-manager-signing` — used by Agent Manager
+* `role/illuvrse-kernel-signing` — used by Kernel (if Kernel needs signing privileges)
+* `role/illuvrse-audit-verifier` — reader-only access to `kms:GetPublicKey` (verifiers)
+* `role/illuvrse-ci` — CI job role that may need `kms:GetPublicKey` to validate chain in CI
 
+**Principle:** do *not* reuse human credentials or long-lived user keys. Use IAM roles (ECS Task Role / EC2 instance profile / IAM role for service account) or short-lived credentials via OIDC or STS.
+
+---
+
+## Allowed KMS Actions (minimum)
+
+Grant these KMS actions **only** on the signing key ARN(s):
+
+* `kms:Sign` — required for RSA/Ed25519 signing operations.
+* `kms:GenerateMac` — required for symmetric HMAC-style keys.
+* `kms:GetPublicKey` — required for verifiers to export the public key.
+* `kms:DescribeKey` — to check key metadata / key state.
+* (Optional) `kms:ListAliases` / `kms:ListKeys` — not required; avoid unless necessary.
+
+**Do not** grant `kms:CreateKey` or broad administrative actions unless explicitly required and audited.
+
+---
+
+## Example IAM policy (Agent Manager signer)
+
+Replace placeholders (`REGION`, `ACCOUNT`, `KEY_ID`) with your values.
+
+```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowKmsSignVerifyGetPublicKey",
+      "Sid": "AllowKMSSigning",
       "Effect": "Allow",
       "Action": [
         "kms:Sign",
-        "kms:Verify",
-        "kms:GetPublicKey",
-        "kms:DescribeKey",
         "kms:GenerateMac",
-        "kms:VerifyMac"
+        "kms:GetPublicKey",
+        "kms:DescribeKey"
       ],
-      "Resource": "arn:aws:kms:REGION:ACCOUNT_ID:key/KEY_ID"
+      "Resource": "arn:aws:kms:REGION:ACCOUNT:key/KEY_ID"
+    }
+  ]
+}
+```
+
+Attach this policy to the service IAM role (for example, `role/illuvrse-agent-manager-signing`).
+
+---
+
+## Recommended KMS key policy (minimal)
+
+The KMS key policy must allow the AWS account root and the specific service role to use the key. Example (partial):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Id": "key-policy-illuvrse-audit-signing",
+  "Statement": [
+    {
+      "Sid": "AllowAccountAdmin",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::ACCOUNT:root" },
+      "Action": "kms:*",
+      "Resource": "*"
     },
     {
-      "Sid": "AllowListAliasesOptional",
+      "Sid": "AllowAgentManagerToUseKey",
       "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::ACCOUNT:role/illuvrse-agent-manager-signing" },
       "Action": [
-        "kms:ListAliases",
-        "kms:ListKeys"
+        "kms:Sign",
+        "kms:GenerateMac",
+        "kms:GetPublicKey",
+        "kms:DescribeKey",
+        "kms:ListGrants",
+        "kms:CreateGrant",
+        "kms:RevokeGrant"
       ],
       "Resource": "*"
     }
   ]
 }
+```
 
-Notes:
+**Notes:**
 
-If you put the key behind an alias, you can use the alias ARN instead: arn:aws:kms:REGION:ACCOUNT_ID:alias/my-audit-signing-key.
+* Use `CreateGrant` / `ListGrants` only if your environment uses grants for cross-account or cross-service access patterns.
+* If you use cross-account principals, the key policy must include those principals explicitly.
 
-kms:GetPublicKey is required for verifiers or tooling that need the public key. Do not grant kms:CreateKey or wide admin permissions here.
+---
 
-If agent-manager signs using KMS, it only needs Sign (or GenerateMac for HMAC). Verify is only needed if the same role will verify. GetPublicKey is necessary only for processes that need to export the public key into kernel/tools/signers.json.
+## Conditions & Restrictions
 
-Example key creation (AWS CLI)
-Create an asymmetric RSA key (for RSA-SHA256)
-aws kms create-key \
-  --description "Agent Manager audit signing RSA_2048 key" \
-  --key-usage SIGN_VERIFY \
-  --customer-master-key-spec RSA_2048 \
-  --origin AWS_KMS
+Add conditions where possible:
 
-Create an Ed25519 key
-aws kms create-key \
-  --description "Agent Manager audit signing ED25519 key" \
-  --key-usage SIGN_VERIFY \
-  --customer-master-key-spec ED25519 \
-  --origin AWS_KMS
+* Restrict to the **exact** KMS key ARN(s) via `Resource`.
+* Add `aws:SourceVpc`, `aws:SourceIp`, or VPC endpoint conditions if your services run inside a constrained network.
+* Deny access when `aws:ViaAWSService` is non-compliant for your topology (optional).
 
-Create an HMAC symmetric key
-aws kms create-key \
-  --description "Agent Manager audit HMAC key" \
-  --key-usage GENERATE_VERIFY_MAC \
-  --origin AWS_KMS
+**Example condition snippet** (restrict to a single VPC endpoint):
 
-After creation you’ll receive a KeyId and Arn. Use that as AUDIT_SIGNING_KMS_KEY_ID (or AUDIT_SIGNER_KID depending on config).
-
-Fetching the public key (DER / base64) for registry
-
-To export the public key (so you can put it in kernel/tools/signers.json):
-# GetPublicKey returns base64-encoded DER in the CLI output (PublicKey is binary)
-aws kms get-public-key --key-id arn:aws:kms:REGION:ACCOUNT_ID:key/KEY_ID --output text --query PublicKey | base64 --decode > public_key.der
-
-Convert DER to PEM (optional):
-openssl rsa -pubin -inform DER -in public_key.der -pubout -out public_key.pem   # for RSA
-# For Ed25519 use openssl (OpenSSL >= 3.0) or encode base64 DER directly; kernel verifier accepts PEM or base64 DER.
-
-Populate signers.json (example entry):
-{
-  "signers": [
-    {
-      "signerId": "integration-rsa-test",
-      "algorithm": "rsa-sha256",
-      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANB...IDAQAB\n-----END PUBLIC KEY-----"
-    }
-  ]
+```json
+"Condition": {
+  "StringEquals": {
+    "aws:sourceVpc": "vpc-0abcd1234"
+  }
 }
+```
 
-You can also store base64 DER (no PEM wrapper) — kernel/tools/audit-verify.js accepts either.
+(Use only when your deployment topology supports it and you can maintain keys in multi-region/multi-vpc setups.)
 
-KMS key policy / trust notes
+---
 
-The KMS key policy is the single most important gate. In many setups you keep the default KMS key policy (AWS account root + admin). If you want the best separation, put a key policy that explicitly allows the Agent Manager IAM role to Sign/GenerateMac and GetPublicKey.
+## Key types & usage patterns
 
-When in doubt, attach an IAM policy (example above) to the Agent Manager role and keep a narrow KMS key policy that allows the account administrators plus kms:ViaService if needed.
+* **Asymmetric RSA_2048** — for RSA PKCS#1 v1.5 signatures (`rsa-sha256`) and `Sign` use. Use `MessageType=DIGEST` for KMS Sign when signing precomputed digests.
+* **Asymmetric ED25519** — for Ed25519 signatures.
+* **Symmetric (HMAC)** — for `GenerateMac` / `VerifyMac` paths when HMAC is the desired signing method.
 
-For cross-account signing or CI systems, prefer granting an IAM role in the account that runs agent-manager and avoid adding wide-access key policies.
+**AWS CLI examples**
 
-Key rotation runbook (quick steps)
+* Create RSA key:
 
-Important: Asymmetric KMS keys do not rotate their private key material automatically in a way that preserves the public key. For audit signing you must plan rotation carefully.
+```bash
+aws kms create-key --description "Agent Manager RSA signing key" --key-usage SIGN_VERIFY --customer-master-key-spec RSA_2048
+```
 
-Create a new KMS key (asymmetric RSA/Ed25519) for the new key pair.
+* Get public key:
 
-Fetch the new public key via aws kms get-public-key and add it to kernel/tools/signers.json (or kernel/tools/signers.json in a controlled registry).
+```bash
+aws kms get-public-key --key-id "$AUDIT_SIGNING_KMS_KEY_ID" --query PublicKey --output text | base64 --decode > public_key.der
+```
 
-Deploy agent-manager with AUDIT_SIGNING_KMS_KEY_ID pointing to the new key ARN. For zero-downtime, ensure the verifier accepts both old and new signers in signers.json.
+* Sign digest (RSA, KMS):
 
-Run verification (e2e smoke) and check a few signed events succeed with the new key.
+```bash
+# hash.bin contains the 32 byte SHA-256 digest
+aws kms sign --key-id "$AUDIT_SIGNING_KMS_KEY_ID" --message-type DIGEST --message fileb://hash.bin --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 --output text --query Signature | base64 --decode > signature.bin
+```
 
-Remove old public key from signers.json only after you're confident older signatures are no longer needed (or are archived).
+* Generate MAC (HMAC):
 
-Optionally, schedule the old key for disable (not deletion) first. Only delete keys after long retention and audit confirmation.
+```bash
+aws kms generate-mac --key-id "$MAC_KEY_ID" --message fileb://message.bin --mac-algorithm HMAC_SHA_256 --query Mac --output text | base64 --decode > mac.bin
+```
 
-Notes: For automatic rotation semantics you must implement a registry that can store multiple signers and let kernel verifier accept multiple signerIds (we already support signers.json registry). Rotation is a manual process: create new key, update registry, update env, test, then deprecate old key.
+---
 
-Least-privilege checklist
-Agent Manager IAM role has only kms:Sign (or kms:GenerateMac for HMAC) + kms:GetPublicKey + kms:DescribeKey scoped to the single key ARN.
-CI/Verifier jobs that only need public key have kms:GetPublicKey (or you export public key once and store in repo/secure storage).
-Key policy restricts who can change the key (not everyone should be able to update key policy or schedule deletion).
-Use CloudTrail + KMS logging/metrics to monitor Sign, GetPublicKey, GenerateMac, etc.
-For production, set REQUIRE_KMS=true in CI to prevent accidental deployments with ephemeral keys.
+## Operational guidance
 
-Common pitfalls & gotchas
-Signing digest vs message: for RSA we must set MessageType: 'DIGEST' when calling Sign with a precomputed digest. If you pass the canonical string as Message, KMS will hash it internally; that’s a different signing shape and can break verification parity if your verifier expects a digest-based signature. Our implementation uses a digest flow (SHA256(canonical || prevHashBytes)) and KMS MessageType: 'DIGEST'.
+* **Public key publishing**: After key creation, export public key and add it to `kernel/tools/signers.json` (or `signers.json.example`), following the signers registry format. Automate with `agent-manager/scripts/build_signers_from_db_kms_pubkeys.js` or similar.
+* **CloudTrail**: Ensure CloudTrail logs `kms:Sign`, `kms:GenerateMac`, and `kms:GetPublicKey` for auditing.
+* **Monitoring**: Alert on unusual KMS usage (spikes in Sign calls), `FailedAttempts`, and changes to the key policy.
+* **No private keys in repo**: NEVER put private key material into the repository. Use KMS or secure secrets (Vault).
 
-Public key encoding: KMS GetPublicKey returns a DER-encoded SubjectPublicKeyInfo. You can use it as base64 DER or convert to PEM. Verifiers accept both.
+---
 
-HMAC keys: HMAC keys are symmetric; you cannot GetPublicKey. Verifiers must call VerifyMac/Verify against KMS to validate signatures — or share the HMAC secret (not recommended). Prefer asymmetric keys for public verification.
+## Acceptance criteria (for this doc and policy)
 
-Ed25519 support: Requires recent AWS KMS features and up-to-date SDK/CLI. Ensure your runtime supports ED25519 and your verifier supports Ed25519 signature verification.
+* An IAM policy exists for each signing role that grants **only** the actions listed and only on the configured key ARN(s).
+* KMS key policy includes the service role(s) that need signing rights and allows `kms:GetPublicKey`.
+* CI or manual test confirms `aws kms sign` and `aws kms get-public-key` succeed using the service role or a temporary credential for that role.
+* CloudTrail is configured to log KMS signing and public-key exports.
+* Public key(s) are exported and an example `kernel/tools/signers.json.example` is provided.
 
-Contact / audit review
+---
 
-If in doubt, ask Security for a short review:
+## Verification steps (quick)
 
-Provide KeyId / ARN, KeyPolicy, IAM role ARN for agent-manager, and the proposed signers.json public key entry.
+1. **Simulate that the role can call Sign**
 
-Provide a plan for rotation and retention of old keys.
+```bash
+aws iam simulate-principal-policy --policy-source-arn arn:aws:iam::ACCOUNT:role/illuvrse-agent-manager-signing --action-names kms:Sign --resource-arns arn:aws:kms:REGION:ACCOUNT:key/KEY_ID
+```
 
-That’s it — use the example IAM policy above, create an asymmetric KMS key for RSA/Ed25519 (or symmetric for HMAC), restrict permissions to the KMS key ARN, export the public key into kernel/tools/signers.json, and follow the rotation runbook when rotating keys.
+Expected: `EvalDecision` = `allowed`.
+
+2. **Sign a known digest (dev or CI)**
+
+```bash
+# compute digest
+echo -n '{"test":1}' | jq -c . | openssl dgst -sha256 -binary > digest.bin
+aws kms sign --key-id "$AUDIT_SIGNING_KMS_KEY_ID" --message-type DIGEST --message fileb://digest.bin --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 --query Signature --output text | base64 --decode > sig.bin
+openssl dgst -sha256 -verify public_key.pem -signature sig.bin <(echo -n '{"test":1}' | jq -c .)
+```
+
+Expected: verification succeeds.
+
+3. **Export public key and check format**
+
+```bash
+aws kms get-public-key --key-id "$AUDIT_SIGNING_KMS_KEY_ID" --query PublicKey --output text | base64 --decode > public_key.der
+# convert to PEM if needed
+openssl rsa -pubin -inform DER -in public_key.der -pubout -out public_key.pem
+```
+

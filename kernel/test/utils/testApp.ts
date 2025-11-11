@@ -1,103 +1,99 @@
-// kernel/test/utils/testApp.ts
-import express, { Request, Response } from 'express';
-import { authMiddleware } from '../../src/auth/middleware';
-import {
-  getPrincipalFromRequest,
-  requireRoles,
-  requireAnyAuthenticated,
-  Roles,
-} from '../../src/rbac';
-import { setSentinelClient, resetSentinelClient } from '../../src/sentinel/sentinelClient';
-
-export type TestAppOpts = {
-  mockSentinel?: any;      // optional test double for sentinel (must implement record, etc.)
-  kmsEndpoint?: string;    // optional KMS endpoint override for tests
-};
-
 /**
- * createTestApp
+ * Lightweight adapter that exposes createAppSync / createApp / app
+ * by delegating to kernel/dist/server. This tolerates multiple shapes
+ * the compiled server may be exported as, and makes tests resilient.
  *
- * Returns an Express app with:
- * - global authMiddleware (attempts OIDC JWT verification and mTLS cert extraction)
- * - /principal -> returns the principal attached or computed
- * - /require-any -> guarded by requireAnyAuthenticated
- * - /require-roles -> guarded by requireRoles(SuperAdmin, Operator)
- *
- * Optionally accepts test helpers (mockSentinel, kmsEndpoint).
- *
- * For convenience the returned app may have a `.teardown()` method attached which
- * tests should call to reset injected mocks (e.g., sentinel).
+ * Tests in this repo often `require('../utils/testApp')` and expect at
+ * least one of createAppSync/createApp/app to be available. This adapter
+ * simply forwards to what the compiled server exports.
  */
-export function createTestApp(opts?: TestAppOpts) {
-  const app = express();
 
-  // allow tests to inject a mock sentinel client
-  if (opts?.mockSentinel) {
-    try {
-      setSentinelClient(opts.mockSentinel);
-    } catch (e) {
-      // ignore: tests may not require sentinel
-      // eslint-disable-next-line no-console
-      console.warn('createTestApp: setSentinelClient failed:', (e as Error).message || e);
-    }
+type MaybeApp = any;
+
+function loadServer(): any {
+  // Load the compiled server (js under kernel/dist)
+  // Keep this in try/catch to surface helpful errors during development.
+  try {
+    // Use require with relative path from this file (kernel/test/utils)
+    // The compiled server is expected at kernel/dist/server.js
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const srv = require('../../dist/server');
+    return srv;
+  } catch (err) {
+    // Re-throw with clearer message
+    throw new Error(
+      `Failed to require kernel/dist/server from kernel/test/utils/testApp.ts - ensure kernel is built. Underlying error: ${(err as Error).message}`
+    );
   }
-
-  // allow tests to override KMS endpoint via opts
-  const originalKms = process.env.KMS_ENDPOINT;
-  if (opts?.kmsEndpoint) {
-    process.env.KMS_ENDPOINT = opts.kmsEndpoint;
-  }
-
-  // Parse JSON (some tests may POST)
-  app.use(express.json());
-
-  // Install auth middleware globally so it attempts JWT / mTLS extraction.
-  app.use((req: Request, res: Response, next) => {
-    // authMiddleware is async; call and forward errors to next()
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    Promise.resolve(authMiddleware(req as any, res as any, next)).catch(next);
-  });
-
-  // Returns the computed/attached principal (does not enforce auth)
-  app.get('/principal', (req: Request, res: Response) => {
-    const principal = req.principal ?? getPrincipalFromRequest(req);
-    // ensure it's attached for downstream assertions
-    (req as any).principal = principal;
-    return res.json({ principal });
-  });
-
-  // Require any authenticated principal (human or service)
-  app.get('/require-any', requireAnyAuthenticated, (req: Request, res: Response) => {
-    return res.json({ ok: true, principal: req.principal });
-  });
-
-  // Require at least one of the roles (SuperAdmin OR Operator) for access
-  app.get(
-    '/require-roles',
-    requireRoles(Roles.SUPERADMIN, Roles.OPERATOR),
-    (req: Request, res: Response) => {
-      return res.json({ ok: true, principal: req.principal });
-    }
-  );
-
-  // Attach a teardown helper for tests to clean up injected mocks / env changes
-  (app as any).teardown = () => {
-    try {
-      resetSentinelClient();
-    } catch (e) {
-      // noop
-    }
-    if (opts?.kmsEndpoint) {
-      if (typeof originalKms === 'undefined') {
-        delete process.env.KMS_ENDPOINT;
-      } else {
-        process.env.KMS_ENDPOINT = originalKms;
-      }
-    }
-  };
-
-  return app;
 }
 
-export default createTestApp;
+const srv = loadServer();
+
+// Normalization helpers -----------------------------------------------------
+
+/** Return the express app if available */
+function pickAppFromServer(s: any): MaybeApp | undefined {
+  if (!s) return undefined;
+  // s might itself be an express app, or an object exposing `app`, or a module with createAppSync/createApp
+  if (typeof s === 'function' && (s.use || s.handle)) return s;
+  if (s.app && typeof s.app === 'function' && (s.app.use || s.app.handle)) return s.app;
+  if (s.default && s.default.app && (s.default.app.use || s.default.app.handle)) return s.default.app;
+  return undefined;
+}
+
+/** Return exported functions if present */
+function pickCreators(s: any) {
+  return {
+    createAppSync: typeof s.createAppSync === 'function' ? s.createAppSync : (s.default && typeof s.default.createAppSync === 'function' ? s.default.createAppSync : undefined),
+    createApp: typeof s.createApp === 'function' ? s.createApp : (s.default && typeof s.default.createApp === 'function' ? s.default.createApp : undefined),
+  };
+}
+
+// Public exports ------------------------------------------------------------
+
+const creators = pickCreators(srv);
+const exportedApp = pickAppFromServer(srv) || (srv.default ? pickAppFromServer(srv.default) : undefined);
+
+export function createAppSync(): any {
+  // Prefer explicit createAppSync if available
+  if (creators.createAppSync) return creators.createAppSync();
+  // Otherwise if an app is directly exported, return it
+  if (exportedApp) return exportedApp;
+  // Otherwise try createApp and unwrap
+  if (creators.createApp) {
+    const maybe = creators.createApp();
+    // createApp could return { app } or app directly or a Promise
+    if ((maybe as Promise<any>).then) {
+      // If it returns a promise, we can't synchronously wait here — throw helpful error
+      throw new Error('createAppSync: server.createApp returned a Promise; call createApp instead from tests.');
+    }
+    return (maybe && (maybe.app || maybe)) || maybe;
+  }
+  // As a last resort, try srv.app
+  if (srv && (srv.app || (srv.default && srv.default.app))) return srv.app || srv.default.app;
+  throw new Error('createAppSync: no app available from kernel/dist/server');
+}
+
+export async function createApp(): Promise<any> {
+  if (creators.createApp) {
+    const created = await creators.createApp();
+    return created?.app || created;
+  }
+  if (creators.createAppSync) {
+    return creators.createAppSync();
+  }
+  if (exportedApp) return exportedApp;
+  if (srv && (srv.app || (srv.default && srv.default.app))) return srv.app || srv.default.app;
+  throw new Error('createApp: no createApp/createAppSync/app available on kernel/dist/server');
+}
+
+// Also export `app` if directly available so tests that require testApp.app work.
+export const app = exportedApp || undefined;
+
+// Default export supporting older require() patterns
+export default {
+  createAppSync,
+  createApp,
+  app,
+};
 

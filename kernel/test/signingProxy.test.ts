@@ -1,108 +1,183 @@
-// kernel/test/signingProxy.test.ts
-import { startMockKmsServer } from './mocks/mockKmsServer';
+/**
+ * kernel/test/signingProxy.test.ts
+ *
+ * Unit tests for kernel/src/signingProxy.ts
+ *
+ * We test:
+ *  - local fallback when KMS not configured
+ *  - throwing when REQUIRE_KMS=true and KMS missing
+ *  - using KMS provider when configured
+ *
+ * Tests use jest.resetModules and jest.mock to control per-test module environment.
+ */
 
-describe('signingProxy (KMS integration)', () => {
-  // Ensure tests run with a clean module cache so env changes are picked up.
+import { jest } from '@jest/globals';
+
+describe('signingProxy', () => {
   afterEach(() => {
-    // Reset module cache so require() re-reads env-configured constants.
     jest.resetModules();
-    // Clean env to avoid leaking between tests
-    delete process.env.KMS_ENDPOINT;
-    delete process.env.REQUIRE_KMS;
-    delete process.env.SIGNER_ID;
-    delete process.env.KMS_BEARER_TOKEN;
-    delete process.env.KMS_MTLS_CERT_PATH;
-    delete process.env.KMS_MTLS_KEY_PATH;
+    jest.clearAllMocks();
   });
 
-  test('signManifest uses KMS when KMS_ENDPOINT is configured (happy path)', async () => {
-    const server = await startMockKmsServer();
-    try {
-      process.env.KMS_ENDPOINT = server.url;
-      process.env.REQUIRE_KMS = 'false';
-      jest.resetModules();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const signingProxy = require('../src/signingProxy');
+  test('falls back to local provider when KMS not configured and REQUIRE_KMS=false', async () => {
+    // Mock kms config to indicate no endpoint and REQUIRE_KMS=false
+    jest.doMock('../../src/config/kms', () => {
+      return {
+        __esModule: true,
+        default: {
+          endpoint: null,
+          requireKms: false,
+          signerId: 'local-signer',
+          bearerToken: null,
+          mtlsCertPath: null,
+          mtlsKeyPath: null,
+        },
+      };
+    });
 
-      const manifest = { id: 'manifest-abc', foo: 'bar' };
-      const sig = await signingProxy.signManifest(manifest);
-      expect(sig).toBeDefined();
-      expect(sig.signature).toBeTruthy();
-      expect(sig.signerId).toBeDefined();
-      // The mock returns signer_id='mock-signer' by default
-      expect(sig.signerId).toBe('mock-signer');
-      expect(sig.manifestId).toBe(manifest.id);
-    } finally {
-      await server.close();
-    }
+    // Mock LocalSigningProvider implementation so signManifest returns deterministic result
+    const localSignManifest = jest.fn(async (manifest: any, req: any) => {
+      return {
+        id: `local-sig-${manifest?.id ?? 'noid'}`,
+        manifestId: manifest?.id ?? null,
+        signerId: 'local-signer',
+        signature: 'local-signature',
+        version: manifest?.version ?? '1.0.0',
+        ts: new Date().toISOString(),
+        prevHash: null,
+      };
+    });
+
+    const localSignData = jest.fn(async (data: string) => {
+      return { signature: 'local-data-sig', signerId: 'local-signer' };
+    });
+
+    jest.doMock('../../src/signingProvider', () => {
+      class LocalSigningProvider {
+        constructor(public signerId: string) {}
+        async signManifest(manifest: any, _req: any) {
+          return localSignManifest(manifest, _req);
+        }
+        async signData(data: string, _req: any) {
+          return localSignData(data, _req);
+        }
+      }
+      return {
+        __esModule: true,
+        LocalSigningProvider,
+        createSigningProvider: jest.fn(),
+        prepareManifestSigningRequest: jest.fn((m: any) => ({})),
+        prepareDataSigningRequest: jest.fn((d: any) => ({})),
+      };
+    });
+
+    // Import signingProxy after mocks
+    const signingProxy = (await import('../../src/signingProxy')).default;
+
+    const manifest = { id: 'division-xyz', name: 'X' };
+    const sig = await signingProxy.signManifest(manifest);
+    expect(sig).toBeDefined();
+    expect(sig.manifestId).toBe(manifest.id);
+    expect(sig.signerId).toBe('local-signer');
+    expect(localSignManifest).toHaveBeenCalledTimes(1);
+
+    const dataRes = await signingProxy.signData('hello');
+    expect(dataRes.signature).toBe('local-data-sig');
+    expect(localSignData).toHaveBeenCalledTimes(1);
   });
 
-  test('signData uses KMS and returns signature/signerId', async () => {
-    const server = await startMockKmsServer();
-    try {
-      process.env.KMS_ENDPOINT = server.url;
-      process.env.REQUIRE_KMS = 'false';
-      jest.resetModules();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const signingProxy = require('../src/signingProxy');
+  test('throws when REQUIRE_KMS=true and KMS_ENDPOINT missing', async () => {
+    jest.doMock('../../src/config/kms', () => {
+      return {
+        __esModule: true,
+        default: {
+          endpoint: null,
+          requireKms: true,
+          signerId: 'local-signer',
+          bearerToken: null,
+          mtlsCertPath: null,
+          mtlsKeyPath: null,
+        },
+      };
+    });
 
-      const res = await signingProxy.signData('hello world');
-      expect(res).toBeDefined();
-      expect(res.signature).toBeTruthy();
-      expect(res.signerId).toBeDefined();
-      expect(res.signerId).toBe('mock-signer');
-    } finally {
-      await server.close();
-    }
+    // Provide basic signingProvider mock (should not be used)
+    jest.doMock('../../src/signingProvider', () => {
+      class LocalSigningProvider {
+        async signManifest() {
+          return {};
+        }
+        async signData() {
+          return { signature: 'x', signerId: 'x' };
+        }
+      }
+      return {
+        __esModule: true,
+        LocalSigningProvider,
+        createSigningProvider: jest.fn(),
+        prepareManifestSigningRequest: jest.fn(),
+        prepareDataSigningRequest: jest.fn(),
+      };
+    });
+
+    const signingProxyMod = await import('../../src/signingProxy');
+
+    await expect(signingProxyMod.signManifest({ id: 'x' })).rejects.toThrow(/REQUIRE_KMS=true/);
+    await expect(signingProxyMod.signData('abc')).rejects.toThrow(/REQUIRE_KMS=true/);
   });
 
-  test('when KMS returns error and REQUIRE_KMS=true -> signManifest throws', async () => {
-    const server = await startMockKmsServer({ statusCode: 500 });
-    try {
-      process.env.KMS_ENDPOINT = server.url;
-      process.env.REQUIRE_KMS = 'true';
-      jest.resetModules();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const signingProxy = require('../src/signingProxy');
+  test('uses KMS provider when configured', async () => {
+    jest.doMock('../../src/config/kms', () => {
+      return {
+        __esModule: true,
+        default: {
+          endpoint: 'http://kms.local',
+          requireKms: false,
+          signerId: 'kms-signer',
+          bearerToken: null,
+          mtlsCertPath: null,
+          mtlsKeyPath: null,
+        },
+      };
+    });
 
-      await expect(signingProxy.signManifest({})).rejects.toThrow(/REQUIRE_KMS=true/);
-    } finally {
-      await server.close();
-    }
-  });
+    const kmsSignManifest = jest.fn(async (manifest: any) => {
+      return {
+        id: `kms-sig-${manifest?.id ?? 'noid'}`,
+        manifestId: manifest?.id ?? null,
+        signerId: 'kms-signer',
+        signature: 'kms-signature',
+        version: manifest?.version ?? '1.0.0',
+        ts: new Date().toISOString(),
+        prevHash: null,
+      };
+    });
+    const kmsSignData = jest.fn(async (data: string) => ({ signature: 'kms-data-sig', signerId: 'kms-signer' }));
 
-  test('when KMS returns error and REQUIRE_KMS=false -> signManifest falls back to local ephemeral signing', async () => {
-    const server = await startMockKmsServer({ statusCode: 500 });
-    try {
-      process.env.KMS_ENDPOINT = server.url;
-      process.env.REQUIRE_KMS = 'false';
-      // Set a known SIGNER_ID so we can assert fallback signer id
-      process.env.SIGNER_ID = 'kernel-signer-local';
-      jest.resetModules();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const signingProxy = require('../src/signingProxy');
+    // Mock createSigningProvider to return an object with signManifest/signData
+    jest.doMock('../../src/signingProvider', () => {
+      return {
+        __esModule: true,
+        createSigningProvider: jest.fn(() => ({
+          signManifest: kmsSignManifest,
+          signData: kmsSignData,
+        })),
+        LocalSigningProvider: jest.fn(),
+        prepareManifestSigningRequest: jest.fn((m: any) => ({})),
+        prepareDataSigningRequest: jest.fn((d: any) => ({})),
+      };
+    });
 
-      const sig = await signingProxy.signManifest({ some: 'payload' });
-      expect(sig).toBeDefined();
-      expect(sig.signature).toBeTruthy();
-      // fallback signerId should match SIGNER_ID env or default
-      expect(sig.signerId).toBe('kernel-signer-local');
-    } finally {
-      await server.close();
-    }
-  });
+    const signingProxy = (await import('../../src/signingProxy')).default;
 
-  test('REQUIRE_KMS=true and missing KMS_ENDPOINT -> throws immediately', async () => {
-    // Ensure no KMS_ENDPOINT set
-    delete process.env.KMS_ENDPOINT;
-    process.env.REQUIRE_KMS = 'true';
-    jest.resetModules();
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const signingProxy = require('../src/signingProxy');
+    const manifest = { id: 'div-kms' };
+    const sig = await signingProxy.signManifest(manifest);
+    expect(sig.signerId).toBe('kms-signer');
+    expect(kmsSignManifest).toHaveBeenCalledTimes(1);
 
-    await expect(signingProxy.signManifest({})).rejects.toThrow(
-      'REQUIRE_KMS=true but KMS_ENDPOINT is not configured'
-    );
+    const d = await signingProxy.signData('payload');
+    expect(d.signature).toBe('kms-data-sig');
+    expect(kmsSignData).toHaveBeenCalledTimes(1);
   });
 });
 

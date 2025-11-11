@@ -1,153 +1,124 @@
-// kernel/test/mocks/mockKmsServer.ts
-import http from 'http';
-import { AddressInfo } from 'net';
+/**
+ * kernel/test/mocks/mockKmsServer.ts
+ *
+ * Lightweight mock KMS/Signing HTTP server used by unit/integration tests.
+ *
+ * Endpoints:
+ *  - GET  /health         -> 200 { ok: true }
+ *  - POST /sign           -> expects { manifest } -> returns manifest signature object
+ *  - POST /sign/data      -> expects { data }     -> returns { signature, signerId }
+ *
+ * This is not a crypto-accurate KMS; it returns deterministic "signatures"
+ * (sha256 of the JSON payload encoded base64) so tests can verify shapes.
+ *
+ * Run with: node -r ts-node/register kernel/test/mocks/mockKmsServer.ts
+ * Or compile and run the emitted JS.
+ */
+
+import express from 'express';
+import bodyParser from 'body-parser';
 import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 
-export type MockKmsHandlers = {
-  onSign?: (body: any) => any;
-  onSignData?: (body: any) => any;
-  onGetPublicKey?: (signerId: string) => any;
-  publicKey?: string; // optional override (base64 or PEM)
-  statusCode?: number; // default 200
-};
+const PORT = Number(process.env.MOCK_KMS_PORT || 7601);
+const HOST = process.env.MOCK_KMS_HOST || '127.0.0.1';
+const SIGNER_ID = process.env.MOCK_KMS_SIGNER_ID || 'mock-kms-signer-v1';
 
-export async function startMockKmsServer(opts: MockKmsHandlers = {}) {
-  const { onSign, onSignData, onGetPublicKey, publicKey: overridePublicKey, statusCode = 200 } = opts;
+function sha256Base64(input: string): string {
+  const h = crypto.createHash('sha256').update(input).digest();
+  return h.toString('base64');
+}
 
-  // If no override public key provided, generate an Ed25519 keypair and export the public key as base64 DER (SPKI).
-  let generatedPublicKeyBase64: string | null = null;
-  try {
-    if (!overridePublicKey) {
-      const { publicKey } = crypto.generateKeyPairSync('ed25519');
-      const exported = publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
-      generatedPublicKeyBase64 = exported.toString('base64');
+function makeManifestSignature(manifest: any) {
+  const id = `sig-${manifest?.id ?? uuidv4()}`;
+  const manifestId = manifest?.id ?? null;
+  // Deterministic signature: hash of a stable JSON representation
+  const normalized = (() => {
+    try {
+      // stable stringify: sort keys
+      const normalize = (obj: any): any => {
+        if (obj === null || typeof obj !== 'object') return obj;
+        if (Array.isArray(obj)) return obj.map(normalize);
+        const out: Record<string, any> = {};
+        for (const k of Object.keys(obj).sort()) out[k] = normalize(obj[k]);
+        return out;
+      };
+      return JSON.stringify(normalize(manifest));
+    } catch {
+      return String(manifest);
     }
-  } catch (e) {
-    // If key generation fails for any reason, we'll simply leave generatedPublicKeyBase64 null
-    generatedPublicKeyBase64 = null;
-  }
-
-  const server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse): void => {
-    void (async () => {
-      try {
-        if (!req.url) {
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('not found');
-          return;
-        }
-
-        // Basic routing
-        //  - POST /sign
-        //  - POST /signData
-        //  - GET  /publicKeys/:signerId
-        if (req.method === 'GET' && req.url.startsWith('/publicKeys/')) {
-          // Extract signerId
-          const parts = req.url.split('/');
-          const signerId = decodeURIComponent(parts.slice(2).join('/')) || 'mock-signer';
-
-          // Allow handler override
-          if (typeof onGetPublicKey === 'function') {
-            const maybe = await Promise.resolve(onGetPublicKey(signerId));
-            // Handler may return a string or an object. If string, return as raw string response.
-            if (typeof maybe === 'string') {
-              res.writeHead(statusCode, { 'Content-Type': 'text/plain' });
-              res.end(maybe);
-            } else {
-              res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify(maybe));
-            }
-            return;
-          }
-
-          // Default: return configured overridePublicKey, else generatedPublicKeyBase64
-          const pk = overridePublicKey ?? generatedPublicKeyBase64;
-          if (!pk) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'no public key available in mock server' }));
-            return;
-          }
-          // Return JSON { publicKey: "<base64 or PEM>" }
-          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ publicKey: pk }));
-          return;
-        }
-
-        if (req.method !== 'POST') {
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('not found');
-          return;
-        }
-
-        // Read body
-        const bodyChunks: Buffer[] = [];
-        for await (const chunk of req as any) {
-          bodyChunks.push(chunk as Buffer);
-        }
-        const raw = Buffer.concat(bodyChunks).toString('utf8');
-        let parsed: any = {};
-        try {
-          parsed = raw ? JSON.parse(raw) : {};
-        } catch (e) {
-          parsed = {};
-        }
-
-        if (req.url === '/sign') {
-          const manifestId = parsed.manifestId ?? parsed.manifest_id ?? `manifest-${Math.random().toString(36).slice(2, 8)}`;
-          const resp =
-            typeof onSign === 'function'
-              ? await Promise.resolve(onSign(parsed))
-              : {
-                  id: `sig-${Math.random().toString(36).slice(2, 8)}`,
-                  manifest_id: parsed.manifestId ?? parsed.manifest_id ?? manifestId,
-                  signer_id: 'mock-signer',
-                  signature: Buffer.from('mock-signature').toString('base64'),
-                  version: '1.0.0',
-                  ts: new Date().toISOString(),
-                  prev_hash: null,
-                };
-
-          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(resp));
-          return;
-        }
-
-        if (req.url === '/signData') {
-          const resp =
-            typeof onSignData === 'function'
-              ? await Promise.resolve(onSignData(parsed))
-              : {
-                  signature: Buffer.from('mock-signature-data').toString('base64'),
-                  signerId: 'mock-signer',
-                };
-
-          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(resp));
-          return;
-        }
-
-        // Unknown path
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('not found');
-      } catch (err: any) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err?.message ?? String(err) }));
-      }
-    })();
-  });
-
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address() as AddressInfo;
-  const url = `http://127.0.0.1:${addr.port}`;
-
+  })();
+  const signature = sha256Base64(normalized);
   return {
-    url,
-    port: addr.port,
-    close: async () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((err) => (err ? reject(err) : resolve()));
-      }),
-    // expose generated public key for tests if needed
-    getDefaultPublicKeyBase64: () => generatedPublicKeyBase64,
+    id,
+    manifestId,
+    signerId: SIGNER_ID,
+    signature,
+    version: manifest?.version ?? '1.0.0',
+    ts: new Date().toISOString(),
+    prevHash: null,
   };
 }
+
+function makeDataSignature(data: string) {
+  const sig = sha256Base64(typeof data === 'string' ? data : JSON.stringify(data));
+  return { signature: sig, signerId: SIGNER_ID };
+}
+
+function createApp() {
+  const app = express();
+  app.use(bodyParser.json({ limit: '2mb' }));
+
+  app.get('/health', (_req, res) => {
+    res.json({ ok: true, signerId: SIGNER_ID });
+  });
+
+  app.post('/sign', (req, res) => {
+    try {
+      const manifest = req.body?.manifest ?? req.body;
+      if (!manifest) {
+        return res.status(400).json({ error: 'missing manifest in body' });
+      }
+      const sig = makeManifestSignature(manifest);
+      return res.json(sig);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('mock-kms /sign error', err);
+      return res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  app.post('/sign/data', (req, res) => {
+    try {
+      // Accept either { data } or { payload } or raw body
+      const data = req.body?.data ?? req.body?.payload ?? req.body;
+      if (data === undefined) {
+        return res.status(400).json({ error: 'missing data in body' });
+      }
+      const out = makeDataSignature(data);
+      return res.json(out);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('mock-kms /sign/data error', err);
+      return res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // Simple ping for tests
+  app.get('/', (_req, res) => {
+    res.send('mock-kms ok');
+  });
+
+  return app;
+}
+
+if (require.main === module) {
+  const app = createApp();
+  app.listen(PORT, HOST, () => {
+    // eslint-disable-next-line no-console
+    console.log(`mock-kms: listening on http://${HOST}:${PORT}`);
+  });
+}
+
+export default createApp;
 

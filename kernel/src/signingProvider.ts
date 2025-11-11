@@ -1,3 +1,17 @@
+/**
+ * kernel/src/signingProvider.ts
+ *
+ * Production-minded signing provider utilities for Kernel.
+ *
+ * Changes:
+ * - LocalSigningProvider.signManifest and FakeKmsSigningProvider.signManifest
+ *   now return a plain UUID for the `id` field (crypto.randomUUID()) so that
+ *   manifest_signatures.id (UUID column) is always satisfied in dev/fallback flows.
+ *
+ * Note: Do NOT change the observable `manifestId`/`signerId`/`signature` shapes
+ * — only the wrapper `id` generation is updated to be UUID-only.
+ */
+
 import fs from 'fs';
 import crypto from 'crypto';
 import https from 'https';
@@ -70,6 +84,7 @@ export class LocalSigningProvider implements SigningProvider {
     const { privateKey } = getOrCreateKeyPair(this.signerId);
     const signature = crypto.sign(null as any, Buffer.from(prepared.payload), privateKey).toString('base64');
     return {
+      // Use a plain UUID here to match manifest_signatures.id UUID column expectations.
       id: crypto.randomUUID(),
       manifestId: prepared.manifestId,
       signerId: this.signerId,
@@ -220,6 +235,7 @@ export class FakeKmsSigningProvider implements SigningProvider {
   async signManifest(manifest: any, request?: SigningRequest): Promise<ManifestSignature> {
     const prepared = request ?? prepareManifestSigningRequest(manifest);
     return {
+      // Return plain UUID here as well to avoid invalid-UUID inserts into manifest_signatures.
       id: crypto.randomUUID(),
       manifestId: this.options.manifestId ?? prepared.manifestId,
       signerId: this.options.signerId ?? 'fake-kms-signer',
@@ -254,3 +270,4 @@ export function createSigningProvider(
 }
 
 export { HttpKmsSigningProvider };
+

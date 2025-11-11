@@ -2,6 +2,14 @@
  * kernel/src/db/index.ts
  *
  * Postgres client and migration runner for Kernel module.
+ *
+ * Improvements:
+ * - runMigrations now searches multiple candidate migration directories:
+ *   1) ../sql/migrations (relative to compiled/dist code)
+ *   2) kernel/sql/migrations (project-root)
+ *   3) sql/migrations (project-root fallback)
+ * - This makes `node kernel/dist/server.js` and the test runner resilient to
+ *   where the process.cwd() is and avoids requiring SQL files to be copied into dist.
  */
 
 import { Pool, QueryResult, PoolClient, QueryResultRow } from 'pg';
@@ -34,20 +42,43 @@ export async function getClient(): Promise<PoolClient> {
 
 /**
  * runMigrations
- * Reads SQL files from kernel/sql/migrations (relative to project root) and executes them in sorted order.
+ * Reads SQL files from a migrations directory and executes them in sorted order.
+ *
+ * Directory resolution:
+ * - Prefer path relative to compiled code: __dirname + '../sql/migrations'
+ * - Fallback to likely project-root locations:
+ *     - process.cwd()/kernel/sql/migrations
+ *     - process.cwd()/sql/migrations
+ *
+ * The search is idempotent and logs which directory is used.
  */
 export async function runMigrations(): Promise<void> {
-  const migrationsDir = path.resolve(__dirname, '../sql/migrations');
-  try {
-    const stat = await fsPromises.stat(migrationsDir);
-    if (!stat.isDirectory()) {
-      console.warn('Migrations path exists but is not a directory:', migrationsDir);
-      return;
+  const candidates = [
+    path.resolve(__dirname, '../sql/migrations'), // compiled/dist location
+    path.resolve(process.cwd(), 'kernel/sql/migrations'), // project-root/kernel/sql/migrations
+    path.resolve(process.cwd(), 'sql/migrations'), // project-root/sql/migrations (fallback)
+  ];
+
+  let migrationsDir: string | null = null;
+
+  for (const c of candidates) {
+    try {
+      const stat = await fsPromises.stat(c);
+      if (stat.isDirectory()) {
+        migrationsDir = c;
+        break;
+      }
+    } catch {
+      // ignore and continue to next candidate
     }
-  } catch (err) {
-    console.warn('Migrations directory not found, skipping migrations:', migrationsDir);
+  }
+
+  if (!migrationsDir) {
+    console.warn('Migrations directory not found in any candidate paths. Searched:', candidates.join(', '));
     return;
   }
+
+  console.info('Using migrations directory:', migrationsDir);
 
   const files = (await fsPromises.readdir(migrationsDir))
     .filter((f) => f.endsWith('.sql'))

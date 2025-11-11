@@ -362,7 +362,7 @@ export default function createKernelRouter(): Router {
    * Minimal implementation:
    *  - Validate body
    *  - Optionally sign agent manifest/record via signingProxy
-   *  - Insert agent row, return created agent id (202 accepted)
+   *  - Insert agent row, return created agent id (201 created)
    */
   router.post(
     '/kernel/agent',
@@ -374,9 +374,26 @@ export default function createKernelRouter(): Router {
 
       const principal = (req as any).principal || getPrincipalFromRequest(req);
 
-      const id = body.id || `agent-${crypto.randomUUID()}`;
+      // Determine id (plain UUID only)
+      const id = body.id || crypto.randomUUID();
       const templateId = body.templateId ?? body.template_id;
-      const divisionId = body.divisionId ?? body.division_id;
+
+      // Accept divisionId as a UUID or as a human-friendly name (resolve name -> uuid)
+      let divisionId = body.divisionId ?? body.division_id;
+      if (divisionId && typeof divisionId === 'string') {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(divisionId)) {
+          try {
+            const r = await query('SELECT id FROM divisions WHERE name = $1 LIMIT 1', [divisionId]);
+            if (r && r.rows && r.rows.length) {
+              divisionId = String(r.rows[0].id);
+            }
+          } catch (e) {
+            // ignore lookup failure and let validation below reject the request
+          }
+        }
+      }
+
       const requester = body.requester ?? body.requestedBy ?? body.requested_by ?? 'unknown';
 
       if (!templateId || !divisionId) return res.status(400).json({ error: 'templateId and divisionId required' });
@@ -409,20 +426,20 @@ export default function createKernelRouter(): Router {
           asJsonString(body.metadata ?? {}),
         ]);
 
-        try {
-          // Append an audit event for agent.create
-          await appendAuditEvent('agent.create', { agentId: id, templateId, divisionId, requester, principal });
-        } catch (e) {
-          console.warn('audit append failed for agent.create:', (e as Error).message || e);
-        }
-
         if (managed) {
           await client.query('COMMIT');
           client.release();
           client = undefined;
         }
 
-        return res.status(202).json({ agentId: id });
+        try {
+          await appendAuditEvent('agent.create', { agentId: id, templateId, divisionId, requester, principal });
+        } catch (e) {
+          console.warn('audit append failed for agent.create:', (e as Error).message || e);
+        }
+
+        // Return created agent id in canonical shape for tests
+        console.debug("[agent] returning response", { id });\n        return res.status(201).json({ id });
       } catch (err) {
         if (managed && client) {
           await client.query('ROLLBACK').catch(() => {});

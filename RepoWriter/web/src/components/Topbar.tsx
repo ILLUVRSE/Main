@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import logo from "../assets/illuvrse-logo.svg";
-import ThemeToggle from "./ThemeToggle";
+import ThemeToggle from "./ThemeToggle.tsx";
 
 /**
  * Topbar: brand, backend selector and theme toggle.

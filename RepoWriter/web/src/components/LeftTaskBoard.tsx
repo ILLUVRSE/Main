@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import TaskCard from "./TaskCard";
-import { generateLocalPlan } from "../services/llm";
+import TaskCard from "./TaskCard.tsx";
+import { generateLocalPlan } from "../services/llm.ts";
 import "../theme/illuvrse.css";
 
 export type TaskStatus = "draft" | "running" | "validated" | "applied" | "failed" | "rolledback";

@@ -10,7 +10,7 @@
  * results uniformly whether the server builds context or the client does a local fallback.
  */
 
-import api from "./api";
+import api from "./api.ts";
 
 export type ContextFile = {
   path: string;

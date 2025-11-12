@@ -1,3 +1,4 @@
+// RepoWriter/web/src/components/HeaderBar.tsx
 import React, { useEffect, useState } from "react";
 
 type HeaderBarProps = {
@@ -14,7 +15,8 @@ type HeaderBarProps = {
  * - shows environment badge (mock vs prod based on VITE_API_URL)
  * - lightweight "Undo last repowriter commit" control (calls history/rollback)
  *
- * The component is intentionally dependency-free (no external toast lib).
+ * Now also exposes a small rail-toggle button which emits a global CustomEvent
+ * that the Layout listens to (repowriter:toggleRail).
  */
 export default function HeaderBar({ repoName = "RepoWriter", onOpenHelp }: HeaderBarProps) {
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
@@ -56,7 +58,6 @@ export default function HeaderBar({ repoName = "RepoWriter", onOpenHelp }: Heade
     if (!confirm("Undo most recent repowriter commit? This will reset the repository to the previous state.")) return;
     setBusy(true);
     try {
-      // Get repowriter commits
       const r = await fetch("/api/history");
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
@@ -66,7 +67,6 @@ export default function HeaderBar({ repoName = "RepoWriter", onOpenHelp }: Heade
         setBusy(false);
         return;
       }
-      // Use the most recent repowriter commit (first in array)
       const sha = commits[0].sha;
       if (!confirm(`Rollback commit ${sha}?`)) {
         setBusy(false);
@@ -93,9 +93,27 @@ export default function HeaderBar({ repoName = "RepoWriter", onOpenHelp }: Heade
   return (
     <header style={headerStyle}>
       <div style={leftStyle}>
+        {/* rail toggle (compact) */}
+        <button
+          title="Toggle left rail"
+          onClick={() => {
+            try {
+              window.dispatchEvent(new CustomEvent("repowriter:toggleRail"));
+            } catch {
+              // fallback for older browsers
+              const e: any = document.createEvent("CustomEvent");
+              e.initCustomEvent("repowriter:toggleRail", true, true, {});
+              window.dispatchEvent(e);
+            }
+          }}
+          style={railToggleStyle}
+        >
+          ☰
+        </button>
+
         <div style={logoStyle}>
-          <div style={{ fontWeight: 700, fontSize: 18, marginRight: 8 }}>RepoWriter</div>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>{repoName}</div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginRight: 8 }}>RepoWriter</div>
+          <div style={{ fontSize: 11, color: "#6b7280" }}>{repoName}</div>
         </div>
       </div>
 
@@ -146,15 +164,19 @@ const headerStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  padding: "12px 16px",
+  padding: "8px 14px",
   borderBottom: "1px solid #e6eef3",
   background: "#fff",
-  position: "sticky",
+  position: "fixed",
   top: 0,
-  zIndex: 50
+  left: 0,
+  right: 0,
+  height: "var(--topbar-height, 56px)",
+  zIndex: 1100,
+  boxSizing: "border-box",
 };
 
-const leftStyle: React.CSSProperties = { display: "flex", alignItems: "center" };
+const leftStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12 };
 const centerStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", flex: 1 };
 const rightStyle: React.CSSProperties = { display: "flex", alignItems: "center" };
 
@@ -178,5 +200,19 @@ const actionButtonStyle: React.CSSProperties = {
   color: "#fff",
   cursor: "pointer",
   fontWeight: 700
+};
+
+const railToggleStyle: React.CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: 8,
+  border: "1px solid #e6eef3",
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: 16,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 0,
 };
 

@@ -11,7 +11,7 @@
  * Defaults to http://localhost:7071 for local development.
  */
 
-import llm, { Plan as LocalPlan } from "./llm";
+import llm, { Plan as LocalPlan } from "./llm.ts";
 
 export type PatchObj = {
   path: string;

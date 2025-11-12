@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import ToastContainer, { ToastItem } from "../components/Toast";
+import ToastContainer, { ToastItem } from "../components/Toast.tsx";
 
 /**
  * useToast + ToastProvider

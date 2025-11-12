@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import DiffViewer from "./DiffViewer";
+import DiffViewer from "./DiffViewer.tsx";
 
 type PatchObj = {
   path: string;

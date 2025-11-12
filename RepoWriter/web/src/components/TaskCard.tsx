@@ -1,258 +1,183 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 
-/**
- * Lightweight Task type (kept local to avoid import cycles).
- * Keep in sync with LeftTaskBoard.Task if you change shape.
- */
-export type TaskStatus = "draft" | "running" | "validated" | "applied" | "failed" | "rolledback";
-
-export type Task = {
+type Task = {
   id: string;
   title: string;
-  prompt: string;
-  createdAt: string;
-  updatedAt?: string;
-  status: TaskStatus;
-  plan?: any;
-  lastError?: string | null;
+  description: string;
+  created?: string;
 };
 
 type Props = {
-  task: Task;
-  onEdit?: () => void;
-  onRemove?: () => void;
-  onRun?: () => void;
-  onImport?: () => void;
-  onSave?: (fields: Partial<Task>) => void;
+  /**
+   * If provided, TaskBoard is controlled by parent.
+   * Otherwise it persists tasks to localStorage under key REPOTASKS_KEY.
+   */
+  tasks?: Task[];
+  onChange?: (tasks: Task[]) => void;
+
+  /**
+   * Callback when user clicks "Run" on a task.
+   */
+  onRun?: (task: Task) => void;
 };
 
-function statusColor(status: TaskStatus) {
-  switch (status) {
-    case "draft":
-      return "var(--muted)";
-    case "running":
-      return "var(--color-primary)";
-    case "validated":
-      return "var(--highlight, var(--color-primary-light))";
-    case "applied":
-      return "var(--success)";
-    case "failed":
-      return "var(--danger)";
-    case "rolledback":
-      return "orange";
-    default:
-      return "var(--muted)";
+const REPOTASKS_KEY = "repowriter_tasks_v1";
+
+/**
+ * TaskBoard
+ * - shows a list of tasks (cards)
+ * - add / edit / delete tasks
+ * - persist to localStorage when uncontrolled
+ * - emits onChange for parent sync
+ * - calls onRun(task) when Run pressed
+ */
+export default function TaskBoard({ tasks: controlledTasks, onChange, onRun }: Props) {
+  const uncontrolled = typeof controlledTasks === "undefined";
+
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    if (!uncontrolled) return controlledTasks || [];
+    try {
+      const raw = localStorage.getItem(REPOTASKS_KEY);
+      if (!raw) return [];
+      return JSON.parse(raw) as Task[];
+    } catch {
+      return [];
+    }
+  });
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [titleInput, setTitleInput] = useState("");
+  const [descInput, setDescInput] = useState("");
+
+  // Keep controlled/uncontrolled in sync
+  useEffect(() => {
+    if (!uncontrolled) {
+      setTasks(controlledTasks || []);
+    }
+  }, [controlledTasks, uncontrolled]);
+
+  // Persist when uncontrolled
+  useEffect(() => {
+    if (!uncontrolled) return;
+    try {
+      localStorage.setItem(REPOTASKS_KEY, JSON.stringify(tasks || []));
+    } catch {}
+    onChange?.(tasks || []);
+  }, [tasks, uncontrolled, onChange]);
+
+  function emitChange(next: Task[]) {
+    if (!uncontrolled) {
+      onChange?.(next);
+    } else {
+      setTasks(next);
+    }
   }
-}
 
-function shortDate(s?: string) {
-  if (!s) return "";
-  try {
-    const d = new Date(s);
-    return d.toLocaleString();
-  } catch {
-    return s;
-  }
-}
-
-export default function TaskCard({ task, onEdit, onRemove, onRun, onImport, onSave }: Props) {
-  const [expanded, setExpanded] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(task.title);
-  const [prompt, setPrompt] = useState(task.prompt);
-
-  // show a short preview of the prompt (first line or 120 chars)
-  const preview = useMemo(() => {
-    const p = (task.prompt || "").trim().split("\n")[0] ?? "";
-    if (p.length > 120) return p.slice(0, 117) + "...";
-    return p;
-  }, [task.prompt]);
-
-  function handleSave() {
-    if (onSave) onSave({ title: title.trim(), prompt: prompt.trim() });
-    setEditing(false);
+  function startAdd() {
+    setEditingId("__new__");
+    setTitleInput("");
+    setDescInput("");
   }
 
-  function handleCancel() {
-    setTitle(task.title);
-    setPrompt(task.prompt);
-    setEditing(false);
+  function startEdit(t: Task) {
+    setEditingId(t.id);
+    setTitleInput(t.title);
+    setDescInput(t.description);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setTitleInput("");
+    setDescInput("");
+  }
+
+  function saveEdit() {
+    const title = titleInput.trim();
+    const desc = descInput.trim();
+    if (!title) return alert("Title required");
+    if (editingId === "__new__") {
+      const t: Task = { id: `t${Date.now()}`, title, description: desc, created: new Date().toISOString() };
+      emitChange([t, ...(tasks || [])]);
+    } else {
+      const next = (tasks || []).map((x) => (x.id === editingId ? { ...x, title, description: desc } : x));
+      emitChange(next);
+    }
+    cancelEdit();
+  }
+
+  function removeTask(id: string) {
+    if (!confirm("Delete this task?")) return;
+    const next = (tasks || []).filter((t) => t.id !== id);
+    emitChange(next);
+  }
+
+  function handleRun(t: Task) {
+    onRun?.(t);
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-        <div
-          aria-hidden
-          style={{
-            width: 10,
-            height: 10,
-            borderRadius: 12,
-            background: statusColor(task.status),
-            marginTop: 6,
-            flex: "0 0 auto"
-          }}
-          title={`status: ${task.status}`}
-        />
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {!editing ? (
-              <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{task.title}</div>
-            ) : (
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                style={{ flex: 1, padding: 6, borderRadius: 6, border: "1px solid rgba(0,0,0,0.08)" }}
-              />
-            )}
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ fontWeight: 700 }}>Task Board</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-ghost btn-small" onClick={() => { setTasks([]); onChange?.([]); localStorage.removeItem(REPOTASKS_KEY); }}>
+            Clear
+          </button>
+          <button className="btn btn-primary btn-small" onClick={startAdd}>New Task</button>
+        </div>
+      </div>
 
-            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>{shortDate(task.updatedAt ?? task.createdAt)}</div>
-              {!editing && (
-                <button
-                  onClick={() => setExpanded((s) => !s)}
-                  title="Toggle details"
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "var(--muted)",
-                    padding: 6,
-                    borderRadius: 6,
-                    cursor: "pointer"
-                  }}
-                >
-                  {expanded ? "▴" : "▾"}
-                </button>
-              )}
+      {editingId && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 8, fontWeight: 700 }}>{editingId === "__new__" ? "New Task" : "Edit Task"}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <input
+              placeholder="Title"
+              value={titleInput}
+              onChange={(e) => setTitleInput(e.target.value)}
+              style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(0,0,0,0.06)" }}
+            />
+            <textarea
+              placeholder="Description (prompt)"
+              value={descInput}
+              onChange={(e) => setDescInput(e.target.value)}
+              rows={4}
+              style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(0,0,0,0.06)", fontFamily: "monospace" }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={cancelEdit}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveEdit}>Save</button>
             </div>
-          </div>
-
-          {/* prompt / preview area */}
-          <div style={{ marginTop: 8 }}>
-            {!editing ? (
-              <div style={{ color: "var(--muted)", fontSize: 13, whiteSpace: "pre-wrap" }}>{preview}</div>
-            ) : (
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                style={{ width: "100%", minHeight: 80, padding: 8, borderRadius: 6, border: "1px solid rgba(0,0,0,0.06)" }}
-              />
-            )}
-          </div>
-
-          {/* expanded details */}
-          {expanded && (
-            <div style={{ marginTop: 8, borderTop: "1px dashed rgba(255,255,255,0.03)", paddingTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ color: "var(--muted)", fontSize: 13, whiteSpace: "pre-wrap" }}>{task.prompt}</div>
-
-              {task.plan ? (
-                <div style={{ fontSize: 13, color: "var(--muted)" }}>
-                  Plan: {Array.isArray(task.plan.steps) ? `${task.plan.steps.length} step(s)` : "unknown"}
-                </div>
-              ) : null}
-
-              {task.lastError ? (
-                <div style={{ color: "var(--danger)", fontSize: 13 }}>{task.lastError}</div>
-              ) : null}
-            </div>
-          )}
-
-          {/* actions */}
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            {!editing ? (
-              <>
-                <button
-                  onClick={() => onRun?.()}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "var(--color-primary)",
-                    color: "#fff"
-                  }}
-                  title="Run local planner for this task"
-                >
-                  Run
-                </button>
-
-                <button
-                  onClick={() => onImport?.()}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.06)",
-                    background: "transparent",
-                    color: "var(--muted)"
-                  }}
-                  title="Import validated plan into the Codex workspace"
-                >
-                  Import
-                </button>
-
-                <button
-                  onClick={() => {
-                    setEditing(true);
-                    onEdit?.();
-                  }}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.06)",
-                    background: "transparent",
-                    color: "var(--muted)"
-                  }}
-                  title="Edit task"
-                >
-                  Edit
-                </button>
-
-                <button
-                  onClick={() => onRemove?.()}
-                  style={{
-                    marginLeft: "auto",
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.06)",
-                    background: "transparent",
-                    color: "var(--danger)"
-                  }}
-                  title="Remove task"
-                >
-                  Delete
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={handleSave}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "var(--color-primary)",
-                    color: "#fff"
-                  }}
-                >
-                  Save
-                </button>
-                <button
-                  onClick={handleCancel}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.06)",
-                    background: "transparent",
-                    color: "var(--muted)"
-                  }}
-                >
-                  Cancel
-                </button>
-              </>
-            )}
           </div>
         </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {(tasks || []).map((t) => (
+          <div key={t.id} className="card">
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700 }}>{t.title}</div>
+                <div style={{ color: "var(--muted)", marginTop: 6, whiteSpace: "pre-wrap", fontFamily: "monospace" }}>{t.description}</div>
+                <div className="small" style={{ marginTop: 8 }}>{t.created ? new Date(t.created).toLocaleString() : ""}</div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn-primary" onClick={() => handleRun(t)}>Run</button>
+                  <button className="btn" onClick={() => startEditTask(t)}>Edit</button>
+                </div>
+                <button className="btn btn-ghost btn-small" onClick={() => removeTask(t.id)}>Delete</button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
+
+  // helper to start edit with the task values
+  function startEditTask(t: Task) {
+    startEdit(t);
+  }
 }
 

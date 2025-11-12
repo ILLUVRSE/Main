@@ -1,3 +1,18 @@
+/**
+ * web/src/services/api.ts
+ *
+ * High-level client helpers for RepoWriter web UI.
+ * Updated to call the backend by absolute API base URL so the UI (served by Vite)
+ * can communicate with the server running at a different origin/port.
+ *
+ * The API base can be changed at runtime by setting:
+ *   localStorage.setItem('repowriter_api_base', 'http://localhost:7071')
+ *
+ * Defaults to http://localhost:7071 for local development.
+ */
+
+import llm, { Plan as LocalPlan } from "./llm";
+
 export type PatchObj = {
   path: string;
   content?: string;
@@ -14,6 +29,31 @@ export type Plan = {
   meta?: Record<string, any>;
 };
 
+type FetchPlanOpts = {
+  backend?: "openai" | "local";
+};
+
+/** Resolve API base URL:
+ *  - First: localStorage 'repowriter_api_base'
+ *  - Fallback: http://localhost:7071
+ */
+function getApiBase(): string {
+  try {
+    const stored = localStorage.getItem("repowriter_api_base");
+    if (stored && stored.trim()) return stored.trim();
+  } catch {
+    /* ignore */
+  }
+  return "http://localhost:7071";
+}
+
+/** Convert a relative /api/... path to absolute URL (API_BASE + path) */
+function apiUrl(path: string) {
+  const base = getApiBase().replace(/\/$/, "");
+  if (path.startsWith("/")) return `${base}${path}`;
+  return `${base}/${path}`;
+}
+
 async function handleJsonResponse(res: Response) {
   const text = await res.text();
   try {
@@ -23,9 +63,24 @@ async function handleJsonResponse(res: Response) {
   }
 }
 
-/** POST /api/openai/plan */
-export async function fetchPlan(prompt: string, memory: string[] = []): Promise<Plan> {
-  const res = await fetch("/api/openai/plan", {
+function getEffectiveBackend(explicit?: "openai" | "local") {
+  if (explicit) return explicit;
+  const stored = (localStorage.getItem("repowriter_backend") as "openai" | "local") || "openai";
+  return stored;
+}
+
+/** POST /api/openai/plan or /api/llm/local/plan if backend=local */
+export async function fetchPlan(prompt: string, memory: string[] = [], opts?: FetchPlanOpts): Promise<Plan> {
+  const backend = getEffectiveBackend(opts?.backend);
+
+  if (backend === "local") {
+    // Use frontend local LLM helper which calls server /api/llm/local/plan (llm.ts handles absolute URL)
+    const p = await llm.generateLocalPlan(prompt);
+    return p as Plan;
+  }
+
+  // OpenAI path via absolute backend URL
+  const res = await fetch(apiUrl("/api/openai/plan"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, memory }),
@@ -35,13 +90,12 @@ export async function fetchPlan(prompt: string, memory: string[] = []): Promise<
     throw new Error(`Server ${res.status}: ${txt}`);
   }
   const j = await handleJsonResponse(res);
-  // server may return { plan } or the plan root
   return (j.plan ?? j) as Plan;
 }
 
 /**
  * streamPlan: helper to call streaming endpoint and handle SSE-style `data: ...` events.
- * onChunk receives raw string payloads (server escapes newlines as \\n).
+ * - If backend is "local", it will call llm.streamLocalGenerate which handles both SSE and chunked text.
  */
 export async function streamPlan(
   prompt: string,
@@ -49,8 +103,27 @@ export async function streamPlan(
   onChunk?: (chunk: string) => void,
   onDone?: () => void,
   onError?: (err: Error) => void,
-  endpoint = "/api/openai/stream"
+  opts?: { backend?: "openai" | "local"; endpoint?: string }
 ): Promise<void> {
+  const backend = getEffectiveBackend(opts?.backend);
+  if (backend === "local") {
+    // Use the llm service's streaming helper
+    return llm.streamLocalGenerate(
+      prompt,
+      (chunk) => {
+        try { onChunk?.(chunk); } catch {}
+      },
+      () => {
+        try { onDone?.(); } catch {}
+      },
+      (err) => {
+        try { onError?.(err); } catch {}
+      }
+    );
+  }
+
+  // OpenAI streaming endpoint (SSE) — use absolute URL
+  const endpoint = opts?.endpoint ?? apiUrl("/api/openai/stream");
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -93,13 +166,12 @@ export async function streamPlan(
             onDone?.();
             return;
           }
-          // server encodes newlines as \n; restore them
           const decoded = payload.replace(/\\n/g, "\n");
           onChunk?.(decoded);
         }
       }
 
-      // process remaining newline-terminated lines
+      // newline-terminated lines
       if (buf.endsWith("\n")) {
         const lines = buf.split("\n").map((l) => l.trim()).filter(Boolean);
         buf = "";
@@ -116,7 +188,7 @@ export async function streamPlan(
       }
     }
 
-    // process trailing buffer
+    // trailing buffer
     if (buf.trim()) {
       const lines = buf.split("\n").map((l) => l.trim()).filter(Boolean);
       for (const line of lines) {
@@ -136,15 +208,13 @@ export async function streamPlan(
     onError?.(err);
     throw err;
   } finally {
-    try {
-      reader.cancel();
-    } catch {}
+    try { reader.cancel(); } catch {}
   }
 }
 
 /** POST /api/openai/apply */
 export async function applyPatches(patches: PatchObj[], mode: "dry" | "apply" = "apply") {
-  const res = await fetch("/api/openai/apply", {
+  const res = await fetch(apiUrl("/api/openai/apply"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ patches, mode }),
@@ -158,21 +228,20 @@ export async function applyPatches(patches: PatchObj[], mode: "dry" | "apply" = 
 
 /** GET /api/repo/list?pattern=... */
 export async function listRepoFiles(pattern = "**/*.*"): Promise<string[]> {
-  const url = `/api/repo/list?pattern=${encodeURIComponent(pattern)}`;
+  const url = `${apiUrl("/api/repo/list")}?pattern=${encodeURIComponent(pattern)}`;
   const res = await fetch(url);
   if (!res.ok) {
     const t = await res.text();
     throw new Error(`Server ${res.status}: ${t}`);
   }
   const j = await handleJsonResponse(res);
-  // Expect { files: string[] } or raw array
   if (Array.isArray(j)) return j;
   return j.files ?? [];
 }
 
 /** GET /api/repo/file?path=... */
 export async function getRepoFile(pathParam: string): Promise<{ content: string | null }> {
-  const url = `/api/repo/file?path=${encodeURIComponent(pathParam)}`;
+  const url = `${apiUrl("/api/repo/file")}?path=${encodeURIComponent(pathParam)}`;
   const res = await fetch(url);
   if (!res.ok) {
     const t = await res.text();
@@ -181,16 +250,15 @@ export async function getRepoFile(pathParam: string): Promise<{ content: string 
   return handleJsonResponse(res);
 }
 
-/** Simple helper to POST /api/openai/validate (may return 501 until implemented) */
+/** Simple helper to POST /api/openai/validate (or use server validate) */
 export async function validatePatches(patches: PatchObj[]) {
-  const res = await fetch("/api/openai/validate", {
+  const res = await fetch(apiUrl("/api/openai/validate"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ patches }),
   });
   if (!res.ok) {
     const t = await res.text();
-    // the server may return 501 for not implemented; still return the JSON body if present
     try {
       const j = JSON.parse(t);
       return j;
@@ -207,6 +275,6 @@ export default {
   applyPatches,
   listRepoFiles,
   getRepoFile,
-  validatePatches
+  validatePatches,
 };
 

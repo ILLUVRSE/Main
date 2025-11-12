@@ -136,7 +136,11 @@ export async function applyRollbackMetadata(rollbackMetadata: {
         }
       } catch (e: any) {
         // If any file fails, abort and report error
-        logError(`applyRollbackMetadata: failed to restore ${relPath}`, { error: String(e?.message || e) });
+        logError(
+          `applyRollbackMetadata: failed to restore ${relPath}`,
+          String(e?.message || e),
+          { error: String(e?.message || e) }
+        );
         return { ok: false, error: `failed to restore ${relPath}: ${String(e?.message || e)}` };
       }
     }
@@ -153,11 +157,19 @@ export async function applyRollbackMetadata(rollbackMetadata: {
       await git.commit(message, changedFiles, { "--author": author });
       return { ok: true };
     } catch (e: any) {
-      logError(`applyRollbackMetadata: git commit failed`, { error: String(e?.message || e) });
+      logError(
+        `applyRollbackMetadata: git commit failed`,
+        String(e?.message || e),
+        { error: String(e?.message || e) }
+      );
       return { ok: false, error: `git commit failed: ${String(e?.message || e)}` };
     }
   } catch (err: any) {
-    logError(`applyRollbackMetadata unexpected error`, { error: String(err?.message || err) });
+    logError(
+      `applyRollbackMetadata unexpected error`,
+      String(err?.message || err),
+      { error: String(err?.message || err) }
+    );
     return { ok: false, error: String(err?.message || err) };
   }
 }

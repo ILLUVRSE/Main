@@ -269,6 +269,27 @@ export async function validatePatches(patches: PatchObj[]) {
   return handleJsonResponse(res);
 }
 
+/**
+ * createPR
+ *
+ * Helper to POST to /api/repo/pr with the payload:
+ * { branchName, patches, commitMessage, prBase, prTitle, prBody, ... }
+ *
+ * Returns server JSON (which includes prUrl/prNumber when successful).
+ */
+export async function createPR(payload: any) {
+  const res = await fetch(apiUrl("/api/repo/pr"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Server ${res.status}: ${t}`);
+  }
+  return handleJsonResponse(res);
+}
+
 export default {
   fetchPlan,
   streamPlan,
@@ -276,5 +297,6 @@ export default {
   listRepoFiles,
   getRepoFile,
   validatePatches,
+  createPR,
 };
 

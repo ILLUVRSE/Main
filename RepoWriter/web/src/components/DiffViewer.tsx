@@ -1,103 +1,84 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
+import "diff2html/bundles/css/diff2html.min.css";
+import { Diff2Html } from "diff2html";
 
-type DiffViewerProps = {
-  diff?: string; // unified diff text
-  before?: string; // optional original file content
-  after?: string; // optional new file content
-  wrap?: boolean; // whether to wrap long lines
-  height?: string | number;
+/**
+ * DiffViewer
+ *
+ * Renders a unified diff string using diff2html. Supports side-by-side or inline rendering.
+ *
+ * Props:
+ *  - diff: string (unified diff)
+ *  - sideBySide?: boolean (default: true)
+ *  - className?: string
+ */
+type Props = {
+  diff?: string;
+  sideBySide?: boolean;
   className?: string;
 };
 
-/**
- * Simple unified-diff renderer.
- *
- * - If `diff` is provided we render it with colored lines:
- *     + lines in green
- *     - lines in red
- *     @@ hunks in blue
- *     other lines in monospace
- *
- * - If `before` and `after` are provided (and no diff), render a compact side-by-side
- *   view by showing labels and the two contents.
- *
- * This component intentionally avoids heavy dependencies to remain easy to drop in.
- */
-export default function DiffViewer({
-  diff,
-  before,
-  after,
-  wrap = false,
-  height = "300px",
-  className,
-}: DiffViewerProps) {
-  if (!diff && (before === undefined || after === undefined)) {
-    return <div>No diff or content provided</div>;
+export default function DiffViewer({ diff = "", sideBySide = true, className }: Props) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!rootRef.current) return;
+
+    if (!diff || diff.trim().length === 0) {
+      rootRef.current.innerHTML = `<div style="padding:12px;color:var(--muted)">No diff to display</div>`;
+      return;
+    }
+
+    try {
+      const html = Diff2Html.getPrettyHtml(diff, {
+        inputFormat: "diff",
+        outputFormat: sideBySide ? "side-by-side" : "line-by-line",
+        drawFileList: false,
+        matching: "lines",
+        synchronisedScroll: true,
+        highlight: true,
+      });
+
+      // Insert the generated HTML
+      rootRef.current.innerHTML = html;
+
+      // Small tweak: ensure monospaced font in code areas (defensive)
+      const codeBlocks = rootRef.current.querySelectorAll(".d2h-code");
+      codeBlocks.forEach((el) => {
+        (el as HTMLElement).style.fontFamily = "var(--mono)";
+        (el as HTMLElement).style.fontSize = "13px";
+      });
+    } catch (err) {
+      rootRef.current.innerHTML = `<pre style="padding:12px;color:var(--danger);white-space:pre-wrap">Failed to render diff: ${String(
+        (err as Error)?.message || err
+      )}</pre>`;
+    }
+  }, [diff, sideBySide]);
+
+  function downloadPatch() {
+    const blob = new Blob([diff || ""], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "patch.diff";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
-  const containerStyle: React.CSSProperties = {
-    fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-    fontSize: 13,
-    border: "1px solid #e5e7eb",
-    borderRadius: 6,
-    overflow: "auto",
-    background: "#0b0b0b",
-    color: "#e6eef3",
-    height: typeof height === "number" ? `${height}px` : height,
-  };
-
-  const lineStyle: React.CSSProperties = {
-    whiteSpace: wrap ? "pre-wrap" : "pre",
-    padding: "6px 10px",
-    margin: 0,
-  };
-
-  if (diff) {
-    const lines = diff.split(/\r?\n/);
-    return (
-      <div style={containerStyle} className={className}>
-        <pre style={{ margin: 0 }}>
-          {lines.map((line, i) => {
-            let style: React.CSSProperties = { ...lineStyle };
-            if (line.startsWith("+") && !line.startsWith("+++")) {
-              style = { ...style, background: "#04260f", color: "#9be6a7" };
-            } else if (line.startsWith("-") && !line.startsWith("---")) {
-              style = { ...style, background: "#2b0b0b", color: "#fca3a3" };
-            } else if (line.startsWith("@@")) {
-              style = { ...style, background: "#062a3a", color: "#9fd6ff", fontWeight: 600 };
-            } else if (line.startsWith("+++ ") || line.startsWith("--- ")) {
-              style = { ...style, background: "#101010", color: "#cbd5e1", fontWeight: 600 };
-            } else {
-              style = { ...style, color: "#cbd5e1" };
-            }
-            // render with key
-            return (
-              <div key={i} style={style}>
-                {line === "" ? "\u00A0" : line}
-              </div>
-            );
-          })}
-        </pre>
-      </div>
-    );
-  }
-
-  // fallback: show simple before/after stacked view
   return (
-    <div style={{ display: "flex", gap: 12, alignItems: "stretch", flexDirection: "row" }} className={className}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 12, color: "#334155", marginBottom: 6 }}>Before</div>
-        <div style={containerStyle}>
-          <pre style={{ margin: 0, padding: 8, whiteSpace: wrap ? "pre-wrap" : "pre" }}>{before}</pre>
+    <div className={className}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <strong>Diff</strong>
+        <div>
+          <button className="btn btn-ghost btn-small" onClick={downloadPatch} style={{ marginRight: 8 }}>
+            Download
+          </button>
         </div>
       </div>
-      <div style={{ width: 12 }} />
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 12, color: "#334155", marginBottom: 6 }}>After</div>
-        <div style={containerStyle}>
-          <pre style={{ margin: 0, padding: 8, whiteSpace: wrap ? "pre-wrap" : "pre" }}>{after}</pre>
-        </div>
-      </div>
+
+      <div ref={rootRef} style={{ borderRadius: 8, overflow: "auto", border: "1px solid rgba(0,0,0,0.06)" }} />
     </div>
   );
 }

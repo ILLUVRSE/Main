@@ -40,3 +40,6 @@ agent-manager/.env.local
 
 # RepoWriter secrets
 RepoWriter/server/.env
+
+# Dev logs
+RepoWriter/web/preview.log

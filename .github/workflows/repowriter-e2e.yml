@@ -1,0 +1,101 @@
+name: Repowriter E2E (Playwright)
+
+on:
+  push:
+    paths:
+      - 'RepoWriter/**'
+  pull_request:
+    paths:
+      - 'RepoWriter/**'
+
+permissions:
+  contents: read
+
+jobs:
+  repowriter-e2e:
+    name: Repowriter end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install server dependencies
+        run: npm --prefix RepoWriter/server ci --no-audit --no-fund
+
+      - name: Install web dependencies
+        run: npm --prefix RepoWriter/web ci --no-audit --no-fund
+
+      - name: Run server unit tests
+        run: npm --prefix RepoWriter/server run test
+        continue-on-error: false
+
+      - name: Start OpenAI mock
+        run: |
+          nohup node RepoWriter/test/openaiMock.js > RepoWriter/test/openaiMock.log 2>&1 &
+          echo "Started openai mock (background)"
+          sleep 0.8
+
+      - name: Start RepoWriter server (dev)
+        run: |
+          # start server in background and let it write server.log
+          nohup npm --prefix RepoWriter/server run dev > RepoWriter/server/server.log 2>&1 &
+          echo "Started server (background); waiting for /api/health..."
+          # wait for health
+          for i in $(seq 1 40); do
+            if curl -sS http://localhost:7071/api/health >/dev/null 2>&1; then
+              echo "server healthy"
+              break
+            fi
+            sleep 1
+          done
+          if ! curl -sS http://localhost:7071/api/health >/dev/null 2>&1; then
+            echo "Server did not become healthy; printing recent logs:" >&2
+            tail -n 200 RepoWriter/server/server.log || true
+            exit 1
+          fi
+
+      - name: Install Playwright browsers
+        run: |
+          cd RepoWriter/web
+          npx playwright install --with-deps
+
+      - name: Run Playwright E2E (chromium)
+        env:
+          APP_URL: http://localhost:5173
+        run: |
+          # Start web preview for Playwright (run vite preview on same port)
+          nohup npm --prefix RepoWriter/web run preview > RepoWriter/web/preview.log 2>&1 &
+          echo "Started web preview in background; waiting briefly..."
+          for i in $(seq 1 20); do
+            if curl -sS http://localhost:5173/ >/dev/null 2>&1; then
+              echo "web preview ready"
+              break
+            fi
+            sleep 1
+          done
+
+          # Run playwright tests (uses playwright config at repo root)
+          cd RepoWriter/web
+          npx playwright test --project=chromium --reporter=list
+
+      - name: Collect logs (server & mock) on failure
+        if: failure()
+        run: |
+          echo "=== server.log ==="
+          tail -n 400 RepoWriter/server/server.log || true
+          echo "=== openaiMock.log ==="
+          tail -n 400 RepoWriter/test/openaiMock.log || true
+

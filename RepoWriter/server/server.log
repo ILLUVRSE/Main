@@ -261,3 +261,323 @@ node:internal/modules/run_main:123
 
 Node.js v20.19.5
 [31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:45545) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:45880) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:49259) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:49759) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:50325) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:51710) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:51974) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:52202) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:52481) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:52647) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:52955) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:53217) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:10228) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 exit listeners added to [Bus]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53446) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:53915) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:54098) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[Env] SANDBOX_ENABLED: undefined
+[Env] REPOWRITER_ALLOW_NO_KEY: undefined
+[Env] GITHUB_TOKEN present: false
+[startup error] Error: Cannot find package 'morgan' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/app.js
+    at packageResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:757:9)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:798:18)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m

@@ -2,13 +2,17 @@
  * repo.ts
  *
  * Repo-related routes: list files, read file, create branch/commit/push, open PR.
+ *
+ * NOTE: imports github.js as a default and destructures to avoid case/casing or export-style mismatches.
  */
 
 import { Router } from "express";
 import path from "path";
 import fs from "fs/promises";
 import { REPO_PATH } from "../config.js";
-import { createBranchAndCommit, pushBranch, createPullRequest, createBranchCommitPushPR, parseRemoteToRepoFullName } from "../services/gitHub.js";
+// Import default and destructure (defensive for different export styles)
+import githubDefault from "../services/github.js";
+const { createBranchAndCommit, pushBranch, createPullRequest, createBranchCommitPushPR, parseRemoteToRepoFullName } = (githubDefault as any);
 import { applyPatches } from "../services/patcher.js";
 
 const r = Router();
@@ -43,8 +47,6 @@ async function walkRepo(root: string): Promise<string[]> {
 
 /** Convert simple wildcard pattern to RegExp. Supports '*' -> '.*' */
 function patternToRegExp(pattern: string) {
-  // If pattern looks like **/*.* or contains glob markers, translate simply
-  // Escape regex special chars then replace '*' with '.*'
   const esc = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
   const regexStr = "^" + esc.replace(/\\\*\\\*/g, ".*").replace(/\\\*/g, ".*") + "$";
   return new RegExp(regexStr);
@@ -137,13 +139,8 @@ r.post("/push", async (req, res, next) => {
  * POST /api/repo/pr
  * Body:
  *  {
- *    branchName, files: [{path, content? , diff?}] OR files: string[] (if already written),
- *    commitMessage,
- *    prBase?,
- *    prTitle?,
- *    prBody?,
- *    pushRemote?,
- *    authorName?, authorEmail?
+ *    branchName, patches, files, commitMessage,
+ *    prBase?, prTitle?, prBody?, pushRemote?, authorName?, authorEmail?, token?
  *  }
  *
  * If patches (with content/diff) are provided, apply them locally first (using patcher)
@@ -171,13 +168,10 @@ r.post("/pr", async (req, res, next) => {
 
     // If patches provided, apply them (applyPatches expects content/diff)
     if (Array.isArray(patches) && patches.length > 0) {
-      // We will perform the apply in 'apply' mode so files are written to REPO_PATH.
-      // Note: caller should ensure server process has permission to write to REPO_PATH.
       const applyResult = await applyPatches(patches, "apply");
       if (!applyResult.ok) {
         return res.status(500).json({ ok: false, error: "apply failed", details: applyResult });
       }
-      // Prepare file list from applied entries
       const committedFiles = (applyResult.applied || []).map((a) => a.path);
       const ghRes = await createBranchCommitPushPR(branchName, committedFiles, commitMessage, prBase || "main", prTitle, prBody, {
         authorName,

@@ -1,0 +1,238 @@
+/**
+ * conversationManager.ts
+ *
+ * Simple conversation store for RepoWriter to support multi-turn planning and clarifying Q&A.
+ *
+ * Persistence:
+ *  - Conversations are kept in-memory and periodically flushed to disk at .repowriter/conversations.json
+ *  - On startup we attempt to load persisted conversations.
+ *
+ * Broadcasts:
+ *  - Calls broadcast('conversation:update', { conversation }) when a conversation is updated.
+ *
+ * NOTE: This module is intentionally small and synchronous-friendly. For heavy usage or multi-process
+ * deployments you should replace with a centralized store (Redis, DB).
+ */
+
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
+import { randomUUID } from "crypto";
+import { broadcast } from "../ws/server.js";
+import { REPO_PATH } from "../config.js";
+
+export type Author = "user" | "model" | "system";
+
+export type ConvMessage = {
+  id: string;
+  author: Author;
+  role?: string; // optional role like 'assistant' / 'planner' etc.
+  text: string;
+  createdAt: string; // ISO
+  clarifying?: boolean; // whether this is a clarifying question by the model
+  meta?: Record<string, any>; // arbitrary metadata, e.g., partial plan fragments
+};
+
+export type Conversation = {
+  id: string;
+  title?: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ConvMessage[];
+  meta?: Record<string, any>; // e.g., token usage, plan meta
+};
+
+const STORE_REL = ".repowriter/conversations.json";
+const FLUSH_INTERVAL_MS = 5000;
+
+let storePathCache: string | null = null;
+function getStorePath() {
+  if (storePathCache) return storePathCache;
+  storePathCache = path.join(REPO_PATH, STORE_REL);
+  return storePathCache;
+}
+
+let conversations: Record<string, Conversation> = {};
+let isDirty = false;
+let flushTimer: NodeJS.Timeout | null = null;
+
+/** Load persisted conversations from disk (best-effort). */
+export async function loadConversations() {
+  const p = getStorePath();
+  try {
+    const raw = await fs.readFile(p, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, Conversation>;
+    // Basic validation
+    if (parsed && typeof parsed === "object") {
+      conversations = parsed;
+    }
+  } catch {
+    // ignore missing or parse errors
+    conversations = {};
+  }
+}
+
+/** Persist conversations to disk (atomic write). */
+export async function flushConversations() {
+  if (!isDirty) return;
+  const p = getStorePath();
+  try {
+    await fs.mkdir(path.dirname(p), { recursive: true });
+    const tmp = `${p}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(conversations, null, 2), "utf8");
+    await fs.rename(tmp, p);
+    isDirty = false;
+  } catch (err) {
+    // swallow for now; keep in-memory state
+    try { await fs.writeFile(p, JSON.stringify(conversations, null, 2), "utf8"); isDirty = false; } catch {}
+  }
+}
+
+/** Schedule periodic flush */
+function scheduleFlush() {
+  if (flushTimer) return;
+  flushTimer = setInterval(() => {
+    flushConversations().catch(() => {});
+  }, FLUSH_INTERVAL_MS);
+  // Do not keep node alive just for flush timer
+  if (typeof flushTimer.unref === "function") flushTimer.unref();
+}
+
+/** Create a new conversation with optional initial system message / title */
+export function createConversation(opts: { title?: string; initialSystem?: string; meta?: Record<string, any> } = {}): Conversation {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const conv: Conversation = {
+    id,
+    title: opts.title,
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+    meta: opts.meta || {}
+  };
+  if (opts.initialSystem) {
+    conv.messages.push({
+      id: randomUUID(),
+      author: "system",
+      text: opts.initialSystem,
+      createdAt: now,
+      meta: {}
+    });
+  }
+  conversations[id] = conv;
+  isDirty = true;
+  scheduleFlush();
+  broadcastSafe("conversation:create", { conversation: conv });
+  return conv;
+}
+
+/** Get a conversation by id */
+export function getConversation(id: string): Conversation | null {
+  return conversations[id] ?? null;
+}
+
+/** List all conversations (lightweight) */
+export function listConversations(): Conversation[] {
+  return Object.values(conversations).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+}
+
+/** Append a message to a conversation and broadcast update */
+export function appendMessage(convId: string, msg: Omit<ConvMessage, "id" | "createdAt">): ConvMessage {
+  const conv = conversations[convId];
+  if (!conv) throw new Error("Conversation not found");
+  const now = new Date().toISOString();
+  const full: ConvMessage = {
+    id: randomUUID(),
+    author: msg.author,
+    role: msg.role,
+    text: msg.text,
+    createdAt: now,
+    clarifying: !!msg.clarifying,
+    meta: msg.meta || {}
+  };
+  conv.messages.push(full);
+  conv.updatedAt = now;
+  isDirty = true;
+  scheduleFlush();
+  broadcastSafe("conversation:update", { conversation: conv, message: full });
+  return full;
+}
+
+/** Add a user message and return appended ConvMessage */
+export function addUserMessage(convId: string, text: string, meta?: Record<string, any>) {
+  return appendMessage(convId, { author: "user", text, meta });
+}
+
+/** Add a model message (planner/assistant) */
+export function addModelMessage(convId: string, text: string, opts: { clarifying?: boolean; meta?: Record<string, any>; role?: string } = {}) {
+  return appendMessage(convId, { author: "model", text, clarifying: !!opts.clarifying, meta: opts.meta, role: opts.role });
+}
+
+/** Update conversation meta */
+export function updateConversationMeta(convId: string, meta: Record<string, any>) {
+  const conv = conversations[convId];
+  if (!conv) throw new Error("Conversation not found");
+  conv.meta = Object.assign({}, conv.meta || {}, meta || {});
+  conv.updatedAt = new Date().toISOString();
+  isDirty = true;
+  scheduleFlush();
+  broadcastSafe("conversation:meta", { conversation: conv });
+  return conv;
+}
+
+/** Remove conversation */
+export function deleteConversation(convId: string) {
+  delete conversations[convId];
+  isDirty = true;
+  scheduleFlush();
+  broadcastSafe("conversation:delete", { id: convId });
+}
+
+/** Prune old conversations older than days */
+export function pruneConversations(olderThanDays = 90) {
+  const cutoff = Date.now() - olderThanDays * 24 * 3600 * 1000;
+  for (const id of Object.keys(conversations)) {
+    const conv = conversations[id];
+    if (new Date(conv.updatedAt).getTime() < cutoff) {
+      delete conversations[id];
+      isDirty = true;
+    }
+  }
+  if (isDirty) {
+    scheduleFlush();
+  }
+}
+
+/** Safe broadcast wrapper: non-fatal if broadcast fails */
+function broadcastSafe(type: string, data: any) {
+  try {
+    broadcast(type, data);
+  } catch {
+    // ignore
+  }
+}
+
+/** Initialize manager: load persisted state and start flush timer */
+export async function initConversationManager() {
+  try {
+    await loadConversations();
+  } catch {
+    // ignore
+  }
+  scheduleFlush();
+}
+
+export default {
+  initConversationManager,
+  createConversation,
+  getConversation,
+  listConversations,
+  appendMessage,
+  addUserMessage,
+  addModelMessage,
+  updateConversationMeta,
+  deleteConversation,
+  pruneConversations,
+  flushConversations
+};
+

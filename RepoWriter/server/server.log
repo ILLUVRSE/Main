@@ -7,13 +7,257 @@
 [33m[nodemon] watching path(s): src/**/*[39m
 [33m[nodemon] watching extensions: ts[39m
 [32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
-(node:201050) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+(node:10254) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
 --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
 (Use `node --trace-warnings ...` to show where the warning was created)
 [Env] OPENAI_API_KEY prefix: sk-...
 [Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
-[startup error] src/services/rollback.ts(139,73): error TS2345: Argument of type '{ error: string; }' is not assignable to parameter of type 'string'.
-src/services/rollback.ts(156,60): error TS2345: Argument of type '{ error: string; }' is not assignable to parameter of type 'string'.
-src/services/rollback.ts(160,56): error TS2345: Argument of type '{ error: string; }' is not assignable to parameter of type 'string'.
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:28290) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:28533) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:28847) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:29132) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:29411) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:29653) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:29897) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[RepoWriter] server listening on http://localhost:7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:30107) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/routes/repo.ts(11,123): error TS2307: Cannot find module '../services/gitHub.js' or its corresponding type declarations.
 
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:30423) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/routes/repo.ts(11,123): error TS2307: Cannot find module '../services/gitHub.js' or its corresponding type declarations.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:33324) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/routes/repo.ts(11,123): error TS2307: Cannot find module '../services/gitHub.js' or its corresponding type declarations.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:33734) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/routes/repo.ts(11,123): error TS2307: Cannot find module '../services/gitHub.js' or its corresponding type declarations.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:34018) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/routes/repo.ts(11,123): error TS2307: Cannot find module '../services/gitHub.js' or its corresponding type declarations.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:34285) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/routes/repo.ts(11,123): error TS2307: Cannot find module '../services/gitHub.js' or its corresponding type declarations.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:34645) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Env] OPENAI_API_KEY prefix: sk-...
+[Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
+[startup error] src/routes/repo.ts(11,123): error TS2307: Cannot find module '../services/gitHub.js' or its corresponding type declarations.
+
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:35162) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:35371) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:35653) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:36032) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:36324) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:36609) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:38190) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+[Object: null prototype] {
+  [Symbol(nodejs.util.inspect.custom)]: [Function: [nodejs.util.inspect.custom]]
+}
+
+Node.js v20.19.5
 [31m[nodemon] app crashed - waiting for file changes before starting...[39m

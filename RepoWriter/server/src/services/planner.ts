@@ -204,9 +204,9 @@ export async function planEdits(prompt: string, memory: string[] = []): Promise<
       contextFragment = buildContextFragment(ctx.files);
       contextMeta = { context: { files: ctx.files.map((f: any) => ({ path: f.path, tokensEstimate: f.tokensEstimate })) , totalTokens: ctx.totalTokens } };
     }
-  } catch (err) {
-    // ignore context errors but record in meta for debugging
-    contextMeta = { contextError: String(err?.message || err) };
+  } catch (err: any) {
+    // record context error safely
+    contextMeta = { contextError: String(err?.message ?? err) };
   }
 
   const user = buildUserPayload(prompt, memory, contextFragment);

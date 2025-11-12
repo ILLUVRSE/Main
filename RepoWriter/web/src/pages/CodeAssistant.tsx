@@ -1,3 +1,4 @@
+// RepoWriter/web/src/pages/CodeAssistant.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import api from "../services/api";
 import ContextSelector from "../components/ContextSelector";
@@ -11,27 +12,31 @@ type PatchObj = {
 };
 
 export default function CodeAssistant() {
-  const [prompt, setPrompt] = useState<string>(""); // narrative prompt
-  const [selectedContext, setSelectedContext] = useState<Array<{ path: string; snippet?: string; tokensEstimate?: number }>>([]);
-  const [contextTokens, setContextTokens] = useState<number>(0);
+  // Layout state
+  const [prompt, setPrompt] = useState<string>("");
   const [plan, setPlan] = useState<any | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamLog, setStreamLog] = useState<string>("");
   const [status, setStatus] = useState<string>("");
+  const [selectedContext, setSelectedContext] = useState<Array<{ path: string; snippet?: string; tokensEstimate?: number }>>([]);
+  const [contextTokens, setContextTokens] = useState<number>(0);
   const [dryResult, setDryResult] = useState<any | null>(null);
   const [appliedResult, setAppliedResult] = useState<any | null>(null);
   const [validationResult, setValidationResult] = useState<any | null>(null);
   const [showClarify, setShowClarify] = useState(false);
   const [clarifyQuestion, setClarifyQuestion] = useState<string>("");
   const [clarifySuggestions, setClarifySuggestions] = useState<string[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
 
   useEffect(() => {
-    // initialize (optional): create a conversation id if you want multi-turn
-    setConversationId(`conv-${Date.now()}`);
+    // Example Task Board items (you can extend this to load from storage)
+    setTasks([
+      { id: "t1", title: "Create hello.txt", description: 'Create "hello.txt" with "Hello from RepoWriter mock!"', created: "11/11/2025" },
+      { id: "t2", title: "Add utils/summarize.ts", description: "Add a summarize util with summarize(text:string):string", created: "11/11/2025" }
+    ]);
   }, []);
 
-  // Handler when ContextSelector changes
+  // Context selector callback
   function handleContextChange(selected: Array<{ path: string; snippet?: string; tokensEstimate?: number }>, totalTokens: number) {
     setSelectedContext(selected || []);
     setContextTokens(totalTokens || 0);
@@ -43,12 +48,7 @@ export default function CodeAssistant() {
     setPlan(null);
     setStreamLog("");
     try {
-      // Try server-side context build first (recommended)
-      const contextOpts = { topK: 8, tokenBudget: 1200 };
-      // server will embed context automatically if we pass nothing here; include files by path in memory if desired
-      const memory: string[] = [];
-      // Fetch plan
-      const p = await api.fetchPlan(prompt, memory, { backend: "openai" });
+      const p = await api.fetchPlan(prompt, [], { backend: "openai" });
       setPlan(p);
       setStatus("Plan ready");
     } catch (err: any) {
@@ -56,7 +56,7 @@ export default function CodeAssistant() {
     }
   }
 
-  // Stream plan (SSE). Streams raw JSON fragments, we accumulate into streamLog and attempt to parse final JSON.
+  // Stream plan (SSE)
   async function handleStream() {
     setPlan(null);
     setStreamLog("");
@@ -67,20 +67,13 @@ export default function CodeAssistant() {
         prompt,
         [],
         (chunk) => {
-          // onChunk
-          try {
-            // Some chunks are JSON fragments (escaped \n). Show them raw and append.
-            setStreamLog((s) => s + chunk);
-          } catch {
-            setStreamLog((s) => s + chunk);
-          }
+          // Append raw chunk
+          setStreamLog((s) => s + chunk);
         },
         () => {
           setStreaming(false);
-          setStatus("Streaming complete — attempt parsing plan");
-          // Try parse streamLog as JSON
+          setStatus("Streaming complete — attempt parsing");
           try {
-            // The model may stream escaped JSON fragments; attempt to extract JSON
             const parsed = tryExtractPlanFromStream(streamLog);
             if (parsed) {
               setPlan(parsed);
@@ -104,110 +97,19 @@ export default function CodeAssistant() {
     }
   }
 
-  // Helper to try to extract JSON plan from streaming raw text
   function tryExtractPlanFromStream(text: string): any | null {
     if (!text) return null;
-    const trimmed = text.trim();
-    // If the stream contains escaped \n sequences, unescape them
-    const replaced = trimmed.replace(/\\n/g, "\n");
-    // Try direct parse
-    try {
-      return JSON.parse(replaced);
-    } catch {
-      // Try to find first { ... } substring
-      const first = replaced.indexOf("{");
-      const last = replaced.lastIndexOf("}");
-      if (first !== -1 && last !== -1 && last > first) {
-        const cand = replaced.slice(first, last + 1);
-        try {
-          return JSON.parse(cand);
-        } catch {
-          // fallback null
-          return null;
-        }
-      }
-      return null;
+    const replaced = text.replace(/\\n/g, "\n");
+    try { return JSON.parse(replaced); } catch {}
+    const first = replaced.indexOf("{");
+    const last = replaced.lastIndexOf("}");
+    if (first !== -1 && last !== -1 && last > first) {
+      const cand = replaced.slice(first, last + 1);
+      try { return JSON.parse(cand); } catch {}
     }
+    return null;
   }
 
-  // Apply plan (either dry or apply)
-  async function handleApply(mode: "dry" | "apply") {
-    setStatus(`${mode === "dry" ? "Dry-run" : "Applying"}...`);
-    setDryResult(null);
-    setAppliedResult(null);
-    try {
-      // Determine patches: use plan.patches if plan has patches; otherwise, ask user to provide patches
-      const patches: PatchObj[] = gatherPatchesFromPlan(plan);
-      if (!patches || patches.length === 0) {
-        setStatus("No patches available to apply");
-        return;
-      }
-
-      const res = await api.applyPatches(patches, mode);
-      if (!res) {
-        setStatus("Apply returned no result");
-        return;
-      }
-      if (mode === "dry") {
-        setDryResult(res);
-        setStatus("Dry-run complete");
-      } else {
-        setAppliedResult(res);
-        setStatus("Apply complete");
-      }
-    } catch (err: any) {
-      setStatus(`Apply failed: ${String(err?.message || err)}`);
-    }
-  }
-
-  // Validate patches via sandbox
-  async function handleValidate() {
-    setStatus("Validating...");
-    setValidationResult(null);
-    try {
-      const patches: PatchObj[] = gatherPatchesFromPlan(plan);
-      if (!patches || patches.length === 0) {
-        setStatus("No patches to validate");
-        return;
-      }
-      const res = await api.validatePatches(patches);
-      setValidationResult(res);
-      setStatus("Validation complete");
-    } catch (err: any) {
-      setStatus(`Validation failed: ${String(err?.message || err)}`);
-    }
-  }
-
-  // Create PR: will apply patches (if needed), create branch, push and open PR via createPR
-  async function handleCreatePR() {
-    setStatus("Creating PR...");
-    try {
-      const patches: PatchObj[] = gatherPatchesFromPlan(plan);
-      if (!patches || patches.length === 0) {
-        setStatus("No patches to create PR from");
-        return;
-      }
-      // Prompt for branch name & commit message (simple prompt)
-      const branchName = `repowriter/${Date.now()}`;
-      const commitMessage = `repowriter: apply ${patches.length} files`;
-      const payload = {
-        branchName,
-        patches,
-        commitMessage,
-        prBase: "main",
-        prTitle: commitMessage,
-        prBody: `Automated changes applied by RepoWriter for prompt:\n\n${prompt}`
-      };
-      const res = await api.createPR(payload);
-      setStatus("PR created");
-      // Show result info
-      setAppliedResult(res);
-    } catch (err: any) {
-      setStatus(`Create PR failed: ${String(err?.message || err)}`);
-    }
-  }
-
-  // Gather patches from plan object
   function gatherPatchesFromPlan(p: any): PatchObj[] {
     if (!p || !p.steps) return [];
     const patches: PatchObj[] = [];
@@ -225,22 +127,112 @@ export default function CodeAssistant() {
     return patches;
   }
 
-  // Handle Clarifying question flow (model -> user)
+  async function handleApply(mode: "dry" | "apply") {
+    setStatus(`${mode === "dry" ? "Dry-run" : "Applying"}...`);
+    setDryResult(null);
+    setAppliedResult(null);
+    try {
+      const patches: PatchObj[] = gatherPatchesFromPlan(plan);
+      if (!patches || patches.length === 0) {
+        setStatus("No patches available to apply");
+        return;
+      }
+      const res = await api.applyPatches(patches, mode);
+      if (mode === "dry") {
+        setDryResult(res);
+        setStatus("Dry-run complete");
+      } else {
+        setAppliedResult(res);
+        setStatus("Apply complete");
+      }
+    } catch (err: any) {
+      setStatus(`Apply failed: ${String(err?.message || err)}`);
+    }
+  }
+
+  async function handleValidate() {
+    setStatus("Validating...");
+    setValidationResult(null);
+    try {
+      const patches: PatchObj[] = gatherPatchesFromPlan(plan);
+      if (!patches || patches.length === 0) {
+        setStatus("No patches to validate");
+        return;
+      }
+      // Ensure sandbox is enabled on server if you need validate to run
+      const res = await api.validatePatches(patches);
+      setValidationResult(res);
+      setStatus("Validation complete");
+    } catch (err: any) {
+      setStatus(`Validation failed: ${String(err?.message || err)}`);
+    }
+  }
+
+  async function handleCreatePR() {
+    setStatus("Creating PR...");
+    try {
+      const patches: PatchObj[] = gatherPatchesFromPlan(plan);
+      if (!patches || patches.length === 0) {
+        setStatus("No patches to create PR from");
+        return;
+      }
+      const branchName = `repowriter/${Date.now()}`;
+      const commitMessage = `repowriter: apply ${patches.length} files`;
+      const payload = {
+        branchName,
+        patches,
+        commitMessage,
+        prBase: "main",
+        prTitle: commitMessage,
+        prBody: `Automated changes applied by RepoWriter for prompt:\n\n${prompt}`
+      };
+      const res = await api.createPR(payload);
+      setStatus("PR created");
+      setAppliedResult(res);
+    } catch (err: any) {
+      setStatus(`Create PR failed: ${String(err?.message || err)}`);
+    }
+  }
+
+  // Task Board actions (simple, local state)
+  function runTask(task: any) {
+    setPrompt(task.description);
+    handlePlan();
+  }
+
+  // Clarify
   function openClarify(question: string, suggestions: string[] = []) {
     setClarifyQuestion(question);
     setClarifySuggestions(suggestions);
     setShowClarify(true);
   }
-
   function onClarifyAnswer(answer: string) {
-    // For simplicity, append answer to prompt and re-run plan
     setShowClarify(false);
     setPrompt((p) => `${p}\n\nClarification: ${answer}`);
-    // optionally auto-run planner
     handlePlan();
   }
 
-  // Render plan steps nicely
+  // UI render helpers
+  function renderTaskBoard() {
+    return (
+      <div style={{ padding: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Task Board</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {tasks.map((t) => (
+            <div key={t.id} style={{ border: "1px solid #eee", padding: 8, borderRadius: 6, background: "#fff" }}>
+              <div style={{ fontWeight: 700 }}>{t.title}</div>
+              <div style={{ color: "#666", marginTop: 6 }}>{t.description}</div>
+              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                <button onClick={() => runTask(t)}>Run</button>
+                <button onClick={() => { setPrompt(t.description); }}>Edit</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   function renderPlanSteps(p: any) {
     if (!p || !p.steps) return <div style={{ color: "#666" }}>No plan</div>;
     return (
@@ -267,28 +259,35 @@ export default function CodeAssistant() {
     );
   }
 
-  // UI layout
+  // Main layout
   return (
-    <div style={{ display: "flex", gap: 12, padding: 16, fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial" }}>
-      <div style={{ width: 520 }}>
-        <div style={{ marginBottom: 8 }}><strong>Prompt</strong></div>
+    <div style={{ display: "flex", height: "100vh", gap: 12, fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial" }}>
+      {/* Left: Task board + ContextSelector (collapsible region) */}
+      <div style={{ width: 320, borderRight: "1px solid #e6e6e6", overflow: "auto", background: "#f7f8f9" }}>
+        {renderTaskBoard()}
+        <div style={{ padding: 12, borderTop: "1px solid #eee" }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Repository Context</div>
+          <ContextSelector initialSelected={[]} onChange={handleContextChange} />
+          <div style={{ marginTop: 8, color: "#666" }}>Context tokens estimate: {contextTokens}</div>
+        </div>
+      </div>
+
+      {/* Center: Prompt / Stream / Plan */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 12, gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Prompt</div>
+          <div style={{ color: "#666" }}>{status}</div>
+        </div>
+
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          rows={8}
-          placeholder="Describe what you want to change. Narrative allowed. Example: 'Add a util/summarize.ts that summarizes top-level comments'"
+          rows={4}
+          placeholder="Describe what you want to change..."
           style={{ width: "100%", fontFamily: "monospace", padding: 8, fontSize: 13, borderRadius: 6, border: "1px solid #e6e6e6" }}
         />
 
-        <div style={{ marginTop: 10 }}>
-          <strong>Repository Context</strong>
-          <div style={{ marginTop: 8 }}>
-            <ContextSelector initialSelected={[]} onChange={handleContextChange} />
-          </div>
-          <div style={{ marginTop: 8, color: "#666", fontSize: 13 }}>Context tokens estimate: {contextTokens}</div>
-        </div>
-
-        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8 }}>
           <button onClick={handlePlan}>Plan</button>
           <button onClick={handleStream} disabled={streaming}>{streaming ? "Streaming..." : "Stream"}</button>
           <button onClick={() => handleApply("dry")} disabled={!plan}>Dry-run</button>
@@ -297,40 +296,57 @@ export default function CodeAssistant() {
           <button onClick={handleCreatePR} disabled={!plan}>Create PR</button>
         </div>
 
+        <div style={{ flex: 1, display: "flex", gap: 12, overflow: "hidden" }}>
+          <div style={{ flex: 1, overflow: "auto", border: "1px solid #eee", borderRadius: 6, padding: 12, background: "#fff" }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Stream Plan</div>
+            <div style={{ fontFamily: "monospace", whiteSpace: "pre-wrap", background: "#0b0b0b", color: "#0f0", padding: 8, borderRadius: 4, minHeight: 120 }}>{streamLog || "No streamed output"}</div>
+
+            <div style={{ fontWeight: 700, marginTop: 12 }}>Plan Preview</div>
+            <div style={{ marginTop: 8 }}>{plan ? renderPlanSteps(plan) : <div style={{ color: "#666" }}>No plan yet — click Plan or Stream to generate a plan.</div>}</div>
+          </div>
+
+          <div style={{ width: 360, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, background: "#fff" }}>
+              <div style={{ fontWeight: 700 }}>Validation</div>
+              <div style={{ marginTop: 8 }}>
+                <ValidationResults patches={gatherPatchesFromPlan(plan)} autoRun={false} onComplete={(r) => setValidationResult(r)} />
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, background: "#fff" }}>
+              <div style={{ fontWeight: 700 }}>Applied / PR result</div>
+              <div style={{ marginTop: 8 }}>
+                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 13 }}>{JSON.stringify(appliedResult || {}, null, 2)}</pre>
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, background: "#fff" }}>
+              <div style={{ fontWeight: 700 }}>Patch Preview</div>
+              <div style={{ marginTop: 8, fontFamily: "monospace", whiteSpace: "pre-wrap", minHeight: 120 }}>
+                {plan && plan.steps && plan.steps.length > 0 ? (
+                  <div>
+                    <div style={{ color: "#666" }}>Select a step on the left to preview (click in the plan).</div>
+                  </div>
+                ) : (
+                  <div style={{ color: "#666" }}>No patches to preview</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Tools & Status */}
+      <div style={{ width: 320, borderLeft: "1px solid #e6e6e6", padding: 12, background: "#f7f8f9", overflow: "auto" }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Repo Tools</div>
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ color: "#666", marginBottom: 6 }}>Repository actions</div>
+          <button onClick={async () => { const res = await api.listRepoFiles("**/*.*"); alert(`Files: ${res.length}`); }}>Open repo browser</button>
+        </div>
+
         <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700 }}>Status</div>
           <div style={{ marginTop: 6, color: "#333" }}>{status}</div>
-        </div>
-      </div>
-
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Plan</div>
-
-        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 6, maxHeight: "78vh", overflow: "auto", background: "#fff" }}>
-          <div style={{ marginBottom: 8 }}>
-            {streamLog ? (
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>Streamed raw output</div>
-                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 13, maxHeight: 220, overflow: "auto", background: "#111", color: "#0f0", padding: 8 }}>{streamLog}</pre>
-              </div>
-            ) : null}
-          </div>
-
-          <div style={{ marginTop: 8 }}>
-            {plan ? renderPlanSteps(plan) : <div style={{ color: "#666" }}>No plan yet. Click Plan or Stream to generate a plan.</div>}
-          </div>
-        </div>
-      </div>
-
-      <div style={{ width: 420 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Validation</div>
-        <ValidationResults patches={gatherPatchesFromPlan(plan)} autoRun={false} onComplete={(r) => setValidationResult(r)} />
-
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Applied / PR result</div>
-          <div style={{ background: "#fafafa", padding: 8, borderRadius: 6 }}>
-            <pre style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 13 }}>{JSON.stringify(appliedResult || {}, null, 2)}</pre>
-          </div>
         </div>
       </div>
 

@@ -27,10 +27,12 @@ async function main() {
 
     // Initialize conversation manager (loads persisted conversations, starts flush timer)
     try {
-      await convManagerMod.initConversationManager();
+      // catch typed as any so we can safely inspect stack/message
+      await (convManagerMod as any).initConversationManager();
       console.log("[RepoWriter] conversationManager initialized");
     } catch (err: any) {
-      console.warn("[RepoWriter] conversationManager init failed:", err && (err.stack || err));
+      // Use safe access to stack or fallback to the error itself
+      console.warn("[RepoWriter] conversationManager init failed:", (err as any)?.stack ?? err);
     }
 
     const port = Number(process.env.PORT || 7071);

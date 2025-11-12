@@ -1,13 +1,13 @@
 /**
- * web/src/services/api.ts (updated)
+ * server/src/services/api.ts
  *
- * Extends the existing RepoWriter client helpers with:
- *  - validatePatches(patches)
- *  - pushRepo / createPR
- *  - getContext(prompt, options)
+ * Lightweight server-side copy of the web client api helper used by some server-side
+ * utilities and tests. This file intentionally keeps a small, pragmatic surface:
+ * - Uses fetch to call internal endpoints
+ * - Provides a local-llm streaming helper by delegating to the server-side llm adapter
  *
- * Keeps fetchPlan / streamPlan / applyPatches / listRepoFiles / getRepoFile behavior,
- * and supports local LLM fallback as before.
+ * NOTE: this file is used by server-side CLI/tools/tests and intentionally mirrors
+ * the client helpers (but lives on the server).
  */
 
 import llm, { Plan as LocalPlan } from "./llm";
@@ -32,21 +32,13 @@ type FetchPlanOpts = {
   backend?: "openai" | "local";
 };
 
-/** Resolve API base URL:
- *  - First: localStorage 'repowriter_api_base'
- *  - Fallback: http://localhost:7071
+/** Resolve API base URL for server-side helpers.
+ * Default is http://localhost:7071
  */
 function getApiBase(): string {
-  try {
-    const stored = localStorage.getItem("repowriter_api_base");
-    if (stored && stored.trim()) return stored.trim();
-  } catch {
-    /* ignore */
-  }
-  return "http://localhost:7071";
+  return process.env.REPOWRITER_API_BASE || "http://localhost:7071";
 }
 
-/** Convert a relative /api/... path to absolute URL (API_BASE + path) */
 function apiUrl(pathStr: string) {
   const base = getApiBase().replace(/\/$/, "");
   if (pathStr.startsWith("/")) return `${base}${pathStr}`;
@@ -62,23 +54,14 @@ async function handleJsonResponse(res: Response) {
   }
 }
 
-function getEffectiveBackend(explicit?: "openai" | "local") {
-  if (explicit) return explicit;
-  const stored = (localStorage.getItem("repowriter_backend") as "openai" | "local") || "openai";
-  return stored;
-}
-
-/** POST /api/openai/plan or /api/llm/local/plan if backend=local */
+/** fetchPlan: call /api/openai/plan (or use local llm when backend=local) */
 export async function fetchPlan(prompt: string, memory: string[] = [], opts?: FetchPlanOpts): Promise<Plan> {
-  const backend = getEffectiveBackend(opts?.backend);
-
+  const backend = opts?.backend ?? "openai";
   if (backend === "local") {
-    // Use frontend local LLM helper which calls server /api/llm/local/plan (llm.ts handles absolute URL)
-    const p = await llm.generateLocalPlan(prompt);
+    const p = await (llm as any).generateLocalPlan(prompt);
     return p as Plan;
   }
 
-  // OpenAI path via absolute backend URL
   const res = await fetch(apiUrl("/api/openai/plan"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -104,18 +87,19 @@ export async function streamPlan(
   onError?: (err: Error) => void,
   opts?: { backend?: "openai" | "local"; endpoint?: string }
 ): Promise<void> {
-  const backend = getEffectiveBackend(opts?.backend);
+  const backend = opts?.backend ?? "openai";
   if (backend === "local") {
-    // Use the llm service's streaming helper
-    return llm.streamLocalGenerate(
+    // Defensive cast: llm default export may be an object; ensure streamLocalGenerate is invoked.
+    // Provide explicit parameter types for callbacks to satisfy TypeScript.
+    return (llm as any).streamLocalGenerate(
       prompt,
-      (chunk) => {
+      (chunk: string) => {
         try { onChunk?.(chunk); } catch {}
       },
       () => {
         try { onDone?.(); } catch {}
       },
-      (err) => {
+      (err: any) => {
         try { onError?.(err); } catch {}
       }
     );
@@ -142,37 +126,53 @@ export async function streamPlan(
     return;
   }
 
-  const reader = res.body.getReader();
+  const reader = (res.body as any).getReader ? (res.body as any).getReader() : null;
   const decoder = new TextDecoder();
   let buf = "";
 
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+  if (reader) {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
 
-      let idx: number;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const rawEvent = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const rawEvent = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
 
-        const lines = rawEvent.split("\n").map((l) => l.trim()).filter(Boolean);
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") {
-            onDone?.();
-            return;
+          const lines = rawEvent.split("\n").map((l) => l.trim()).filter(Boolean);
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (payload === "[DONE]") {
+              onDone?.();
+              return;
+            }
+            const decoded = payload.replace(/\\n/g, "\n");
+            onChunk?.(decoded);
           }
-          const decoded = payload.replace(/\\n/g, "\n");
-          onChunk?.(decoded);
+        }
+
+        if (buf.endsWith("\n")) {
+          const lines = buf.split("\n").map((l) => l.trim()).filter(Boolean);
+          buf = "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (payload === "[DONE]") {
+              onDone?.();
+              return;
+            }
+            const decoded = payload.replace(/\\n/g, "\n");
+            onChunk?.(decoded);
+          }
         }
       }
 
-      if (buf.endsWith("\n")) {
+      if (buf.trim()) {
         const lines = buf.split("\n").map((l) => l.trim()).filter(Boolean);
-        buf = "";
         for (const line of lines) {
           if (!line.startsWith("data:")) continue;
           const payload = line.slice(5).trim();
@@ -184,28 +184,28 @@ export async function streamPlan(
           onChunk?.(decoded);
         }
       }
-    }
 
-    if (buf.trim()) {
-      const lines = buf.split("\n").map((l) => l.trim()).filter(Boolean);
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") {
-          onDone?.();
-          return;
-        }
-        const decoded = payload.replace(/\\n/g, "\n");
-        onChunk?.(decoded);
-      }
+      onDone?.();
+    } catch (err: any) {
+      onError?.(err);
+      throw err;
+    } finally {
+      try { reader.releaseLock?.(); } catch {}
     }
+    return;
+  }
 
+  // Fallback: use reader-less consumption (Node stream or string)
+  const streamReader = res.body;
+  try {
+    for await (const chunk of (streamReader as any)) {
+      const decoded = typeof chunk === "string" ? chunk : decoder.decode(chunk);
+      onChunk?.(decoded);
+    }
     onDone?.();
   } catch (err: any) {
     onError?.(err);
     throw err;
-  } finally {
-    try { reader.cancel(); } catch {}
   }
 }
 

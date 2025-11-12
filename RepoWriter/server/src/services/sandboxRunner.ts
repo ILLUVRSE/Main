@@ -30,46 +30,15 @@ export type CommandResult = {
 };
 
 export type SandboxOptions = {
-  /**
-   * Milliseconds before killing a command (default 60s).
-   */
   timeoutMs?: number;
-
-  /**
-   * Command to run tests (default: "npm test").
-   */
   testCommand?: string;
-
-  /**
-   * Command to run type-check (default: "npm --prefix . run tsc --noEmit" if tsconfig present,
-   * otherwise omitted).
-   */
   typecheckCommand?: string;
-
-  /**
-   * Command to run linter (default "npm run lint" if present).
-   */
   lintCommand?: string;
-
-  /**
-   * Keep the temp directory for debugging (default: false).
-   */
   keepTemp?: boolean;
-
-  /**
-   * Maximum size (chars) to keep of stdout/stderr per command.
-   */
   maxOutputSize?: number;
-
-  /**
-   * Environment variables to pass to commands.
-   */
   env?: Record<string,string>;
 };
 
-/**
- * Schema of the sandbox validation response
- */
 export type SandboxResult = {
   ok: boolean;
   tests?: CommandResult;
@@ -77,15 +46,14 @@ export type SandboxResult = {
   lint?: CommandResult;
   error?: string;
   timedOut?: boolean;
-  tempDir?: string | null; // only returned if keepTemp=true or on error
-  logs?: string; // short summary/logs
+  tempDir?: string | null;
+  logs?: string;
 };
 
 /** Helper: run a command in a working directory with timeout. */
 async function runCommand(cmd: string, cwd: string, opts: { timeoutMs: number; env?: Record<string,string>; maxOutputSize?: number } = { timeoutMs: 60000 }) : Promise<CommandResult> {
   return new Promise((resolve) => {
     const env = Object.assign({}, process.env, opts.env || {});
-    // Use shell so users can pass npm scripts / compound commands.
     const child = spawn(cmd, { cwd, shell: true, env });
 
     let stdout = "";
@@ -97,7 +65,6 @@ async function runCommand(cmd: string, cwd: string, opts: { timeoutMs: number; e
     const cleanupAndResolve = (code: number | null) => {
       if (finished) return;
       finished = true;
-      // Trim outputs to maxSize characters.
       if (stdout.length > maxSize) stdout = stdout.slice(0, maxSize) + "\n...[truncated stdout]";
       if (stderr.length > maxSize) stderr = stderr.slice(0, maxSize) + "\n...[truncated stderr]";
       resolve({
@@ -139,13 +106,12 @@ async function runCommand(cmd: string, cwd: string, opts: { timeoutMs: number; e
 function validateRelativePath(p: string) {
   if (!p || typeof p !== "string") throw new Error("Invalid path");
   if (p.startsWith("/") || p.includes("\0")) throw new Error("Absolute or invalid paths are not allowed");
-  // forbid traversal up:
   const normalized = path.normalize(p);
   if (normalized.startsWith("..")) throw new Error("Path escapes repository root");
   return normalized;
 }
 
-/** Apply patches (content or diff) to files under destRoot. Mirrors minimal patcher behavior. */
+/** Apply patches (content or diff) to files under destRoot. */
 async function applyPatchesToDir(patches: PatchInput[], destRoot: string) {
   const applied: { path: string; wasCreated: boolean; previousContent: string | null }[] = [];
   for (const p of patches) {
@@ -155,7 +121,6 @@ async function applyPatchesToDir(patches: PatchInput[], destRoot: string) {
     const parent = path.dirname(abs);
     await fs.mkdir(parent, { recursive: true });
 
-    // read current content if exists
     let current: string | null = null;
     try {
       current = await fs.readFile(abs, "utf8");
@@ -187,17 +152,8 @@ async function applyPatchesToDir(patches: PatchInput[], destRoot: string) {
 /**
  * runSandboxForPatches
  *
- * Copies the repo into a temp directory, applies patches, runs tests/type-check/lint,
+ * Copies the repo into a temp directory, applies patches, runs tests/typecheck/lint,
  * and returns structured results.
- *
- * Options:
- *   - timeoutMs (per command)
- *   - testCommand ("npm test" default)
- *   - typecheckCommand (if unspecified, attempts a tsc run if tsconfig exists)
- *   - lintCommand (default "npm run lint" if present)
- *   - keepTemp (if true, tempDir is returned for debugging)
- *   - env (env vars passed to commands)
- *
  */
 export async function runSandboxForPatches(patches: PatchInput[], options: SandboxOptions = {}): Promise<SandboxResult> {
   const timeoutMs = options.timeoutMs ?? 60000;
@@ -205,19 +161,15 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
   const keepTemp = options.keepTemp ?? false;
   const env = options.env ?? {};
 
-  let tmpDir = null;
+  let tmpDir: string | null = null;
   try {
-    // Create temp dir
     const prefix = path.join(os.tmpdir(), "repowriter-sandbox-");
     tmpDir = await fs.mkdtemp(prefix);
 
-    // Copy repository into tmpDir
-    // Try to use fs.cp (Node 16+). Fallback to naive copy if not available.
     if ((fs as any).cp) {
-      // @ts-ignore - fs.cp is present in Node 16.7+
+      // @ts-ignore
       await (fs as any).cp(REPO_PATH, tmpDir, { recursive: true });
     } else {
-      // naive copy: do a directory walk and copy files
       const copyRecursive = async (src: string, dest: string) => {
         await fs.mkdir(dest, { recursive: true });
         const entries = await fs.readdir(src, { withFileTypes: true });
@@ -234,25 +186,19 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
       await copyRecursive(REPO_PATH, tmpDir);
     }
 
-    // Apply patches to the temp dir
     await applyPatchesToDir(patches, tmpDir);
 
     const results: SandboxResult = { ok: true, tempDir: keepTemp ? tmpDir : null, logs: "" };
 
-    // Decide commands
     const testCmd = options.testCommand ?? "npm test";
     let typecheckCmd = options.typecheckCommand;
     let lintCmd = options.lintCommand;
 
-    // Heuristics: if tsconfig exists and no explicit typecheck command given, run tsc --noEmit
     try {
       await fs.access(path.join(tmpDir, "tsconfig.json"));
       if (!typecheckCmd) typecheckCmd = "npm --prefix . run tsc --noEmit";
-    } catch {
-      // no tsconfig
-    }
+    } catch {}
 
-    // Heuristics: run lint only if package.json has lint script
     try {
       const pkgJsonRaw = await fs.readFile(path.join(tmpDir, "package.json"), "utf8");
       const pkg = JSON.parse(pkgJsonRaw);
@@ -263,11 +209,8 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
           lintCmd = undefined;
         }
       }
-    } catch {
-      // ignore missing package.json
-    }
+    } catch {}
 
-    // Run typecheck first (if available)
     if (typecheckCmd) {
       const res = await runCommand(typecheckCmd, tmpDir, { timeoutMs, env, maxOutputSize });
       results.typecheck = res;
@@ -275,7 +218,6 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
       results.logs += `typecheck: exit=${res.exitCode} timedOut=${res.timedOut}\n`;
     }
 
-    // Run tests
     if (testCmd) {
       const res = await runCommand(testCmd, tmpDir, { timeoutMs, env, maxOutputSize });
       results.tests = res;
@@ -283,7 +225,6 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
       results.logs += `tests: exit=${res.exitCode} timedOut=${res.timedOut}\n`;
     }
 
-    // Run linter
     if (lintCmd) {
       const res = await runCommand(lintCmd, tmpDir, { timeoutMs, env, maxOutputSize });
       results.lint = res;
@@ -291,12 +232,9 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
       results.logs += `lint: exit=${res.exitCode} timedOut=${res.timedOut}\n`;
     }
 
-    // Short summary
     results.logs += `ok=${results.ok}\n`;
     if (!keepTemp) {
-      // cleanup
       try {
-        // recursive rm
         await fs.rm(tmpDir, { recursive: true, force: true });
         results.tempDir = null;
       } catch {
@@ -315,12 +253,16 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
     };
     return res;
   } finally {
-    // if keepTemp is false and tmpDir still exists (in error path), try cleanup
     if (!options.keepTemp && tmpDir) {
       try { await fs.rm(tmpDir, { recursive: true, force: true }); } catch {}
     }
   }
 }
 
-export default { runSandboxForPatches };
+// Backwards-compatible alias for validator/other callers
+export async function runTestsInSandbox(patches: any[], options: any = {}) {
+  return await runSandboxForPatches(patches, options);
+}
+
+export default { runSandboxForPatches, runTestsInSandbox };
 

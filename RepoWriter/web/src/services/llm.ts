@@ -1,70 +1,88 @@
 /**
  * web/src/services/llm.ts
  *
- * Client-side helper for local LLM usage.
+ * Minimal local LLM adapter used by the web client when the backend is set to "local".
+ * This is intentionally simple and deterministic so the frontend works when offline or
+ * for UI development without calling the real OpenAI server.
  *
  * Exports:
- *  - generateLocalPlan(prompt: string): Promise<any>       // returns plan-like object or { raw: "..." }
+ *  - generateLocalPlan(prompt: string): Promise<Plan>
  *  - streamLocalGenerate(prompt: string, onChunk, onDone, onError): Promise<void>
  *
- * The streaming helper accepts callbacks and supports SSE-style `data: ...` events or
- * chunked text. It is intentionally tolerant to different local LLM adapters.
+ * The Plan shape matches web/src/services/api.ts expectations:
+ *  { steps: [ { explanation: string, patches: [ { path, content?, diff? } ] } ], meta?: {} }
  */
 
+export type PatchObj = {
+  path: string;
+  content?: string;
+  diff?: string;
+};
+
+export type PlanStep = {
+  explanation: string;
+  patches: PatchObj[];
+};
+
 export type Plan = {
-  steps?: Array<any>;
+  steps: PlanStep[];
   meta?: Record<string, any>;
-} | { raw: string };
+};
 
-function getApiBase(): string {
-  try {
-    const stored = localStorage.getItem("repowriter_api_base");
-    if (stored && stored.trim()) return stored.trim();
-  } catch {
-    /* ignore */
-  }
-  return "http://localhost:7071";
-}
-
-function apiUrl(pathStr: string) {
-  const base = getApiBase().replace(/\/$/, "");
-  if (pathStr.startsWith("/")) return `${base}${pathStr}`;
-  return `${base}/${pathStr}`;
-}
-
-async function handleJsonResponse(res: Response) {
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-/** generateLocalPlan: calls server /api/llm/local/plan to generate a plan synchronously */
+/** Simple deterministic mock plan generator */
 export async function generateLocalPlan(prompt: string): Promise<Plan> {
-  const url = apiUrl("/api/llm/local/plan");
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt })
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Local LLM server ${res.status}: ${txt}`);
+  // Very simple heuristics so the UI can show realistic results:
+  // - If prompt mentions "hello" create hello.txt
+  // - If prompt mentions "add" + filename produce a file with that name
+  const p = (prompt || "").toLowerCase();
+
+  const steps: PlanStep[] = [];
+
+  if (p.includes("hello")) {
+    steps.push({
+      explanation: "Create hello.txt with a friendly greeting.",
+      patches: [
+        { path: "hello.txt", content: "Hello from RepoWriter local mock!\n" }
+      ]
+    });
   }
-  const parsed = await handleJsonResponse(res);
-  // The endpoint may return a plan-like object or { raw: "..." }
-  return parsed;
+
+  // detect "add <name>" pattern (very loose)
+  const addMatch = prompt.match(/add\s+([\w\-./]+(?:\.\w+)?)/i);
+  if (addMatch && addMatch[1]) {
+    const fname = addMatch[1];
+    steps.push({
+      explanation: `Add file ${fname} with a stub implementation.`,
+      patches: [
+        { path: fname, content: `// Created by RepoWriter local mock\n\n// TODO: implement ${fname}\n` }
+      ]
+    });
+  }
+
+  // fallback: create a multi-step plan example
+  if (steps.length === 0) {
+    steps.push({
+      explanation: "Update README with short summary of change and create a smoke file.",
+      patches: [
+        { path: "README.md", content: `# Changes\n\nPrompt: ${prompt}\n\nThis is a mock plan produced by the local LLM.` },
+        { path: "smoke-local.txt", content: "smoke-local\n" }
+      ]
+    });
+  }
+
+  const plan: Plan = { steps, meta: { localMock: true, promptPreview: (prompt || "").slice(0, 200) } };
+  // Simulate a tiny delay to feel realistic
+  await new Promise((r) => setTimeout(r, 120));
+  return plan;
 }
 
 /**
  * streamLocalGenerate
  *
- * Streams a prompt to /api/llm/local/stream and calls onChunk for each chunk,
- * onDone when finished, and onError on error.
+ * Simulates streaming output. Calls onChunk with string chunks (the frontend
+ * expects plain string chunks, which it will append and attempt parsing).
  *
- * Supports both SSE-style `data: ...` events and plain chunked text.
+ * This emits the JSON plan as one or more chunks (split roughly), then calls onDone().
  */
 export async function streamLocalGenerate(
   prompt: string,
@@ -72,113 +90,32 @@ export async function streamLocalGenerate(
   onDone?: () => void,
   onError?: (err: Error) => void
 ): Promise<void> {
-  const url = apiUrl("/api/llm/local/stream");
-  let res: Response;
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt })
-    });
-  } catch (err: any) {
-    onError?.(new Error(`Local LLM fetch failed: ${String(err?.message || err)}`));
-    throw err;
-  }
-
-  if (!res.ok) {
-    const txt = await res.text();
-    const err = new Error(`Local LLM server ${res.status}: ${txt}`);
-    onError?.(err);
-    throw err;
-  }
-
-  if (!res.body) {
-    const txt = await res.text();
-    try { onChunk?.(txt); } catch {}
-    onDone?.();
-    return;
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-
-      // SSE-style events separated by double-newline
-      let idx: number;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const rawEvent = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-
-        const lines = rawEvent.split("\n").map((l) => l.trim()).filter(Boolean);
-        for (const line of lines) {
-          if (line.startsWith("data:")) {
-            const payload = line.slice(5).trim();
-            if (!payload) continue;
-            if (payload === "[DONE]") {
-              onDone?.();
-              return;
-            }
-            const decoded = payload.replace(/\\n/g, "\n");
-            try { onChunk?.(decoded); } catch {}
-          } else {
-            // non-data SSE line
-            try { onChunk?.(line); } catch {}
-          }
-        }
-      }
-
-      // newline-terminated single-line events (defensive)
-      if (buf.endsWith("\n")) {
-        const lines = buf.split("\n").map((l) => l.trim()).filter(Boolean);
-        buf = "";
-        for (const line of lines) {
-          if (line.startsWith("data:")) {
-            const payload = line.slice(5).trim();
-            if (payload === "[DONE]") {
-              onDone?.();
-              return;
-            }
-            const decoded = payload.replace(/\\n/g, "\n");
-            try { onChunk?.(decoded); } catch {}
-          } else {
-            try { onChunk?.(line); } catch {}
-          }
-        }
-      }
+    const plan = await generateLocalPlan(prompt);
+    // Serialize to JSON and split into chunk pieces to mimic streaming
+    const json = JSON.stringify(plan);
+    // Split into ~80-char chunks
+    const chunkSize = 80;
+    for (let i = 0; i < json.length; i += chunkSize) {
+      const piece = json.slice(i, i + chunkSize);
+      // replace newlines with escaped form so frontend's replace(/\\n/g,"\n") works
+      const safe = piece.replace(/\n/g, "\\n");
+      onChunk?.(safe);
+      // small delay between chunks to mimic streaming
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 60));
     }
-
-    // trailing buffer
-    if (buf.trim()) {
-      const lines = buf.split("\n").map((l) => l.trim()).filter(Boolean);
-      for (const line of lines) {
-        if (line.startsWith("data:")) {
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") {
-            onDone?.();
-            return;
-          }
-          const decoded = payload.replace(/\\n/g, "\n");
-          try { onChunk?.(decoded); } catch {}
-        } else {
-          try { onChunk?.(line); } catch {}
-        }
-      }
-    }
-
+    // Finally signal done; frontend expects onDone to be called when stream complete
     onDone?.();
   } catch (err: any) {
-    onError?.(new Error(String(err?.message || err)));
-    throw err;
-  } finally {
-    try { reader.cancel(); } catch {}
+    try {
+      onError?.(err);
+    } catch {}
   }
 }
 
-export default { generateLocalPlan, streamLocalGenerate };
+export default {
+  generateLocalPlan,
+  streamLocalGenerate,
+};
 

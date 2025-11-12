@@ -43,3 +43,10 @@ RepoWriter/server/.env
 
 # Dev logs
 RepoWriter/web/preview.log
+
+# RepoWriter runtime artifacts and preview build output
+.repowriter_pids/
+RepoWriter/server/server.log
+RepoWriter/test/openaiMock.log
+RepoWriter/web/preview.log
+RepoWriter/web/dist/

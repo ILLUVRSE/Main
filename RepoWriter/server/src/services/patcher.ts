@@ -2,12 +2,10 @@
  * patcher.ts
  *
  * Apply unified diffs or full-file content patches safely to the repository.
- * Supports modes:
- *   - "dry": validate and simulate changes (no writes)
- *   - "apply": write files, stage and commit changes, and return rollback metadata
- *   - "rollback": restore previousContents (used to undo an apply)
+ * Added: applyPatchesAndPush helper that applies patches, commits, and optionally
+ * creates a branch/pushes and opens a PR using gitHub helpers.
  *
- * The applyPatches API returns structured metadata that can be used to rollback.
+ * Existing behavior preserved.
  */
 
 import fs from "fs/promises";
@@ -20,6 +18,7 @@ import {
   GIT_USER_EMAIL,
   GITHUB_REMOTE
 } from "../config.js";
+import { createBranchCommitPushPR } from "./gitHub.js";
 
 export type PatchInput = {
   path: string;
@@ -212,5 +211,101 @@ export async function applyPatches(
   }
 }
 
-export default { applyPatches };
+/**
+ * applyPatchesAndPush
+ *
+ * Convenience helper:
+ *  - Applies patches (mode must be 'apply'; other modes will be forwarded to applyPatches).
+ *  - If pushOptions provided, will create a branch, commit any applied files (applyPatches already commits),
+ *    push the branch and open a PR via gitHub.createBranchCommitPushPR.
+ *
+ * pushOptions:
+ *  {
+ *    branchName?: string; // if omitted, auto-generate repowriter/<timestamp>
+ *    commitMessage?: string; // override the default commit message
+ *    prBase?: string; // default "main"
+ *    prTitle?: string;
+ *    prBody?: string;
+ *    authorName?: string;
+ *    authorEmail?: string;
+ *    pushRemote?: string;
+ *    token?: string; // optional GitHub token
+ *  }
+ *
+ * Returns an object combining ApplyResult and optional PR metadata.
+ */
+export async function applyPatchesAndPush(
+  patches: PatchInput[],
+  mode: "dry" | "apply" | "rollback" = "apply",
+  pushOptions?: {
+    branchName?: string;
+    commitMessage?: string;
+    prBase?: string;
+    prTitle?: string;
+    prBody?: string;
+    authorName?: string;
+    authorEmail?: string;
+    pushRemote?: string;
+    token?: string;
+  }
+): Promise<ApplyResult & { prUrl?: string; prNumber?: number; branch?: string }> {
+  // If mode !== 'apply', just delegate to applyPatches
+  if (mode !== "apply") {
+    const res = await applyPatches(patches, mode);
+    return res;
+  }
+
+  // Apply patches (this will write files and commit them)
+  const applyRes = await applyPatches(patches, "apply");
+  if (!applyRes.ok) {
+    return applyRes;
+  }
+
+  // If no pushOptions or pushOptions.branchName not provided and no PR desired, just return applyRes
+  if (!pushOptions) {
+    return applyRes;
+  }
+
+  // Prepare branch name
+  const branchName = pushOptions.branchName || `repowriter/${Date.now()}`;
+
+  // Determine files to include in commit/pr
+  const files = (applyRes.applied || []).map(a => a.path);
+
+  // If commitMessage provided, we want to create a new branch based on current HEAD and commit the files again with provided message.
+  // But applyPatches already committed. To keep history clean, we'll create a new branch from current HEAD and re-commit the staged files if needed.
+  // Strategy:
+  // 1) Create a new branch from current HEAD
+  // 2) Commit the files with the provided commitMessage (or reuse existing commit message)
+  // 3) Push branch and create PR
+
+  try {
+    const commitMessage = pushOptions.commitMessage || (files.length === 1 ? `repowriter: apply ${files[0]}` : `repowriter: apply ${files.length} files`);
+    const authorName = pushOptions.authorName;
+    const authorEmail = pushOptions.authorEmail;
+
+    const ghRes = await createBranchCommitPushPR(
+      branchName,
+      files,
+      commitMessage,
+      pushOptions.prBase || "main",
+      pushOptions.prTitle || commitMessage,
+      pushOptions.prBody || "",
+      {
+        authorName,
+        authorEmail,
+        pushRemote: pushOptions.pushRemote,
+        token: pushOptions.token
+      }
+    );
+
+    return Object.assign({}, applyRes, { prUrl: ghRes.prUrl, prNumber: ghRes.prNumber, branch: ghRes.branch });
+  } catch (err: any) {
+    // Return applyRes but include error info
+    const msg = String(err?.message || err);
+    return Object.assign({}, applyRes, { ok: false, errors: (applyRes.errors || []).concat([`push/pr failed: ${msg}`]) });
+  }
+}
+
+export default { applyPatches, applyPatchesAndPush };
 

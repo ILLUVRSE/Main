@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
-import MonacoEditorWrapper from "./MonacoEditorWrapper";
-import DiffViewer from "./DiffViewer";
+import MonacoEditorWrapper from "./MonacoEditorWrapper.tsx";
+import DiffViewer from "./DiffViewer.tsx";
 
 type Patch = {
   path?: string;

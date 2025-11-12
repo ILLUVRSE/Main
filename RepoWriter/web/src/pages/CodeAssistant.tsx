@@ -1,14 +1,14 @@
 // RepoWriter/web/src/pages/CodeAssistant.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import api from "../services/api";
-import ContextSelector from "../components/ContextSelector";
-import ValidationResults from "../components/ValidationResults";
-import ClarifyDialog from "../components/ClarifyDialog";
-import TaskBoard from "../components/TaskBoard";
-import PatchPreview from "../components/PatchPreview";
-import MonacoEditorWrapper from "../components/MonacoEditorWrapper";
-import PRResult from "../components/PRResult";
-import ApiStatus from "../components/ApiStatus";
+import api from "../services/api.ts";
+import ContextSelector from "../components/ContextSelector.tsx";
+import ValidationResults from "../components/ValidationResults.tsx";
+import ClarifyDialog from "../components/ClarifyDialog.tsx";
+import TaskBoard from "../components/TaskBoard.tsx";
+import PatchPreview from "../components/PatchPreview.tsx";
+import MonacoEditorWrapper from "../components/MonacoEditorWrapper.tsx";
+import PRResult from "../components/PRResult.tsx";
+import ApiStatus from "../components/ApiStatus.tsx";
 
 type PatchObj = { path: string; content?: string; diff?: string };
 

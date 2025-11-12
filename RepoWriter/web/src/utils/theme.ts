@@ -7,7 +7,7 @@
  * - Exports: getTheme(), setTheme(), toggleTheme(), useTheme() React hook
  *
  * Usage:
- *  import { setTheme, getTheme, toggleTheme, useTheme } from "../utils/theme";
+ *  import { setTheme, getTheme, toggleTheme, useTheme } from "../utils/theme.ts";
  *  setTheme("dark");
  *  const [theme, setTheme] = useTheme();
  */

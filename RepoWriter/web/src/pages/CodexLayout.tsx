@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import LeftTaskBoard from "../components/LeftTaskBoard";
-import CodeAssistant from "../pages/CodeAssistant";
-import SettingsDrawer from "../components/SettingsDrawer";
-import CommandPalette from "../components/CommandPalette";
-import useBackend from "../hooks/useBackend";
+import LeftTaskBoard from "../components/LeftTaskBoard.tsx";
+import CodeAssistant from "../pages/CodeAssistant.tsx";
+import SettingsDrawer from "../components/SettingsDrawer.tsx";
+import CommandPalette from "../components/CommandPalette.tsx";
+import useBackend from "../hooks/useBackend.ts";
 import "../theme/illuvrse.css";
 
 /**

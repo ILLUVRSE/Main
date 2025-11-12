@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import Editor from "../components/Editor";
+import Editor from "../components/Editor.tsx";
 
 type RepoFile = {
   path: string;

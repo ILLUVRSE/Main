@@ -1,17 +1,15 @@
+// RepoWriter/web/src/components/DiffViewer.tsx
 import React, { useEffect, useRef } from "react";
 import "diff2html/bundles/css/diff2html.min.css";
-import { Diff2Html } from "diff2html";
 
 /**
- * DiffViewer
+ * Robust DiffViewer that dynamically imports diff2html and handles
+ * different module export shapes (named export, default export, or namespace).
  *
- * Renders a unified diff string using diff2html. Supports side-by-side or inline rendering.
- *
- * Props:
- *  - diff: string (unified diff)
- *  - sideBySide?: boolean (default: true)
- *  - className?: string
+ * This avoids the runtime error: "doesn't provide an export named: 'Diff2Html'"
+ * which can happen depending on how the package is bundled / resolved by Vite.
  */
+
 type Props = {
   diff?: string;
   sideBySide?: boolean;
@@ -23,36 +21,55 @@ export default function DiffViewer({ diff = "", sideBySide = true, className }: 
 
   useEffect(() => {
     if (!rootRef.current) return;
-
     if (!diff || diff.trim().length === 0) {
       rootRef.current.innerHTML = `<div style="padding:12px;color:var(--muted)">No diff to display</div>`;
       return;
     }
 
-    try {
-      const html = Diff2Html.getPrettyHtml(diff, {
-        inputFormat: "diff",
-        outputFormat: sideBySide ? "side-by-side" : "line-by-line",
-        drawFileList: false,
-        matching: "lines",
-        synchronisedScroll: true,
-        highlight: true,
-      });
+    let cancelled = false;
 
-      // Insert the generated HTML
-      rootRef.current.innerHTML = html;
+    (async () => {
+      try {
+        // dynamic import so we can adapt to multiple export shapes
+        // (named export, default export, or the module object)
+        const mod: any = await import("diff2html");
+        // prefer named export, then default, then module itself
+        const D = mod?.Diff2Html ?? mod?.default ?? mod;
 
-      // Small tweak: ensure monospaced font in code areas (defensive)
-      const codeBlocks = rootRef.current.querySelectorAll(".d2h-code");
-      codeBlocks.forEach((el) => {
-        (el as HTMLElement).style.fontFamily = "var(--mono)";
-        (el as HTMLElement).style.fontSize = "13px";
-      });
-    } catch (err) {
-      rootRef.current.innerHTML = `<pre style="padding:12px;color:var(--danger);white-space:pre-wrap">Failed to render diff: ${String(
-        (err as Error)?.message || err
-      )}</pre>`;
-    }
+        if (!D || typeof D.getPrettyHtml !== "function") {
+          throw new Error("diff2html: no getPrettyHtml() available on module");
+        }
+
+        const html = D.getPrettyHtml(diff, {
+          inputFormat: "diff",
+          outputFormat: sideBySide ? "side-by-side" : "line-by-line",
+          drawFileList: false,
+          matching: "lines",
+          synchronisedScroll: true,
+          highlight: true,
+        });
+
+        if (cancelled || !rootRef.current) return;
+        // Insert generated HTML
+        rootRef.current.innerHTML = html;
+
+        // Small tweak: ensure monospaced font in code areas (defensive)
+        const codeBlocks = rootRef.current.querySelectorAll(".d2h-code");
+        codeBlocks.forEach((el) => {
+          (el as HTMLElement).style.fontFamily = "var(--mono)";
+          (el as HTMLElement).style.fontSize = "13px";
+        });
+      } catch (err: any) {
+        if (!rootRef.current) return;
+        rootRef.current.innerHTML = `<pre style="padding:12px;color:var(--danger);white-space:pre-wrap">Failed to render diff: ${String(
+          err?.message ?? err
+        )}</pre>`;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [diff, sideBySide]);
 
   function downloadPatch() {

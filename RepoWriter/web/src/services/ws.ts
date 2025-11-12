@@ -6,7 +6,7 @@
  * WebSocket at /ws/notifications (or configurable path).
  *
  * Usage:
- *  import notificationsClient from "../services/ws";
+ *  import notificationsClient from "../services/ws.ts";
  *  notificationsClient.addListener((msg) => { ... });
  *  notificationsClient.connect();
  *

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import Editor from "../components/Editor";
-import useToast from "../hooks/useToast";
+import Editor from "../components/Editor.tsx";
+import useToast from "../hooks/useToast.ts";
 
 /**
  * EditorPage

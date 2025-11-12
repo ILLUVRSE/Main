@@ -7,37 +7,13 @@
 [33m[nodemon] watching path(s): src/**/*[39m
 [33m[nodemon] watching extensions: ts[39m
 [32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
-(node:143026) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+(node:201050) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
 --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
 (Use `node --trace-warnings ...` to show where the warning was created)
 [Env] OPENAI_API_KEY prefix: sk-...
 [Env] OPENAI_PROJECT_ID: proj_3VQGwRX1xACgLuhU60iR3g2k
-[RepoWriter] server listening on http://localhost:7071
+[startup error] src/services/rollback.ts(139,73): error TS2345: Argument of type '{ error: string; }' is not assignable to parameter of type 'string'.
+src/services/rollback.ts(156,60): error TS2345: Argument of type '{ error: string; }' is not assignable to parameter of type 'string'.
+src/services/rollback.ts(160,56): error TS2345: Argument of type '{ error: string; }' is not assignable to parameter of type 'string'.
+
 [31m[nodemon] app crashed - waiting for file changes before starting...[39m
-
-  #  Node.js[143012]: void node::ResetStdio() at ../src/node.cc:751
-  #  Assertion failed: !(err != 0) || (err == -1 && (*__errno_location ()) == 1)
-
------ Native stack trace -----
-
- 1: 0xcb2ef7 node::Assert(node::AssertionInfo const&) [node]
- 2: 0xc5f924  [node]
- 3: 0x722c39245495  [/lib/x86_64-linux-gnu/libc.so.6]
- 4: 0x722c39245610 on_exit [/lib/x86_64-linux-gnu/libc.so.6]
- 5: 0xbbf62f node::DefaultProcessExitHandlerInternal(node::Environment*, node::ExitCode) [node]
- 6: 0xc1ef0f node::Environment::Exit(node::ExitCode) [node]
- 7: 0xf4e44f v8::internal::FunctionCallbackArguments::Call(v8::internal::CallHandlerInfo) [node]
- 8: 0xf4ecbd  [node]
- 9: 0xf4f185 v8::internal::Builtin_HandleApiCall(int, unsigned long*, v8::internal::Isolate*) [node]
-10: 0x1959df6  [node]
-
-  #  Node.js[143012]: void node::ResetStdio() at ../src/node.cc:751
-  #  Assertion failed: !(err != 0) || (err == -1 && (*__errno_location ()) == 1)
-
------ Native stack trace -----
-
- 1: 0xcb2ef7 node::Assert(node::AssertionInfo const&) [node]
- 2: 0xc5f924  [node]
- 3: 0xc5ff3d node::TrapWebAssemblyOrContinue(int, siginfo_t*, void*) [node]
- 4: 0x722c39242520  [/lib/x86_64-linux-gnu/libc.so.6]
- 5: 0x233a9160 

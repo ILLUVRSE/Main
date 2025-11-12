@@ -1,78 +1,63 @@
 /**
- * logger.ts
+ * logger.js
  *
- * Minimal structured logger and request-id middleware for RepoWriter.
- * - requestIdMiddleware attaches X-Request-Id to responses and res.locals.requestId.
- * - logger exposes info/warn/error helpers that include timestamp and request id when available.
+ * Lightweight telemetry/logger shim for RepoWriter.
  *
- * This is intentionally dependency-free and small; swap in a full-featured logger (pino/winston)
- * later if you want structured outputs or JSON logs.
+ * Exports:
+ *   - logInfo(reqOrMeta?, msg)
+ *   - logWarn(reqOrMeta?, msg)
+ *   - logError(reqOrMeta?, msg)
+ *
+ * Accepts either an Express `req` object (reads method/path and some headers) or a plain metadata object.
+ * Currently just prints to console; adapt to your telemetry backend later.
  */
 
-import { Request, Response, NextFunction } from "express";
-
-export function generateRequestId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
-}
-
-/** Attach a request id for tracing and set the header. */
-export function requestIdMiddleware(req: Request, res: Response, next: NextFunction) {
+function extractReqMeta(reqOrMeta) {
+  if (!reqOrMeta) return {};
+  // If this looks like an Express request (has method and url), extract simple metadata
   try {
-    const headerId = (req.headers["x-request-id"] as string) || "";
-    const id = headerId.trim() || generateRequestId();
-    // expose on res.locals so other code can use it without modifying Request type
-    (res.locals as any).requestId = id;
-    res.setHeader("X-Request-Id", id);
-  } catch (err) {
-    // fail-open: don't block requests if middleware errors
-    console.warn("[requestIdMiddleware] failed to set request id", err);
-  }
-  next();
+    if (reqOrMeta && typeof reqOrMeta === "object" && reqOrMeta.method && (reqOrMeta.url || reqOrMeta.path)) {
+      return {
+        method: reqOrMeta.method,
+        path: reqOrMeta.url || reqOrMeta.path,
+        ip: reqOrMeta.ip || (reqOrMeta.headers && reqOrMeta.headers["x-forwarded-for"]) || undefined,
+        userAgent: reqOrMeta.headers && (reqOrMeta.headers["user-agent"] || reqOrMeta.headers["User-Agent"])
+      };
+    }
+  } catch {}
+  // Otherwise return shallow copy of object
+  if (typeof reqOrMeta === "object") return reqOrMeta;
+  return { meta: String(reqOrMeta) };
 }
 
-function formatMessage(level: string, requestId: string | undefined, msg: string, meta?: any) {
+function formatMsg(level, meta, msg) {
   const ts = new Date().toISOString();
-  const idPart = requestId ? ` [${requestId}]` : "";
-  const metaPart = meta ? ` ${JSON.stringify(meta)}` : "";
-  return `[${ts}] [${level.toUpperCase()}]${idPart} ${msg}${metaPart}`;
-}
-
-/** Generic logger that optionally accepts an Express Request or Response to pull a request id. */
-export function logInfo(reqOrMsg: Request | string, maybeMsg?: string, meta?: any) {
-  if (typeof reqOrMsg === "string") {
-    console.info(formatMessage("info", undefined, reqOrMsg, maybeMsg));
-  } else {
-    const id = (reqOrMsg.res && (reqOrMsg.res as any).locals?.requestId) || (reqOrMsg.headers && (reqOrMsg.headers["x-request-id"] as string));
-    const msg = maybeMsg || "";
-    console.info(formatMessage("info", id, msg, meta));
+  let metaStr = "";
+  try {
+    metaStr = meta && Object.keys(meta).length ? JSON.stringify(meta) : "";
+  } catch {
+    metaStr = String(meta);
   }
+  return `[${ts}] [${level}] ${msg}${metaStr ? " | " + metaStr : ""}`;
 }
 
-export function logWarn(reqOrMsg: Request | string, maybeMsg?: string, meta?: any) {
-  if (typeof reqOrMsg === "string") {
-    console.warn(formatMessage("warn", undefined, reqOrMsg, maybeMsg));
-  } else {
-    const id = (reqOrMsg.res && (reqOrMsg.res as any).locals?.requestId) || (reqOrMsg.headers && (reqOrMsg.headers["x-request-id"] as string));
-    const msg = maybeMsg || "";
-    console.warn(formatMessage("warn", id, msg, meta));
-  }
+export function logInfo(reqOrMeta, msg) {
+  const meta = extractReqMeta(reqOrMeta);
+  // eslint-disable-next-line no-console
+  console.info(formatMsg("INFO", meta, msg || ""));
 }
 
-export function logError(reqOrMsg: Request | string, maybeMsg?: string, meta?: any) {
-  if (typeof reqOrMsg === "string") {
-    console.error(formatMessage("error", undefined, reqOrMsg, maybeMsg));
-  } else {
-    const id = (reqOrMsg.res && (reqOrMsg.res as any).locals?.requestId) || (reqOrMsg.headers && (reqOrMsg.headers["x-request-id"] as string));
-    const msg = maybeMsg || "";
-    console.error(formatMessage("error", id, msg, meta));
-  }
+export function logWarn(reqOrMeta, msg) {
+  const meta = extractReqMeta(reqOrMeta);
+  // eslint-disable-next-line no-console
+  console.warn(formatMsg("WARN", meta, msg || ""));
 }
 
-export default {
-  requestIdMiddleware,
-  generateRequestId,
-  info: logInfo,
-  warn: logWarn,
-  error: logError
-};
+export function logError(reqOrMeta, msg) {
+  const meta = extractReqMeta(reqOrMeta);
+  // eslint-disable-next-line no-console
+  console.error(formatMsg("ERROR", meta, msg || ""));
+}
+
+export default { logInfo, logWarn, logError };
 

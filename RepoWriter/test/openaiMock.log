@@ -1,14 +1,26 @@
-node:internal/modules/esm/get_format:189
-  throw new ERR_UNKNOWN_FILE_EXTENSION(ext, filepath);
-        ^
+node:events:502
+      throw er; // Unhandled 'error' event
+      ^
 
-TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".ts" for /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/test/mocks/openaiMock.ts
-    at Object.getFileProtocolModuleFormat [as file:] (node:internal/modules/esm/get_format:189:9)
-    at defaultGetFormat (node:internal/modules/esm/get_format:232:36)
-    at defaultLoad (node:internal/modules/esm/load:145:22)
-    at async ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:543:45)
-    at async ModuleJob._link (node:internal/modules/esm/module_job:148:19) {
-  code: 'ERR_UNKNOWN_FILE_EXTENSION'
+Error: listen EADDRINUSE: address already in use :::9876
+    at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+    at listenInCluster (node:net:1965:12)
+    at Server.listen (node:net:2067:7)
+    at Function.listen (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/node_modules/express/lib/application.js:635:24)
+    at Object.<anonymous> (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/test/openaiMock.js:54:5)
+    at Module._compile (node:internal/modules/cjs/loader:1521:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+    at Module.load (node:internal/modules/cjs/loader:1266:32)
+    at Module._load (node:internal/modules/cjs/loader:1091:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:1944:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:82:21) {
+  code: 'EADDRINUSE',
+  errno: -98,
+  syscall: 'listen',
+  address: '::',
+  port: 9876
 }
 
 Node.js v20.19.5

@@ -1,0 +1,464 @@
+Below is a **complete, no-fluff “100% Completion” criteria** file for the ILLUVRSE Platform.  Put this file in the repo as `ILLUVRSE/Main/FINAL_COMPLETION_CRITERIA.md` (or wherever you prefer). It defines exactly what “done” looks like for the whole platform — module by module, cross-cutting requirements (security, audit, SLOs), testing and governance, and the final end-to-end acceptance.
+
+I kept it strict and measurable: every clause is a pass/fail criterion, and final approval requires the named owners to sign off.
+
+---
+
+# ILLUVRSE — Final Completion Criteria
+
+**Purpose.** This document defines the criteria for **100% completion** of the ILLUVRSE platform. “100%” means: the feature, module and system-level contracts, security, observability, tests, and governance are implemented, verified, documented, deployed (to the target environment), and signed off by the required stakeholders.
+
+**Scope.** All core modules under `ILLUVRSE/Main/` (Kernel, Agent Manager, Memory Layer, Reasoning Graph, Eval Engine, SentinelNet, Marketplace, Finance, AI Infra, Capital, Product & Development, Market & Media) and platform-wide cross-cutting concerns (signing, audit, policy, infra, CI/CD). See repo overview for modules and responsibilities. 
+
+---
+
+## How to read this file
+
+Each section gives a concise, testable set of acceptance checks. A module is **complete** when **all** its checks pass and the module’s `acceptance-criteria.md` is signed by the final approver(s). The platform is **100% complete** when *every* module is complete and all system-level checks below are satisfied.
+
+Final approver for Core modules: **Ryan (SuperAdmin)** unless otherwise noted; other modules list required reviewers in their README. 
+
+---
+
+## Kernel — Minimum completion (must be 100% done)
+
+Kernel is the single source of truth for orchestration, signing, audit and governance. Complete when:
+
+* [ ] **OpenAPI + server**: `openapi.yaml` exists and is implemented by a production-ready Kernel API gateway. Endpoints (at minimum): `POST /kernel/sign`, `POST /kernel/agent`, `POST /kernel/allocate`, `POST /kernel/division`, `GET /kernel/audit/{id}`, `GET /kernel/reason/{node}` are implemented and pass contract tests. 
+* [ ] **RBAC & Auth**: OIDC/SSO for humans and mTLS for service-to-service enforced on all endpoints; SuperAdmin role implemented and tested. 
+* [ ] **Manifest signing**: KMS/HSM integration with Ed25519 signing; `POST /kernel/sign` issues canonical `ManifestSignature` objects. KMS key rotation and key-use audit documented and tested. 
+* [ ] **Audit log**: Kernel emits append-only, chained AuditEvents (prevHash + SHA256 + signature). Audit events are published to Event Bus and archived to S3 with object-lock. End-to-end verification procedure exists and passes. 
+* [ ] **Multisig upgrade flow**: Multi-sig (3-of-5) process for kernel-level upgrades implemented, automated tooling and tests exist. 
+* [ ] **Operational SLOs & runbooks**: documented SLOs, monitoring, and incident runbooks for Kernel.
+* [ ] **Acceptance & sign-off**: Kernel `acceptance-criteria.md` passed and signed by Security Engineer + Ryan.
+
+(Reference Kernel core responsibilities and example flows in Kernel API Spec.) 
+
+---
+
+## Agent Manager — Minimum completion
+
+Agent Manager is the runtime for agents. Complete when:
+
+* [ ] **Spawn / lifecycle**: `POST /api/v1/agent/spawn` creates an agent record and returns `agent_id`; lifecycle actions (start/stop/restart/scale) update status and behave idempotently. 
+* [ ] **Manifest enforcement**: Signed-manifest enforcement for `illuvrse` profile; invalid signatures rejected with 403. 
+* [ ] **Sandbox runner**: Sandbox run API works and returns run status (complete/pass/fail). Sandbox secures runtime and is auditable. 
+* [ ] **Telemetry & audit**: emits metrics and AuditEvents for critical actions. Telemetry aligns with Eval Engine needs. 
+* [ ] **Local dev / Docker**: `docker-compose` dev composition and scripts exist and are verified. 
+* [ ] **Security review**: KMS/signing rules reviewed by Security Engineer.
+* [ ] **Acceptance & sign-off**: tests pass, `acceptance-criteria.md` signed by Ryan + Security Engineer. 
+
+---
+
+## Memory Layer — Minimum completion
+
+Memory Layer is canonical store for memory nodes, embeddings, artifacts. Complete when:
+
+* [ ] **Storage & APIs**: Postgres schema (`memory_nodes`, `artifact`) implemented; Vector DB integration for embeddings and an API (`storeEmbedding`, `searchEmbedding`) working. 
+* [ ] **Artifact guarantees**: S3 artifact storage with checksum; artifact uploads produce stored checksums linked to AuditEvents and `manifestSignatureId`. 
+* [ ] **Retention & legal-hold**: TTL, soft-delete, legal-hold semantics and tests exist. 
+* [ ] **Encryption & access controls**: TLS everywhere, encryption-at-rest, RBAC for read/write; PII redaction and SentinelNet gating. 
+* [ ] **Backup & recovery**: backup/restore tested for Postgres and Vector DB; replay procedure from audit archives validated. 
+* [ ] **Acceptance & sign-off**: tests pass, Security Engineer review, Ryan sign-off.
+
+---
+
+## Reasoning Graph — Minimum completion
+
+Reasoning Graph organizes causal decision traces. Complete when:
+
+* [ ] **Models & API**: nodes/edges/traces defined and write/read APIs implemented. Writes only accepted via Kernel (mTLS + RBAC). 
+* [ ] **Explainability & snapshots**: explainable traces, signed snapshots with verifiable hash/signature. 
+* [ ] **Append-only corrections**: corrections are append-only and produce AuditEvents. 
+* [ ] **Integration tests**: end-to-end tests with Kernel, Eval Engine, Agent Manager and SentinelNet pass.
+* [ ] **Acceptance & sign-off**: tests pass, Security Engineer + Ryan sign-off. 
+
+---
+
+## Eval Engine & Resource Allocator — Minimum completion
+
+Eval Engine must convert telemetry into promotion/allocations and interact with SentinelNet. Complete when:
+
+* [ ] **Scoring & ingestion**: Eval ingestion accepts EvalReports and scores correctly; scoring logic covered by tests. 
+* [ ] **Promotion & allocation flows**: Promotion events are written to Reasoning Graph and Audit Bus; Resource Allocator interacts with Kernel and Finance for compute/capital assignments. 
+* [ ] **Policy gating**: SentinelNet checks invoked and can block promotions; canary flows and rollbacks implemented. 
+* [ ] **Acceptance & sign-off**: scoring correctness, policy enforcement tests, and operational SLOs validated; Ryan sign-off. 
+
+---
+
+## SentinelNet — Minimum completion
+
+SentinelNet is the policy & enforcement engine. Complete when:
+
+* [ ] **Synchronous checks**: low-latency Kernel pre-action checks implemented with explainable `policyCheck` events. 
+* [ ] **Event stream detection**: subscribes to Event Bus for asynchronous detection and emits signed policy audit events. 
+* [ ] **Policy lifecycle tooling**: versioning, simulation/dry-run, canary rollouts, multisig gating for high-severity changes. 
+* [ ] **SLOs & observability**: latency metrics (p50/p95/p99), false-positive monitoring, runbooks. 
+* [ ] **Acceptance & sign-off**: Security Engineer + Ryan sign-off.
+
+---
+
+## AI & Infrastructure — Minimum completion
+
+AI Infra manages model lifecycle and promotions. Complete when:
+
+* [ ] **Reproducible training**: training orchestration records full provenance (codeRef, container digest, dataset checksums, hyperparams). 
+* [ ] **Model registry & lineage**: registry stores lineage, metrics, signerId. Promotion/canary/rollback supported. 
+* [ ] **SentinelNet gating**: promotions require SentinelNet clearance and ManifestSignature for staging/prod. 
+* [ ] **Serving & infra**: serving stack, canaries, drift detection and SLOs implemented.
+* [ ] **Acceptance & sign-off**: ML Lead + Security Engineer + Ryan sign-off.
+
+---
+
+## Marketplace — Minimum completion
+
+Marketplace is customer-facing SKU delivery. Complete when:
+
+* [ ] **Catalog & checkout**: listing, preview sandbox, checkout and secure DRM/encrypted delivery implemented. 
+* [ ] **Manifest verification**: validates Kernel-signed manifests before listing. 
+* [ ] **Payments & Finance integration**: Stripe used for payments (PCI compliance), Finance ledger entries and royalty splits work. 
+* [ ] **Audit & delivery**: license/delivery artifacts signed and stored with audit trail; preview sandboxes auditable. 
+* [ ] **Acceptance & sign-off**: Security + Finance + Ryan sign-off.
+
+---
+
+## Finance — Minimum completion
+
+Finance is the double-entry ledger and audit proof engine. Complete when:
+
+* [ ] **Ledger correctness**: double-entry journal API that ensures every posted journal entry balances; reconciliation tooling exists. 
+* [ ] **Signed proofs**: KMS/HSM-signed proofs for ledger ranges and signed export formats for auditors. 
+* [ ] **Isolation & governance**: isolated high-trust environment, multi-sig for high-value actions, mTLS & OIDC for access. 
+* [ ] **Acceptance & sign-off**: Finance Lead + Security Engineer + Ryan sign-off.
+
+---
+
+## Capital, Product & MarketMedia — Minimum completion
+
+Each module must implement its spec and acceptance criteria, integrate with Kernel, SentinelNet and Finance, and be auditable.
+
+* Product & Development **must** implement idea pipeline, handoff → Kernel manifest, store evidence in Memory, feed Eval Engine and Reasoning Graph, and require multisig for high-budget handoffs. 
+* Capital must implement deal registration, underwriting, allocation + multisig flows and integrate with Finance and SentinelNet. 
+* Market & Media must implement asset lifecycle, campaign orchestration, integration with Eval and Finance, and SentinelNet content checks. 
+
+All these modules are complete when their `acceptance-criteria.md` tests pass and required reviewers sign off.
+
+---
+
+## RepoWriter and IDEA (product handoff automation)
+
+These automation pieces are required for a full production workflow:
+
+* [ ] **IDEA service**: The UI + service implements `/product/idea`, scoring, `/product/handoff` that creates a Kernel manifest and stores evidence in Memory. Handoff triggers multisig when required. 
+* [ ] **RepoWriter** (automation): A service that commits Kernel-signed manifests / SKUs / deployment templates into GitHub, triggers CI/preview deploys, attaches `manifestSignatureId` and emits an AuditEvent. RepoWriter must *not* behave as the authority to sign; it only commits Kernel-signed content. (See kernel & product handoff specs.) 
+* [ ] **CommandPad integration**: CommandPad multisig flow used to approve handoff/production commits; approvals recorded as AuditEvents. Kernel must sign manifests prior to RepoWriter commit or provide a designated signing proof. 
+
+---
+
+## Cross-cutting, non-functional & compliance requirements
+
+These are platform-wide and mandatory:
+
+* [ ] **Audit chain**: every critical action (manifest sign, commit, promotion, allocation, policy decision) emits an AuditEvent on the Event Bus. Events are chained (prevHash), signed, and archived to S3 with object-lock; verification tooling exists to validate the chain. 
+* [ ] **Security**: OIDC/SSO for humans; mTLS for services; KMS/HSM for all signing. High-value/multi-party actions require multisig. No private keys in code. 
+* [ ] **PII & SentinelNet**: PII detection, legal-hold, and SentinelNet gating for products containing PII. SentinelNet sim/dry-run + canary modes exist.  
+* [ ] **Observability & SLOs**: platform SLOs documented (p95 targets, etc.) for Kernel, SentinelNet, Memory, and Eval. All services have metrics, traces, and dashboards. 
+* [ ] **Backup & DR**: tested backups and recovery for Postgres, Vector DB and Audit archives. Runbook for rebuild from audit archives exists. 
+* [ ] **CI / CD & reproducible builds**: CI pipelines reproduce server and infra artifacts; model training and serving are deterministic enough to produce reproducible builds and signed artifacts. 
+* [ ] **Legal & compliance**: Payment PCI handled by Stripe, legal reviews for Marketplace and product launch, export control and geofencing implemented for Marketplace where required. 
+
+---
+
+## Testing matrix (must pass)
+
+For each module and system-level integration:
+
+* Unit tests: **100% of critical logic** covered.
+* Integration tests: external dependencies (KMS stubbed) verified.
+* End-to-end tests: One or more E2E scenarios exercised:
+
+  1. Product idea → handoff → Kernel manifest signed → RepoWriter commit → CI preview → Marketplace listing → purchase → Finance ledger -> delivery -> audit chain verified.
+  2. Agent spawn → write to Memory → Eval scoring → promotion → Resource allocation → Agent Manager apply -> audit & reasoning graph trace.
+* Performance tests: SLO verification (p95/p99) for synchronous flows (Kernel sign, SentinelNet check).
+* Chaos / disaster tests: backup restore and failure-mode tests for Event Bus, Memory, and Kernel.
+* Security tests: pen tests, secrets scanning, key compromise scenario tests.
+
+All tests must run in CI and pass in a staging environment that mirrors production.
+
+---
+
+## Documentation & runbooks (required artifacts)
+
+Every module must ship the following files and they must be accurate:
+
+* `README.md` (module overview).
+* `acceptance-criteria.md` (module tests & sign-off checklist).
+* `openapi.yaml` or `api.md` (formal API contracts).
+* `deployment.md` (infra, high-availability, certs, KMS, canary/rollback).
+* `security-governance.md` or equivalent (RBAC, KMS, multisig).
+* `audit-log-spec.md` (audit event format and verification).
+* `operational-runbook.md` (runbooks & runbook tests).
+
+These files are referenced in multiple module READMEs and are required for sign-off.  
+
+---
+
+## Sign-off matrix (final authority)
+
+* **Security Engineer** — signs off on KMS/HSM, multisig, SentinelNet policy lifecycle, RBAC and key material handling.
+* **Finance Lead** — signs off on Finance integrations, ledger proofs, and Marketplace settlement.
+* **ML Lead** — signs off on AI Infra reproducibility and model promotion policies.
+* **Ryan (SuperAdmin)** — final approver for Core modules and final system acceptance. (All modules list Ryan as final approver unless otherwise noted.) 
+
+**Final system acceptance** requires written sign-off from the above parties and a passing audit verification exercise (see next section).
+
+---
+
+## Final audit verification exercise (must pass)
+
+Before declaring platform 100% complete, perform a supervised audit run:
+
+1. Run the **audit replay test**: select a range of AuditEvents from Event Bus, verify chain (prevHash, SHA256, signature) and that all events are archived and verifiable from S3 object-lock. (Kernel audit + Memory artifact checks.) 
+2. Run the **handoff → marketplace end-to-end flow** described above. Verify Kernel signature is present on manifest, RepoWriter commit metadata references the manifestSignatureId, CI preview deploys, Marketplace validates the manifest and Finance posts correct ledger entries.  
+3. Run the **policy gating test**: SentinelNet blocks an unsafe action in synchronous check; policyCheck event emitted and logged. 
+4. Run **privacy / legal test**: attempt to publish PII-containing product without SentinelNet approval — must be blocked. 
+
+All steps must be independently validated by Security or Audit team and recorded as signed AuditEvents.
+
+---
+
+## Definition of “100% complete” — one-paragraph summary
+
+The ILLUVRSE platform is **100% complete** when every core module’s acceptance criteria pass, cross-cutting requirements (signing, audit, mTLS, OIDC, KMS/HSM, multisig) are implemented and independently verified, all modules integrate end-to-end in staging with successful E2E scenarios (product handoff → Kernel signing → RepoWriter commit → Marketplace flow; agent lifecycle → eval → allocation), performance & failure-mode tests pass, documentation and runbooks exist, and the final sign-offs from Security Engineer, Finance Lead / ML Lead (where applicable) and Ryan (SuperAdmin) are present. The entire audit chain must be verifiable and archived. 
+
+# ILLUVRSE — Final Completion Criteria
+
+**Purpose.** This document defines the criteria for **100% completion** of the ILLUVRSE platform. “100%” means: the feature, module and system-level contracts, security, observability, tests, and governance are implemented, verified, documented, deployed to the target environment, and signed off by the required stakeholders.
+
+**Scope.** All core modules under `ILLUVRSE/Main/` (Kernel, Agent Manager, Memory Layer, Reasoning Graph, Eval Engine, SentinelNet, Marketplace, Finance, AI Infra, Capital, Product & Development, Market & Media) and platform-wide cross-cutting concerns (signing, audit, policy, infra, CI/CD).
+
+---
+
+## How to read this file
+
+Each section gives a concise, testable set of acceptance checks. A module is **complete** when **all** its checks pass and the module’s `acceptance-criteria.md` is signed by the final approver(s). The platform is **100% complete** when *every* module is complete and all system-level checks below are satisfied.
+
+Final approver for Core modules: **Ryan (SuperAdmin)** unless otherwise noted.
+
+---
+
+## Kernel — Minimum completion (must be 100% done)
+
+Kernel is the single source of truth for orchestration, signing, audit and governance. Complete when:
+
+* [ ] **OpenAPI + server**: `openapi.yaml` exists and is implemented by a production-ready Kernel API gateway. Endpoints (at minimum): `POST /kernel/sign`, `POST /kernel/agent`, `POST /kernel/allocate`, `POST /kernel/division`, `GET /kernel/audit/{id}`, `GET /kernel/reason/{node}` are implemented and pass contract tests.
+* [ ] **RBAC & Auth**: OIDC/SSO for humans and mTLS for service-to-service enforced on all endpoints; SuperAdmin role implemented and tested.
+* [ ] **Manifest signing**: KMS/HSM integration with Ed25519 signing; `POST /kernel/sign` issues canonical `ManifestSignature` objects. KMS key rotation and key-use audit documented and tested.
+* [ ] **Audit log**: Kernel emits append-only, chained AuditEvents (prevHash + SHA256 + signature). Audit events are published to Event Bus and archived to S3 with object-lock. End-to-end verification procedure exists and passes.
+* [ ] **Multisig upgrade flow**: Multi-sig (3-of-5) process for kernel-level upgrades implemented, automated tooling and tests exist.
+* [ ] **Operational SLOs & runbooks**: documented SLOs, monitoring, and incident runbooks for Kernel.
+* [ ] **Acceptance & sign-off**: Kernel `acceptance-criteria.md` passed and signed by Security Engineer + Ryan.
+
+---
+
+## Agent Manager — Minimum completion
+
+Agent Manager is the runtime for agents. Complete when:
+
+* [ ] **Spawn / lifecycle**: `POST /api/v1/agent/spawn` creates an agent record and returns `agent_id`; lifecycle actions (start/stop/restart/scale) update status and behave idempotently.
+* [ ] **Manifest enforcement**: Signed-manifest enforcement for `illuvrse` profile; invalid signatures rejected with 403.
+* [ ] **Sandbox runner**: Sandbox run API works and returns run status (complete/pass/fail). Sandbox secures runtime and is auditable.
+* [ ] **Telemetry & audit**: emits metrics and AuditEvents for critical actions. Telemetry aligns with Eval Engine needs.
+* [ ] **Local dev / Docker**: `docker-compose` dev composition and scripts exist and are verified.
+* [ ] **Security review**: KMS/signing rules reviewed by Security Engineer.
+* [ ] **Acceptance & sign-off**: tests pass, `acceptance-criteria.md` signed by Ryan + Security Engineer.
+
+---
+
+## Memory Layer — Minimum completion
+
+Memory Layer is canonical store for memory nodes, embeddings, artifacts. Complete when:
+
+* [ ] **Storage & APIs**: Postgres schema (`memory_nodes`, `artifact`) implemented; Vector DB integration for embeddings and an API (`storeEmbedding`, `searchEmbedding`) working.
+* [ ] **Artifact guarantees**: S3 artifact storage with checksum; artifact uploads produce stored checksums linked to AuditEvents and `manifestSignatureId`.
+* [ ] **Retention & legal-hold**: TTL, soft-delete, legal-hold semantics and tests exist.
+* [ ] **Encryption & access controls**: TLS everywhere, encryption-at-rest, RBAC for read/write; PII redaction and SentinelNet gating.
+* [ ] **Backup & recovery**: backup/restore tested for Postgres and Vector DB; replay procedure from audit archives validated.
+* [ ] **Acceptance & sign-off**: tests pass, Security Engineer review, Ryan sign-off.
+
+---
+
+## Reasoning Graph — Minimum completion
+
+Reasoning Graph organizes causal decision traces. Complete when:
+
+* [ ] **Models & API**: nodes/edges/traces defined and write/read APIs implemented. Writes only accepted via Kernel (mTLS + RBAC).
+* [ ] **Explainability & snapshots**: explainable traces, signed snapshots with verifiable hash/signature.
+* [ ] **Append-only corrections**: corrections are append-only and produce AuditEvents.
+* [ ] **Integration tests**: end-to-end tests with Kernel, Eval Engine, Agent Manager and SentinelNet pass.
+* [ ] **Acceptance & sign-off**: tests pass, Security Engineer + Ryan sign-off.
+
+---
+
+## Eval Engine & Resource Allocator — Minimum completion
+
+Eval Engine must convert telemetry into promotion/allocations and interact with SentinelNet. Complete when:
+
+* [ ] **Scoring & ingestion**: Eval ingestion accepts EvalReports and scores correctly; scoring logic covered by tests.
+* [ ] **Promotion & allocation flows**: Promotion events are written to Reasoning Graph and Audit Bus; Resource Allocator interacts with Kernel and Finance for compute/capital assignments.
+* [ ] **Policy gating**: SentinelNet checks invoked and can block promotions; canary flows and rollbacks implemented.
+* [ ] **Acceptance & sign-off**: scoring correctness, policy enforcement tests, and operational SLOs validated; Ryan sign-off.
+
+---
+
+## SentinelNet — Minimum completion
+
+SentinelNet is the policy & enforcement engine. Complete when:
+
+* [ ] **Synchronous checks**: low-latency Kernel pre-action checks implemented with explainable `policyCheck` events.
+* [ ] **Event stream detection**: subscribes to Event Bus for asynchronous detection and emits signed policy audit events.
+* [ ] **Policy lifecycle tooling**: versioning, simulation/dry-run, canary rollouts, multisig gating for high-severity changes.
+* [ ] **SLOs & observability**: latency metrics (p50/p95/p99), false-positive monitoring, runbooks.
+* [ ] **Acceptance & sign-off**: Security Engineer + Ryan sign-off.
+
+---
+
+## AI & Infrastructure — Minimum completion
+
+AI Infra manages model lifecycle and promotions. Complete when:
+
+* [ ] **Reproducible training**: training orchestration records full provenance (codeRef, container digest, dataset checksums, hyperparams).
+* [ ] **Model registry & lineage**: registry stores lineage, metrics, signerId. Promotion/canary/rollback supported.
+* [ ] **SentinelNet gating**: promotions require SentinelNet clearance and ManifestSignature for staging/prod.
+* [ ] **Serving & infra**: serving stack, canaries, drift detection and SLOs implemented.
+* [ ] **Acceptance & sign-off**: ML Lead + Security Engineer + Ryan sign-off.
+
+---
+
+## Marketplace — Minimum completion
+
+Marketplace is customer-facing SKU delivery. Complete when:
+
+* [ ] **Catalog & checkout**: listing, preview sandbox, checkout and secure DRM/encrypted delivery implemented.
+* [ ] **Manifest verification**: validates Kernel-signed manifests before listing.
+* [ ] **Payments & Finance integration**: Stripe used for payments (PCI compliance), Finance ledger entries and royalty splits work.
+* [ ] **Audit & delivery**: license/delivery artifacts signed and stored with audit trail; preview sandboxes auditable.
+* [ ] **Acceptance & sign-off**: Security + Finance + Ryan sign-off.
+
+---
+
+## Finance — Minimum completion
+
+Finance is the double-entry ledger and audit proof engine. Complete when:
+
+* [ ] **Ledger correctness**: double-entry journal API that ensures every posted journal entry balances; reconciliation tooling exists.
+* [ ] **Signed proofs**: KMS/HSM-signed proofs for ledger ranges and signed export formats for auditors.
+* [ ] **Isolation & governance**: isolated high-trust environment, multi-sig for high-value actions, mTLS & OIDC for access.
+* [ ] **Acceptance & sign-off**: Finance Lead + Security Engineer + Ryan sign-off.
+
+---
+
+## Capital, Product & MarketMedia — Minimum completion
+
+Each module must implement its spec and acceptance criteria, integrate with Kernel, SentinelNet and Finance, and be auditable.
+
+* Product & Development **must** implement idea pipeline, handoff → Kernel manifest, store evidence in Memory, feed Eval Engine and Reasoning Graph, and require multisig for high-budget handoffs.
+* Capital must implement deal registration, underwriting, allocation + multisig flows and integrate with Finance and SentinelNet.
+* Market & Media must implement asset lifecycle, campaign orchestration, integration with Eval and Finance, and SentinelNet content checks.
+
+All these modules are complete when their `acceptance-criteria.md` tests pass and required reviewers sign off.
+
+---
+
+## RepoWriter and IDEA (product handoff automation)
+
+These automation pieces are required for a full production workflow:
+
+* [ ] **IDEA service**: The UI + service implements `/product/idea`, scoring, `/product/handoff` that creates a Kernel manifest and stores evidence in Memory. Handoff triggers multisig when required.
+* [ ] **RepoWriter** (automation): A service that commits Kernel-signed manifests / SKUs / deployment templates into GitHub, triggers CI/preview deploys, attaches `manifestSignatureId` and emits an AuditEvent. RepoWriter must *not* behave as the authority to sign; it only commits Kernel-signed content.
+* [ ] **CommandPad integration**: CommandPad multisig flow used to approve handoff/production commits; approvals recorded as AuditEvents. Kernel must sign manifests prior to RepoWriter commit or provide a designated signing proof.
+
+---
+
+## Cross-cutting, non-functional & compliance requirements
+
+These are platform-wide and mandatory:
+
+* [ ] **Audit chain**: every critical action (manifest sign, commit, promotion, allocation, policy decision) emits an AuditEvent on the Event Bus. Events are chained (prevHash), signed, and archived to S3 with object-lock; verification tooling exists to validate the chain.
+* [ ] **Security**: OIDC/SSO for humans; mTLS for services; KMS/HSM for all signing. High-value/multi-party actions require multisig. No private keys in code.
+* [ ] **PII & SentinelNet**: PII detection, legal-hold, and SentinelNet gating for products containing PII. SentinelNet sim/dry-run + canary modes exist.
+* [ ] **Observability & SLOs**: platform SLOs documented (p95 targets, etc.) for Kernel, SentinelNet, Memory, and Eval. All services have metrics, traces, and dashboards.
+* [ ] **Backup & DR**: tested backups and recovery for Postgres, Vector DB and Audit archives. Runbook for rebuild from audit archives exists.
+* [ ] **CI / CD & reproducible builds**: CI pipelines reproduce server and infra artifacts; model training and serving are deterministic enough to produce reproducible builds and signed artifacts.
+* [ ] **Legal & compliance**: Payment PCI handled by Stripe, legal reviews for Marketplace and product launch, export control and geofencing implemented for Marketplace where required.
+
+---
+
+## Testing matrix (must pass)
+
+For each module and system-level integration:
+
+* Unit tests: **100% of critical logic** covered.
+* Integration tests: external dependencies (KMS stubbed) verified.
+* End-to-end tests: One or more E2E scenarios exercised:
+
+  1. Product idea → handoff → Kernel manifest signed → RepoWriter commit → CI preview → Marketplace listing → purchase → Finance ledger -> delivery -> audit chain verified.
+  2. Agent spawn → write to Memory → Eval scoring → promotion → Resource allocation → Agent Manager apply -> audit & reasoning graph trace.
+* Performance tests: SLO verification (p95/p99) for synchronous flows (Kernel sign, SentinelNet check).
+* Chaos / disaster tests: backup restore and failure-mode tests for Event Bus, Memory, and Kernel.
+* Security tests: pen tests, secrets scanning, key compromise scenario tests.
+
+All tests must run in CI and pass in a staging environment that mirrors production.
+
+---
+
+## Documentation & runbooks (required artifacts)
+
+Every module must ship the following files and they must be accurate:
+
+* `README.md` (module overview).
+* `acceptance-criteria.md` (module tests & sign-off checklist).
+* `openapi.yaml` or `api.md` (formal API contracts).
+* `deployment.md` (infra, high-availability, certs, KMS, canary/rollback).
+* `security-governance.md` or equivalent (RBAC, KMS, multisig).
+* `audit-log-spec.md` (audit event format and verification).
+* `operational-runbook.md` (runbooks & runbook tests).
+
+These files are required for sign-off.
+
+---
+
+## Sign-off matrix (final authority)
+
+* **Security Engineer** — signs off on KMS/HSM, multisig, SentinelNet policy lifecycle, RBAC and key material handling.
+* **Finance Lead** — signs off on Finance integrations, ledger proofs, and Marketplace settlement.
+* **ML Lead** — signs off on AI Infra reproducibility and model promotion policies.
+* **Ryan (SuperAdmin)** — final approver for Core modules and final system acceptance.
+
+Final system acceptance requires written sign-off from the above parties and a passing audit verification exercise.
+
+---
+
+## Final audit verification exercise (must pass)
+
+Before declaring platform 100% complete, perform a supervised audit run:
+
+1. Run the **audit replay test**: select a range of AuditEvents from Event Bus, verify chain (prevHash, SHA256, signature) and that all events are archived and verifiable from S3 object-lock.
+2. Run the **handoff → marketplace end-to-end flow**: Verify Kernel signature on manifest, RepoWriter commit metadata references the manifestSignatureId, CI preview deploys, Marketplace validates the manifest and Finance posts correct ledger entries.
+3. Run the **policy gating test**: SentinelNet blocks an unsafe action in synchronous check; policyCheck event emitted and logged.
+4. Run **privacy / legal test**: attempt to publish PII-containing product without SentinelNet approval — must be blocked.
+
+All steps must be independently validated by Security or Audit team and recorded as signed AuditEvents.
+
+---
+
+## Definition of “100% complete” — summary
+
+The ILLUVRSE platform is **100% complete** when every core module’s acceptance criteria pass, cross-cutting requirements (signing, audit, mTLS, OIDC, KMS/HSM, multisig) are implemented and independently verified, all modules integrate end-to-end in staging with successful E2E scenarios (product handoff → Kernel signing → RepoWriter commit → Marketplace flow; agent lifecycle → eval → allocation), performance & failure-mode tests pass, documentation and runbooks exist, and the final sign-offs from Security Engineer, Finance Lead / ML Lead (where applicable) and Ryan (SuperAdmin) are present. The entire audit chain must be verifiable and archived.
+
+---
+
+## Next steps
+
+Place this file at `ILLUVRSE/Main/FINAL_COMPLETION_CRITERIA.md`, open a review PR, and add automated CI gates enforcing each module’s acceptance criteria where practical.
+

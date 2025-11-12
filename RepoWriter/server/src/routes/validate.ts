@@ -1,71 +1,78 @@
 /**
  * validate.ts
  *
- * HTTP route to validate a set of patches by running them inside the sandbox runner.
- * Expects JSON body: { patches: Array<{ path, content?, diff? }>, testCommand?: string[], timeoutMs?: number }
+ * Route that runs sandbox validation against a set of patches.
  *
- * Returns:
- * {
- *   ok: boolean,
- *   passed: boolean,
- *   stdout?: string,
- *   stderr?: string,
- *   timedOut?: boolean,
- *   exitCode?: number | null,
- *   error?: string
- * }
+ * POST /api/validate
+ * Body: { patches: Array<{path,content?,diff?}>, options?: SandboxOptions }
  *
- * This route delegates to src/services/validator.ts which wraps sandboxRunner.
+ * Note: guarded by sandboxGuard at the route mount site (or you can import it here
+ * and use it directly). This file normalizes inputs (e.g., testCommand arrays) and
+ * maps the SandboxResult shape into a simple response used by the UI.
  */
 
-import { Router, Request, Response, NextFunction } from "express";
-import { validatePatches } from "../services/validator.js";
-import { logInfo, logError } from "../telemetry/logger.js";
+import { Router } from "express";
+import sandboxGuard from "../middleware/sandboxGuard.js";
+import validator from "../services/validator.js";
 
-const router = Router();
+const r = Router();
 
-router.post("/", async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * POST /api/validate
+ */
+r.post("/", sandboxGuard, async (req, res, next) => {
   try {
-    const { patches, testCommand, timeoutMs } = req.body as {
-      patches?: Array<any>;
-      testCommand?: string[];
-      timeoutMs?: number;
-    };
+    const { patches, options = {} } = req.body || {};
 
     if (!Array.isArray(patches) || patches.length === 0) {
-      return res.status(400).json({ ok: false, error: "missing or empty patches array" });
+      return res.status(400).json({ ok: false, error: "missing patches array" });
     }
 
-    logInfo(req, `validate: received ${patches.length} patch(es)`);
+    // Normalize testCommand if the client passed an array (some clients may pass ["npm", "test"] or similar)
+    // We will accept both string and array forms; for arrays we pick the first element if it's a single string command
+    const normalizedOptions: any = { ...(options || {}) };
+    if (Array.isArray(normalizedOptions.testCommand)) {
+      // If the array looks like command + args, join into a single shell string. Otherwise pick the first string.
+      try {
+        const tc = normalizedOptions.testCommand;
+        if (tc.length === 0) {
+          normalizedOptions.testCommand = undefined;
+        } else if (tc.length === 1) {
+          normalizedOptions.testCommand = String(tc[0]);
+        } else {
+          // join with space to make a shellable command, e.g. ["npm","test"] -> "npm test"
+          normalizedOptions.testCommand = tc.map((t: any) => String(t)).join(" ");
+        }
+      } catch {
+        normalizedOptions.testCommand = undefined;
+      }
+    }
 
-    const result = await validatePatches(patches, {
-      testCommand: Array.isArray(testCommand) && testCommand.length > 0 ? testCommand : undefined,
-      timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined
-    });
+    // Run validation
+    const result = await validator.validatePatches(patches, normalizedOptions);
 
-    // Normalize output
-    const body: any = {
+    // Determine passed status: prefer result.ok, otherwise base on tests exit code
+    const passed = !!result.ok && !!result.tests && result.tests.exitCode === 0 && !result.tests.timedOut;
+
+    // Provide short flattened response expected by UI: extract test stdout/stderr/exitCode where available
+    const stdout = result.tests?.stdout ?? "";
+    const stderr = result.tests?.stderr ?? "";
+    const exitCode = typeof result.tests?.exitCode === "number" ? result.tests!.exitCode : null;
+
+    return res.json({
       ok: true,
-      passed: !!result.ok && result.exitCode === 0 && !result.timedOut,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      timedOut: !!result.timedOut,
-      exitCode: typeof result.exitCode === "number" ? result.exitCode : null
-    };
-
-    if (result.error) {
-      body.ok = false;
-      body.error = result.error;
-    }
-
-    logInfo(req, `validate: result passed=${body.passed} timedOut=${body.timedOut} exitCode=${body.exitCode}`);
-
-    return res.json(body);
+      result,
+      passed,
+      stdout,
+      stderr,
+      exitCode
+    });
   } catch (err: any) {
-    logError(req, `validate: unexpected error`, { error: String(err?.message || err) });
-    return next(err);
+    // Defensive catch
+    const msg = String(err?.message ?? err);
+    return res.status(500).json({ ok: false, error: msg });
   }
 });
 
-export default router;
+export default r;
 

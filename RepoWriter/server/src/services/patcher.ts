@@ -3,7 +3,7 @@
  *
  * Apply unified diffs or full-file content patches safely to the repository.
  * Added: applyPatchesAndPush helper that applies patches, commits, and optionally
- * creates a branch/pushes and opens a PR using gitHub helpers.
+ * creates a branch/pushes and opens a PR via the `github` helpers.
  *
  * Existing behavior preserved.
  */
@@ -18,7 +18,8 @@ import {
   GIT_USER_EMAIL,
   GITHUB_REMOTE
 } from "../config.js";
-import { createBranchCommitPushPR } from "./gitHub.js";
+// Use lowercase github.js to match actual filename on disk
+import { createBranchCommitPushPR } from "./github.js";
 
 export type PatchInput = {
   path: string;
@@ -217,7 +218,7 @@ export async function applyPatches(
  * Convenience helper:
  *  - Applies patches (mode must be 'apply'; other modes will be forwarded to applyPatches).
  *  - If pushOptions provided, will create a branch, commit any applied files (applyPatches already commits),
- *    push the branch and open a PR via gitHub.createBranchCommitPushPR.
+ *    push the branch and open a PR via github.createBranchCommitPushPR.
  *
  * pushOptions:
  *  {

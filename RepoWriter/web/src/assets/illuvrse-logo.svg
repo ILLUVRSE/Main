@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ILLUVRSE logo — simple, modern wordmark + mark.
+  Colors match theme: primary #1C8174 and accent gold #C89C2E.
+  Save as RepoWriter/web/src/assets/illuvrse-logo.svg
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="56" viewBox="0 0 360 56" role="img" aria-label="ILLUVRSE logo">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1C8174"/>
+      <stop offset="100%" stop-color="#49B2A2"/>
+    </linearGradient>
+    <style>
+      .word { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; font-weight: 800; fill: #0A1A1A; letter-spacing: -0.01em; }
+      .tag { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; font-weight: 600; fill: #64748B; font-size: 12px; }
+    </style>
+  </defs>
+
+  <!-- Background rounded mark -->
+  <rect x="8" y="6" width="44" height="44" rx="10" fill="url(#g1)" />
+
+  <!-- Stylized "I" inside mark -->
+  <g transform="translate(8,6)">
+    <rect x="18" y="10" width="8" height="24" rx="2" fill="#ffffff" />
+    <!-- small accent dot / sparkle -->
+    <circle cx="34" cy="10" r="3.2" fill="#C89C2E" />
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(68,36)">
+    <text x="0" y="-6" class="word" font-size="20" fill="#05323F">ILLUVRSE</text>
+    <!-- subtle gold underline / accent -->
+    <rect x="0" y="2" width="84" height="4" rx="2" fill="#C89C2E" opacity="0.14" />
+  </g>
+
+  <!-- Subtle descriptor (optional) -->
+  <g transform="translate(68,50)">
+    <text x="0" y="0" class="tag">Codex · Planning · AI Assistant</text>
+  </g>
+</svg>
+

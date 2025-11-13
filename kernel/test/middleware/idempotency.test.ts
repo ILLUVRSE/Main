@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import idempotencyMiddleware from '../../src/middleware/idempotency';
 import * as dbModule from '../../src/db';
 import { MockDb } from '../utils/mockDb';

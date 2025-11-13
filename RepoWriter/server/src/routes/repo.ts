@@ -1,16 +1,25 @@
-// Append-only corrections handling
+import { Router } from "express";
 
-class AuditEvent {
-    constructor(public action: string, public timestamp: Date) {}
-}
+type AuditEvent = { action: string; timestamp: Date };
 
 const appendOnlyCorrections: AuditEvent[] = [];
 
-function addCorrection(action: string) {
-    const event = new AuditEvent(action, new Date());
-    appendOnlyCorrections.push(event);
-    // Logic to handle the correction
+function recordCorrection(action: string) {
+  const event: AuditEvent = { action, timestamp: new Date() };
+  appendOnlyCorrections.push(event);
+  return event;
 }
 
-// Example usage
-addCorrection('File updated');
+const router = Router();
+
+router.get("/corrections", (_req, res) => {
+  res.json({ corrections: appendOnlyCorrections });
+});
+
+router.post("/corrections", (req, res) => {
+  const action = typeof req.body?.action === "string" ? req.body.action : "correction";
+  const event = recordCorrection(action);
+  res.status(201).json({ correction: event });
+});
+
+export default router;

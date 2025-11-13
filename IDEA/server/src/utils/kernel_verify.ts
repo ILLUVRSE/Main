@@ -1,7 +1,7 @@
 // server/src/utils/kernel_verify.ts
 import crypto from 'crypto';
 import path from 'path';
-import { readJson, writeJsonAtomic } from './storage.js';
+import { readJson, writeJsonAtomic } from './storage';
 
 const NONCE_PATH = path.resolve(process.cwd(), 'data', 'kernel-nonces.json');
 
@@ -42,4 +42,3 @@ async function ensureNonceStore() {
     await writeJsonAtomic(NONCE_PATH, {});
   }
 }
-

@@ -21,7 +21,7 @@
  */
 
 import { WebSocketServer, WebSocket } from "ws";
-import { logInfo, logWarn } from "../telemetry/logger.js";
+import { logInfo, logWarn } from "../telemetry/logger";
 
 type Notification = {
   type: string;
@@ -87,4 +87,3 @@ export function broadcast(event: Notification) {
 }
 
 export default { initNotifications, broadcast };
-

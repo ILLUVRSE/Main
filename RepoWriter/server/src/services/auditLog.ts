@@ -7,7 +7,7 @@
 * This includes telemetry metrics for spawn/start/stop/scale actions.
 */
 
-import { logInfo, logError } from '../telemetry/logger.js';
+import { logInfo, logError } from '../telemetry/logger';
 
 class AuditLogService {
   emitAuditEvent(action, details) {

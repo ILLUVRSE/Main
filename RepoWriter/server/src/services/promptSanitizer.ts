@@ -4,7 +4,7 @@
  * Small server-side prompt sanitizer for RepoWriter.
  *
  * Usage:
- *   import { sanitizePrompt } from "./promptSanitizer.js";
+ *   import { sanitizePrompt } from "./promptSanitizer";
  *   sanitizePrompt(prompt); // throws Error when prompt is disallowed
  *
  * Behavior:
@@ -109,4 +109,3 @@ export function sanitizePrompt(prompt: string, opts?: { maxChars?: number }) {
 }
 
 export default { sanitizePrompt, estimateTokensApprox };
-

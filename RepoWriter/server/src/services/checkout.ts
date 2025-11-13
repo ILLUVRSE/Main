@@ -4,7 +4,7 @@
  * Checkout service to handle the checkout process and secure delivery.
  */
 
-import { logInfo, logError } from '../telemetry/logger.js';
+import { logInfo, logError } from '../telemetry/logger';
 
 export const checkout = async (cart) => {
     // Logic to process checkout

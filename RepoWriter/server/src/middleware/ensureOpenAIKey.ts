@@ -18,7 +18,7 @@
  */
 
 import { Request, Response, NextFunction } from "express";
-import { logWarn } from "../telemetry/logger.js";
+import { logWarn } from "../telemetry/logger";
 
 export function ensureOpenAIKey(req: Request, res: Response, next: NextFunction) {
   try {
@@ -83,4 +83,3 @@ export function ensureOpenAIKey(req: Request, res: Response, next: NextFunction)
 }
 
 export default ensureOpenAIKey;
-

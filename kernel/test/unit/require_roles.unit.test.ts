@@ -1,6 +1,6 @@
 // kernel/test/unit/require_roles.unit.test.ts
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import { requireRoles, Roles } from '../../src/rbac';
 
 describe('requireRoles middleware', () => {
@@ -79,4 +79,3 @@ describe('requireRoles middleware', () => {
     expect(res.body.principal.roles).toEqual(expect.arrayContaining([Roles.SUPERADMIN]));
   });
 });
-

@@ -3,9 +3,9 @@ import { Router } from 'express';
 import axios from 'axios';
 import path from 'path';
 import fs from 'fs/promises';
-import { requireAuth } from '../middleware/auth.js';
-import { verifyKernelCallback } from '../utils/kernel_verify.js';
-import { emitEvent } from '../utils/events.js';
+import { requireAuth } from '../middleware/auth';
+import { verifyKernelCallback } from '../utils/kernel_verify';
+import { emitEvent } from '../utils/events';
 
 const router = Router();
 
@@ -100,4 +100,3 @@ router.post('/kernel/callback', async (req:any, res) => {
 });
 
 export default router;
-

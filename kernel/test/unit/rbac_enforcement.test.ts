@@ -1,5 +1,5 @@
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 
 describe('kernelRoutes RBAC enforcement (production)', () => {
   const originalEnv = process.env.NODE_ENV;

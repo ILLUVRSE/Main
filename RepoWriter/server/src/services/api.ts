@@ -1,3 +1,4 @@
+import express, { Request, Response } from 'express';
 import { NodeModel } from '../models/nodes';
 import { EdgeModel } from '../models/edges';
 import { TraceModel } from '../models/traces';
@@ -24,3 +25,13 @@ export const createTrace = (trace) => {
 export const getNodes = () => nodeModel.getNodes();
 export const getEdges = () => edgeModel.getEdges();
 export const getTraces = () => traceModel.getTraces();
+
+const apiRouter = express.Router();
+
+export function helloHandler(_req: Request, res: Response) {
+  res.json({ msg: 'hello' });
+}
+
+apiRouter.get('/api/hello', helloHandler);
+
+export default apiRouter;

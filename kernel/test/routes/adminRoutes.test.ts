@@ -1,5 +1,5 @@
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import createAdminRouter from '../../src/routes/adminRoutes';
 import { Roles } from '../../src/rbac';
 import * as dbModule from '../../src/db';

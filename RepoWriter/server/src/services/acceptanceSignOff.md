@@ -1,1 +1,1 @@
-**Acceptance & sign-off**: Security + Finance + Ryan sign-off.
+**Acceptance & sign-off**: Finance Lead + Security Engineer + Ryan sign-off.

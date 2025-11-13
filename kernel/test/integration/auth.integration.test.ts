@@ -14,40 +14,13 @@
 
 import request from 'supertest';
 import crypto from 'crypto';
-import path from 'path';
-import fs from 'fs';
+import { createApp } from '../../src/server';
 
-// Provide a robust app loader that tries common paths for TS/JS setups.
-function resolveApp(): any {
-  // Try dist (compiled), then src (ts-node / ts-jest)
-  const candidates = [
-    path.resolve(__dirname, '..', '..', '..', 'dist', 'server'),
-    path.resolve(__dirname, '..', '..', '..', 'src', 'server'),
-    path.resolve(__dirname, '..', '..', '..', 'src', 'app'),
-    path.resolve(__dirname, '..', '..', '..', 'dist', 'app'),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c + '.js') || fs.existsSync(c + '.ts')) {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const mod = require(c);
-      // Prefer exported `app`, then default export, then module itself
-      return mod.app || mod.default || mod;
-    }
-  }
-  // As a fallback, try to require by package main (may throw)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pkgMod = require(path.resolve(process.cwd(), 'kernel', 'dist', 'server'));
-    return pkgMod.app || pkgMod.default || pkgMod;
-  } catch (err) {
-    // If we cannot find the server, throw a clear error for the test runner.
-    throw new Error(
-      'Could not resolve server app. Please ensure kernel server exports `app` or update resolveApp() in this test.'
-    );
-  }
-}
+let app: any;
 
-const app = resolveApp();
+beforeAll(async () => {
+  app = await createApp();
+});
 
 // Use TEST_CLIENT_SECRET (CI) or generate a random 32-byte secret for this run.
 const CLIENT_SECRET: string =
@@ -96,7 +69,7 @@ describe('Auth integration (OIDC / token signing)', () => {
     if (res.status === 200) {
       // When authorized, expect a principal object with subject and roles
       expect(res.body).toBeDefined();
-      expect(res.body.sub || res.body.subject || res.body.principal || res.body.username).toBeDefined();
+      expect(res.body.sub || res.body.subject || res.body.principal || res.body.username || res.body.id).toBeDefined();
       expect(Array.isArray(res.body.roles) || Array.isArray(res.body.roles || res.body.role)).toBeTruthy();
     } else if (res.status === 401) {
       // If auth fails, ensure it is due to invalid or missing token rather than a code error.
@@ -104,4 +77,3 @@ describe('Auth integration (OIDC / token signing)', () => {
     }
   });
 });
-

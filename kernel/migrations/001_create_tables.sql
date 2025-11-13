@@ -86,4 +86,3 @@ CREATE INDEX IF NOT EXISTS idx_allocations_status ON allocations (status);
 
 -- Safety: prevent accidental updates that violate audit immutability - leave application-level enforcement.
 -- End of migration.
-

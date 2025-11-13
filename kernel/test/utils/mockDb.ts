@@ -95,7 +95,23 @@ type UpgradeApprovalRow = {
   approved_at: string;
 };
 
+type AuditEventRow = {
+  id: string;
+  event_type: string | null;
+  payload: any;
+  payload_key: string;
+  prev_hash: string | null;
+  hash: string;
+  signature: string | null;
+  signer_id: string | null;
+  algorithm: string | null;
+  sampled: boolean;
+  ts: string;
+};
+
 type DbState = {
+  audit_events: Map<string, AuditEventRow>;
+  audit_event_payload_index: Map<string, string>;
   idempotency: Map<string, IdempotencyRow>;
   manifest_signatures: Map<string, ManifestSignatureRow>;
   divisions: Map<string, DivisionRow>;
@@ -118,6 +134,8 @@ function cloneState(source: DbState): DbState {
 
   return {
     idempotency: cloneMap(source.idempotency),
+    audit_events: cloneMap(source.audit_events),
+    audit_event_payload_index: new Map(source.audit_event_payload_index.entries()),
     manifest_signatures: cloneMap(source.manifest_signatures),
     divisions: cloneMap(source.divisions),
     agents: cloneMap(source.agents),
@@ -132,6 +150,22 @@ function cloneState(source: DbState): DbState {
       ]),
     ),
   };
+}
+
+function payloadKeyForDedup(value: any): string {
+  const clone = value === undefined ? null : JSON.parse(JSON.stringify(value ?? null));
+  const scrub = (obj: any): any => {
+    if (!obj || typeof obj !== 'object') return obj;
+    if ('traceId' in obj) {
+      delete obj.traceId;
+    }
+    return obj;
+  };
+  const normalized = scrub(clone);
+  if (normalized && typeof normalized === 'object' && normalized.value) {
+    normalized.value = scrub(normalized.value);
+  }
+  return JSON.stringify(normalized);
 }
 
 class MockClient {
@@ -151,6 +185,8 @@ const EMPTY_RESULT: QueryResult<any> = { rows: [], rowCount: 0, command: '', oid
 export class MockDb {
   private state: DbState = {
     idempotency: new Map(),
+    audit_events: new Map(),
+    audit_event_payload_index: new Map(),
     manifest_signatures: new Map(),
     divisions: new Map(),
     agents: new Map(),
@@ -485,6 +521,114 @@ export class MockDb {
     };
   }
 
+  private insertAuditEvent(params: any[]): QueryResult<any> {
+    const [
+      idParam,
+      eventType,
+      payload,
+      prevHash,
+      hashParam,
+      signature,
+      signerId,
+      algorithm,
+      sampled,
+    ] = params;
+    const id = (idParam && String(idParam)) || randomUUID();
+    const hash = (hashParam && String(hashParam)) || randomUUID().replace(/-/g, '');
+
+    const payloadKey = payloadKeyForDedup(payload);
+
+    const findExisting = (predicate: (row: AuditEventRow) => boolean) =>
+      Array.from(this.state.audit_events.values())
+        .filter(predicate)
+        .sort((a, b) => (a.ts < b.ts ? 1 : -1))[0];
+
+    const matchByHash = findExisting((row) => row.hash === String(hashParam));
+    if (matchByHash) {
+      return {
+        ...EMPTY_RESULT,
+        rowCount: 1,
+        rows: [{ id: matchByHash.id, hash: matchByHash.hash, ts: matchByHash.ts }],
+      };
+    }
+
+    const dedupeKey = JSON.stringify({ eventType: eventType ?? null, payloadKey });
+    const existingId = this.state.audit_event_payload_index.get(dedupeKey);
+    if (existingId) {
+      const existingRow = this.state.audit_events.get(existingId);
+      if (existingRow) {
+        return {
+          ...EMPTY_RESULT,
+          rowCount: 1,
+          rows: [{ id: existingRow.id, hash: existingRow.hash, ts: existingRow.ts }],
+        };
+      }
+    }
+
+    const matchByPayload = findExisting(
+      (row) => row.event_type === (eventType ?? null) && row.payload_key === payloadKey,
+    );
+    if (matchByPayload) {
+      this.state.audit_event_payload_index.set(dedupeKey, matchByPayload.id);
+      return {
+        ...EMPTY_RESULT,
+        rowCount: 1,
+        rows: [{ id: matchByPayload.id, hash: matchByPayload.hash, ts: matchByPayload.ts }],
+      };
+    }
+
+    const storedPayload = payload === undefined ? null : JSON.parse(JSON.stringify(payload ?? null));
+    const row: AuditEventRow = {
+      id,
+      event_type: eventType ?? null,
+      payload: storedPayload,
+      payload_key: payloadKey,
+      prev_hash: prevHash ?? null,
+      hash,
+      signature: signature ?? null,
+      signer_id: signerId ?? null,
+      algorithm: algorithm ?? null,
+      sampled: typeof sampled === 'boolean' ? sampled : false,
+      ts: nowIso(),
+    };
+    this.state.audit_events.set(id, row);
+    this.state.audit_event_payload_index.set(dedupeKey, id);
+    return {
+      ...EMPTY_RESULT,
+      rowCount: 1,
+      rows: [{ id: row.id, hash: row.hash, ts: row.ts }],
+    };
+  }
+
+  private selectAuditEventById(id: string): QueryResult<any> {
+    const row = this.state.audit_events.get(id);
+    if (!row) return { ...EMPTY_RESULT };
+    return { ...EMPTY_RESULT, rowCount: 1, rows: [{ ...row }] };
+  }
+
+  private selectAuditEventByHash(hash: string): QueryResult<any> {
+    const matches = Array.from(this.state.audit_events.values())
+      .filter((row) => row.hash === hash)
+      .sort((a, b) => (a.ts < b.ts ? 1 : -1));
+    if (!matches.length) return { ...EMPTY_RESULT };
+    const { id, hash: storedHash, ts } = matches[0];
+    return {
+      ...EMPTY_RESULT,
+      rowCount: 1,
+      rows: [{ id, hash: storedHash, ts }],
+    };
+  }
+
+  private selectLastAuditHash(): QueryResult<any> {
+    const rows = Array.from(this.state.audit_events.values()).sort((a, b) => (a.ts < b.ts ? 1 : -1));
+    if (!rows.length) return { ...EMPTY_RESULT };
+    return {
+      ...EMPTY_RESULT,
+      rowCount: 1,
+      rows: [{ hash: rows[0].hash }],
+    };
+  }
+
   async handleQuery(text: string, params: any[]): Promise<QueryResult<any>> {
     const normalized = text.replace(/\s+/g, ' ').trim();
     const lower = normalized.toLowerCase();
@@ -504,6 +648,23 @@ export class MockDb {
     }
     if (lower.startsWith('update idempotency set')) {
       return this.updateIdempotency(params);
+    }
+    if (lower.startsWith('insert into audit_events')) { return this.insertAuditEvent(params); }
+    if (
+      lower.startsWith('select hash from audit_events') &&
+      lower.includes('order by ts desc') &&
+      lower.includes('limit 1')
+    ) {
+      return this.selectLastAuditHash();
+    }
+    if (
+      lower.startsWith('select id, hash, ts from audit_events where hash = $1 limit 1') ||
+      (lower.startsWith('select') && lower.includes('from audit_events') && lower.includes('where hash = $1 limit 1'))
+    ) {
+      return this.selectAuditEventByHash(params[0]);
+    }
+    if (lower.startsWith('select') && lower.includes('from audit_events') && lower.includes('where id')) {
+      return this.selectAuditEventById(params[0]);
     }
     if (lower.startsWith('insert into manifest_signatures')) {
       return this.insertManifestSignature(params);

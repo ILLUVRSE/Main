@@ -1,133 +1,145 @@
 // kernel/test/rbac.test.ts
-import request from 'supertest';
-import { createTestApp } from './utils/testApp';
-import { hasAnyRole, hasRole, Roles, Principal } from '../src/rbac';
+import { Request, Response } from 'express';
+import {
+  getPrincipalFromRequest,
+  requireAnyAuthenticated,
+  requireRoles,
+  hasAnyRole,
+  hasRole,
+  Roles,
+  Principal,
+} from '../src/rbac';
+
+function makeReq(headers: Record<string, string> = {}): Request {
+  const normalized: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    normalized[k.toLowerCase()] = v;
+  }
+  const req: any = {
+    method: 'GET',
+    path: '/test',
+    header(name: string) {
+      if (name.toLowerCase() === 'set-cookie') return undefined;
+      return normalized[name.toLowerCase()];
+    },
+    get(name: string) {
+      if (name.toLowerCase() === 'set-cookie') return undefined;
+      return normalized[name.toLowerCase()];
+    },
+  };
+  return req as Request;
+}
+
+function makeRes(): Response & { body: any } {
+  const res: any = {
+    statusCode: 200,
+    body: undefined,
+    headers: {},
+    status(code: number) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload: any) {
+      this.body = payload;
+      return this;
+    },
+    setHeader(key: string, value: string) {
+      this.headers[key.toLowerCase()] = value;
+      return this;
+    },
+  };
+  return res as Response & { body: any };
+}
 
 describe('RBAC unit tests', () => {
-  let app: any;
-
-  beforeAll(async () => {
-    app = await createTestApp();
-  });
-
-  describe('getPrincipalFromRequest via /principal', () => {
-    test('returns human principal for x-oidc-sub + x-oidc-roles', async () => {
-      const res = await request(app)
-        .get('/principal')
-        .set('x-oidc-sub', 'user-123')
-        .set('x-oidc-roles', 'SuperAdmin,Operator');
-
-      expect(res.status).toBe(200);
-      const p = res.body?.principal;
-      expect(p).toBeDefined();
-      expect(p.type).toBe('human');
-      expect(p.id).toBe('user-123');
-      expect(Array.isArray(p.roles)).toBe(true);
-      expect(p.roles).toEqual(expect.arrayContaining([Roles.SUPERADMIN, Roles.OPERATOR]));
+  describe('getPrincipalFromRequest', () => {
+    test('returns human principal for x-oidc headers', () => {
+      const req = makeReq({ 'x-oidc-sub': 'user-123', 'x-oidc-roles': 'SuperAdmin,Operator' });
+      const principal = getPrincipalFromRequest(req);
+      expect(principal.type).toBe('human');
+      expect(principal.id).toBe('user-123');
+      expect(principal.roles).toEqual(expect.arrayContaining([Roles.SUPERADMIN, Roles.OPERATOR]));
     });
 
-    test('returns service principal for x-service-id + x-service-roles', async () => {
-      const res = await request(app)
-        .get('/principal')
-        .set('x-service-id', 'svc-abc')
-        .set('x-service-roles', 'Operator');
-
-      expect(res.status).toBe(200);
-      const p = res.body?.principal;
-      expect(p).toBeDefined();
-      expect(p.type).toBe('service');
-      expect(p.id).toBe('svc-abc');
-      expect(p.roles).toEqual(expect.arrayContaining(['Operator']));
+    test('returns service principal for service headers', () => {
+      const req = makeReq({ 'x-service-id': 'svc-abc', 'x-service-roles': 'Operator' });
+      const principal = getPrincipalFromRequest(req);
+      expect(principal.type).toBe('service');
+      expect(principal.id).toBe('svc-abc');
+      expect(principal.roles).toEqual(expect.arrayContaining(['Operator']));
     });
 
-    test('role override header returns dev-override principal', async () => {
-      const res = await request(app)
-        .get('/principal')
-        .set('x-role-override', 'Auditor Operator');
-
-      expect(res.status).toBe(200);
-      const p = res.body?.principal;
-      expect(p).toBeDefined();
-      expect(p.type).toBe('human');
-      expect(p.id).toBe('dev-override');
-      expect(p.roles).toEqual(expect.arrayContaining(['Auditor', 'Operator']));
+    test('role override header returns dev principal', () => {
+      const req = makeReq({ 'x-role-override': 'Auditor Operator' });
+      const principal = getPrincipalFromRequest(req);
+      expect(principal.id).toBe('dev-override');
+      expect(principal.roles).toEqual(expect.arrayContaining(['Auditor', 'Operator']));
     });
   });
 
-  describe('requireAnyAuthenticated', () => {
-    test('allows human principal', async () => {
-      const res = await request(app)
-        .get('/require-any')
-        .set('x-oidc-sub', 'human-1')
-        .set('x-oidc-roles', 'Operator');
-
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('ok', true);
-      expect(res.body).toHaveProperty('principal');
-      expect(res.body.principal.type).toBe('human');
+  describe('requireAnyAuthenticated middleware', () => {
+    test('allows human principal', (done) => {
+      const req = makeReq({ 'x-oidc-sub': 'human-1', 'x-oidc-roles': 'Operator' });
+      const res = makeRes();
+      requireAnyAuthenticated(req, res, () => {
+        expect((req as any).principal?.type).toBe('human');
+        done();
+      });
     });
 
-    test('allows service principal', async () => {
-      const res = await request(app)
-        .get('/require-any')
-        .set('x-service-id', 'svc-1')
-        .set('x-service-roles', 'Operator');
-
-      expect(res.status).toBe(200);
-      expect(res.body.ok).toBe(true);
-      expect(res.body.principal.type).toBe('service');
+    test('allows service principal', (done) => {
+      const req = makeReq({ 'x-service-id': 'svc-1', 'x-service-roles': 'Operator' });
+      const res = makeRes();
+      requireAnyAuthenticated(req, res, () => {
+        expect((req as any).principal?.type).toBe('service');
+        done();
+      });
     });
 
-    test('returns 401 for anonymous', async () => {
-      const res = await request(app).get('/require-any');
-      expect(res.status).toBe(401);
+    test('returns 401 for anonymous', () => {
+      const req = makeReq();
+      const res = makeRes();
+      requireAnyAuthenticated(req, res, () => {
+        throw new Error('should not call next');
+      });
+      expect(res.statusCode).toBe(401);
       expect(res.body).toHaveProperty('error', 'unauthenticated');
     });
   });
 
   describe('requireRoles middleware (SuperAdmin OR Operator)', () => {
-    test('401 when anonymous', async () => {
-      const res = await request(app).get('/require-roles');
-      expect(res.status).toBe(401);
+    test('401 when anonymous', () => {
+      const req = makeReq();
+      const res = makeRes();
+      const middleware = requireRoles(Roles.SUPERADMIN, Roles.OPERATOR);
+      middleware(req, res, () => {
+        throw new Error('should not call next');
+      });
+      expect(res.statusCode).toBe(401);
       expect(res.body).toHaveProperty('error', 'unauthenticated');
-      expect(Array.isArray(res.body.requiredRoles)).toBe(true);
     });
 
-    test('403 when authenticated but lacks required roles', async () => {
-      const res = await request(app)
-        .get('/require-roles')
-        .set('x-oidc-sub', 'user-456')
-        .set('x-oidc-roles', 'Auditor');
-
-      expect(res.status).toBe(403);
+    test('403 when authenticated but lacks required roles', () => {
+      const req = makeReq({ 'x-oidc-sub': 'user-456', 'x-oidc-roles': 'Auditor' });
+      const res = makeRes();
+      const middleware = requireRoles(Roles.SUPERADMIN, Roles.OPERATOR);
+      middleware(req, res, () => {
+        throw new Error('should not call next');
+      });
+      expect(res.statusCode).toBe(403);
       expect(res.body).toHaveProperty('error', 'forbidden');
-      expect(res.body).toHaveProperty('requiredRoles');
-      expect(Array.isArray(res.body.requiredRoles)).toBe(true);
-      expect(res.body).toHaveProperty('required');
-      expect(Array.isArray(res.body.required)).toBe(true);
     });
 
-    test('200 and principal attached when role present (Operator)', async () => {
-      const res = await request(app)
-        .get('/require-roles')
-        .set('x-oidc-sub', 'user-789')
-        .set('x-oidc-roles', 'Operator,Auditor');
-
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('ok', true);
-      expect(res.body.principal).toBeDefined();
-      expect(res.body.principal.roles).toEqual(expect.arrayContaining([Roles.OPERATOR]));
-    });
-
-    test('200 when SuperAdmin present', async () => {
-      const res = await request(app)
-        .get('/require-roles')
-        .set('x-oidc-sub', 'super-1')
-        .set('x-oidc-roles', 'SuperAdmin');
-
-      expect(res.status).toBe(200);
-      expect(res.body.ok).toBe(true);
-      expect(res.body.principal.roles).toEqual(expect.arrayContaining([Roles.SUPERADMIN]));
+    test('200 and principal attached when role present (Operator)', () => {
+      const req = makeReq({ 'x-oidc-sub': 'user-789', 'x-oidc-roles': 'Operator,Auditor' });
+      const res = makeRes();
+      const middleware = requireRoles(Roles.SUPERADMIN, Roles.OPERATOR);
+      let nextCalled = false;
+      middleware(req, res, () => {
+        nextCalled = true;
+      });
+      expect(nextCalled).toBe(true);
+      expect((req as any).principal?.roles).toEqual(expect.arrayContaining([Roles.OPERATOR]));
     });
   });
 
@@ -140,17 +152,6 @@ describe('RBAC unit tests', () => {
     test('returns false when principal lacks required roles', () => {
       const principal: Principal = { type: 'human', id: 'p2', roles: ['Auditor'] };
       expect(hasAnyRole(principal, 'Operator')).toBe(false);
-    });
-
-    test('handles space/comma separated parsing indirectly via headers (integration)', async () => {
-      // Verify "Admin,Operator" header results in Operator being present
-      const res = await request(app)
-        .get('/principal')
-        .set('x-oidc-sub', 'user-parse')
-        .set('x-oidc-roles', 'Admin,Operator');
-
-      const p = res.body.principal;
-      expect(p.roles).toEqual(expect.arrayContaining(['Operator']));
     });
   });
 

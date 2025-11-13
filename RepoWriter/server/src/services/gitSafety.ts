@@ -5,8 +5,8 @@
 import { recordAuditEvent } from './auditService';
 
 export const approveCommit = async (commitDetails) => {
-    // Logic to interact with CommandPad multisig flow
-    const approval = await commandPad.approve(commitDetails);
+    // Logic to interact with ControlPanel multisig flow
+    const approval = await controlPanel.approve(commitDetails);
     await recordAuditEvent({ type: 'commitApproval', details: approval });
 };
 

@@ -19,7 +19,7 @@ All files for the Reasoning Graph live under:
 1. Read `reasoning-graph-spec.md` to understand the models (ReasonNode, ReasonEdge, ReasonTrace) and required APIs.
 2. Implement a service that accepts Kernel-authorized writes (nodes/edges), computes traces, creates signed snapshots, and exports traces for auditors.
 3. Ensure every write produces an AuditEvent linking node IDs to kernel-signed manifests per the Audit Log spec.
-4. Integrate with Eval Engine, Agent Manager, SentinelNet, and CommandPad to record recommendations, policy checks, decisions, and annotations.
+4. Integrate with Eval Engine, Agent Manager, SentinelNet, and ControlPanel to record recommendations, policy checks, decisions, and annotations.
 
 ## # Security & governance
 - Writes only through Kernel (mTLS + RBAC).

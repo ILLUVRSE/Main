@@ -13,7 +13,7 @@ It enforces who can do what, signs important manifests, records immutable audit 
 - Manifest signing and provenance (Ed25519 signatures)
 - Audit logging (append-only, signed events)
 - SentinelNet hooks for real-time policy enforcement
-- CommandPad hooks for manual override and governance
+- ControlPanel hooks for manual override and governance
 
 ## # Minimal endpoints (name + intent)
 - `POST /kernel/division` — register or update a DivisionManifest

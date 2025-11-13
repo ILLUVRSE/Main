@@ -12,7 +12,7 @@ The graph is NOT a replace-for-log; it complements the Audit Log by providing hi
 - Provide queryable reasoning traces for a node (ancestors, descendants, causal path).
 - Record provenance: all graph updates link to ManifestSignature and AuditEvent entries.
 - Support graph versioning and branching (snapshots, experiments, canary reasoning paths).
-- Allow read-only views for auditors and CommandPad; write/update flows go through Kernel APIs only.
+- Allow read-only views for auditors and ControlPanel; write/update flows go through Kernel APIs only.
 - Integrate with Eval Engine, Agent Manager, and SentinelNet to record recommendations and policy checks.
 - Provide export for human-readable traces and machine-verifiable proofs (hashes/signatures).
 
@@ -84,7 +84,7 @@ These are what Kernel and UIs call (implement as service endpoints):
 - **Agent Manager:** writes recommendations from agents as `recommendation` nodes and receives `decision` nodes that drive lifecycle actions.
 - **SentinelNet:** records `policyCheck` nodes showing policy input, decision, and rationale. SentinelNet decisions must be linked to reason nodes for explainability.
 - **Memory Layer & Audit Bus:** nodes reference memory artifacts; audit events record node creation.
-- **CommandPad:** reads traces, can annotate, and can initiate multi-sig upgrade flows that create `decision` nodes.
+- **ControlPanel:** reads traces, can annotate, and can initiate multi-sig upgrade flows that create `decision` nodes.
 
 ---
 
@@ -97,7 +97,7 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ## # Security & access control
 - Reads: many traces are readable by auditors and Division Leads, but PII-sensitive payloads must be redacted per SentinelNet.
-- Writes: only Kernel or authorized services can create nodes/edges. CommandPad annotations require elevated permissions.
+- Writes: only Kernel or authorized services can create nodes/edges. ControlPanel annotations require elevated permissions.
 - Signing: snapshots and important decision nodes must be signed; signer identity recorded.
 - Data retention: snapshots retained per retention policy. Reasoning nodes older than retention may be archived; audit provenance must remain accessible.
 
@@ -113,7 +113,7 @@ These are what Kernel and UIs call (implement as service endpoints):
 
 ## # Safety & governance
 - SentinelNet policies can prevent creation of nodes/edges that would violate governance (e.g., secret leakage). All policy denials produce `policyCheck` nodes describing the block.
-- Human override must be explicit and recorded: CommandPad "override" creates an annotated node and requires multi-sig if changing governance-critical nodes.
+- Human override must be explicit and recorded: ControlPanel "override" creates an annotated node and requires multi-sig if changing governance-critical nodes.
 - Rate-limit automated node creation to avoid graph floods; enforce quotas per agent/service.
 
 ---
@@ -134,7 +134,7 @@ These are what Kernel and UIs call (implement as service endpoints):
 2. Eval emits `recommendation` node: `{recommend: "promote", reason:"score>0.8", confidence:0.9}` and links `score -> recommendation`.
 3. Resource Allocator decision writes `decision` node `{action:"allocate extra gpus", reason:"roi positive"}` and links `recommendation -> decision`.
 4. SentinelNet runs policy check, writes `policyCheck` node with `deny=false` and rationale, and links to `decision`.
-5. Kernel records snapshot of the subgraph, hashes it, signs it, and emits an audit event. CommandPad can display the trace from `score` to `decision`.
+5. Kernel records snapshot of the subgraph, hashes it, signs it, and emits an audit event. ControlPanel can display the trace from `score` to `decision`.
 
 ---
 

@@ -38,7 +38,7 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 ## # Normal approval flow (step-by-step)
 1. **Prepare upgrade**: Requestor (Technical Lead or Operator) creates the Upgrade Manifest and uploads code/patch to a secure artifact store; compute `patchHash`. This is recorded as a draft upgrade event on the audit bus.
 2. **Run automated checks**: CI runs unit tests, integration tests, security scans, and canary simulations as required by `preconditions`. CI posts test results to the draft upgrade event. If tests fail, the upgrade is paused.
-3. **Request approvals**: Requestor uses CommandPad to submit the Upgrade Manifest for approval. The Kernel issues a `pending-approval` upgrade event. All approvers are notified.
+3. **Request approvals**: Requestor uses ControlPanel to submit the Upgrade Manifest for approval. The Kernel issues a `pending-approval` upgrade event. All approvers are notified.
 4. **Approvers review**: Each approver reviews artifacts, test results, and rationale. If approving, approver signs an Approval Record (via KMS/HSM or UI) and submits it to the Kernel. If rejecting, approver records a rejection event with reason.
 5. **Quorum collected**: Once 3 valid Approval Records exist, Kernel builds the Quorum Bundle, validates signatures, verifies `patchHash` against artifact store, and re-runs a final verification (checks policies via SentinelNet, budget constraints, etc.).
 6. **Apply upgrade**: If checks pass, Kernel writes the AppliedUpgradeRecord to the audit bus, applies the change (deploys code, updates manifest), and marks the upgrade as `applied`. The apply step is atomic where possible: write audit, deploy, confirm.
@@ -56,7 +56,7 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 ## # Emergency (break-glass) path
 - **Who can trigger**: SuperAdmin (Ryan) or SecurityEngineer.
 - **What happens**:
-  1. Trigger emergency apply via CommandPad — Kernel records `emergency=true` on the upgrade manifest.
+  1. Trigger emergency apply via ControlPanel — Kernel records `emergency=true` on the upgrade manifest.
   2. Kernel applies the change immediately but marks state `emergency_applied`.
   3. Kernel emits a high-priority audit event and notifies approvers and auditors.
   4. Within a short window (configurable, e.g., 48 hours), the requester must obtain retroactive multi-sig approvals (3-of-5) to ratify the emergency change. If ratification fails within window, an automated rollback is scheduled.
@@ -83,8 +83,8 @@ All artifacts are canonicalized, hashed, and signed. They are stored in the audi
 
 ---
 
-## # UI / CommandPad interaction (brief)
-- CommandPad shows pending upgrades, their artifacts, test results, and approval buttons.
+## # UI / ControlPanel interaction (brief)
+- ControlPanel shows pending upgrades, their artifacts, test results, and approval buttons.
 - Approvers may view diffs or download artifacts; approval is a signed action in the UI (or via CLI) that submits the Approval Record.
 - The UI forbids approving if SentinelNet flags a policy violation; approver can add notes or request further tests.
 

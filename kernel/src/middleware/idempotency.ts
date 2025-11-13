@@ -77,6 +77,10 @@ function getLimit(): number {
   return parsed;
 }
 
+function isIdempotencyDisabled(): boolean {
+  return (process.env.DISABLE_IDEMPOTENCY || '').toLowerCase() === 'true';
+}
+
 /** Serialize response body to string for storage */
 function serializeBody(body: any): string {
   if (body === undefined) return 'null';
@@ -177,6 +181,9 @@ function normalizeResponseShape(body: any): any {
  *   or 412 when request hash differs (conflicting body).
  */
 export async function idempotencyMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (isIdempotencyDisabled()) {
+    return next();
+  }
   if (req.method.toUpperCase() !== 'POST') {
     return next();
   }

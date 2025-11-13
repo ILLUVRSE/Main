@@ -1,7 +1,5 @@
 // agentService.ts
-
 import { Router } from 'express';
-
 const router = Router();
 
 // In-memory storage for agents
@@ -11,7 +9,7 @@ let nextId = 1;
 // POST /api/v1/agent/spawn
 router.post('/api/v1/agent/spawn', (req, res) => {
     const agentId = nextId++;
-    agents[agentId] = { id: agentId, status: 'created' };
+    agents[agentId] = { id: agentId, status: 'stopped' };
     res.status(201).json({ agent_id: agentId });
 });
 
@@ -46,7 +44,7 @@ router.post('/api/v1/agent/:id/restart', (req, res) => {
 router.post('/api/v1/agent/:id/scale', (req, res) => {
     const agentId = req.params.id;
     if (agents[agentId]) {
-        // Scaling logic here
+        // Scaling logic here (if applicable)
         return res.status(200).json({ status: 'scaled' });
     }
     return res.status(404).json({ error: 'Agent not found' });

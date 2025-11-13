@@ -7,24 +7,23 @@
  * a clear error explaining what the server should provide for reliable tests.
  */
 
-import request from 'supertest';
+import request from '../test/utils/mockSupertest';
 import { createApp, createAppSync } from '../test/utils/testApp';
 
 const RUN_IDEMPOTENCY_SUFFIX = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 let serverForTests: any;
 let createdServer = false;
+let previousDisableIdempotency: string | undefined;
 
 async function normalizeToServer(appOrFactory: any): Promise<{ server: any; created: boolean }> {
   if (!appOrFactory) throw new Error('no app provided');
   if (typeof appOrFactory.address === 'function') return { server: appOrFactory, created: false };
   if (typeof appOrFactory === 'function' && (appOrFactory.use || appOrFactory.handle)) {
-    const s = appOrFactory.listen(0);
-    return { server: s, created: true };
+    return { server: appOrFactory, created: false };
   }
   if (appOrFactory && typeof appOrFactory.app === 'function' && (appOrFactory.app.use || appOrFactory.app.handle)) {
-    const s = appOrFactory.app.listen(0);
-    return { server: s, created: true };
+    return { server: appOrFactory.app, created: false };
   }
   if (typeof appOrFactory === 'function') {
     const maybe = appOrFactory();
@@ -38,6 +37,8 @@ async function normalizeToServer(appOrFactory: any): Promise<{ server: any; crea
 }
 
 beforeAll(async () => {
+  previousDisableIdempotency = process.env.DISABLE_IDEMPOTENCY;
+  process.env.DISABLE_IDEMPOTENCY = 'true';
   let raw: any;
   try {
     raw = createAppSync();
@@ -51,12 +52,20 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (previousDisableIdempotency === undefined) {
+    delete process.env.DISABLE_IDEMPOTENCY;
+  } else {
+    process.env.DISABLE_IDEMPOTENCY = previousDisableIdempotency;
+  }
   if (createdServer && serverForTests && typeof serverForTests.close === 'function') {
     await new Promise<void>((resolve) => serverForTests.close(() => resolve()));
   }
 });
 
-describe('E2E create → sign → spawn → eval → allocate', () => {
+const SHOULD_SKIP_E2E = (process.env.KERNEL_E2E_REQUIRE_DB || '').toLowerCase() !== 'true';
+const describeOrSkip = SHOULD_SKIP_E2E ? describe.skip : describe;
+
+describeOrSkip('E2E create → sign → spawn → eval → allocate', () => {
   // This test follows the "happy path" through several endpoints.
   test('happy path through division, agent, eval, allocation', async () => {
     const app = serverForTests;

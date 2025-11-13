@@ -50,3 +50,4 @@ RepoWriter/server/server.log
 RepoWriter/test/openaiMock.log
 RepoWriter/web/preview.log
 RepoWriter/web/dist/
+sentinelnet/.env

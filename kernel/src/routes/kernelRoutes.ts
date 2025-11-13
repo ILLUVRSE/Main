@@ -44,6 +44,7 @@ import {
   IdempotencyKeyConflictError,
 } from '../handlers/kernelCreate';
 import createUpgradeRouter from './upgradeRoutes';
+import createControlPanelRouter from './controlPanelRoutes';
 import { getReasoningClient, ReasoningClientError } from '../reasoning/client';
 
 const ENV = process.env.NODE_ENV || 'development';
@@ -133,6 +134,7 @@ export default function createKernelRouter(): Router {
   );
 
   router.use('/kernel/upgrade', createUpgradeRouter());
+  router.use('/control-panel', createControlPanelRouter());
 
   /**
    * POST /kernel/sign

@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  sentinelnet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sentinelnet:dev
+    env_file:
+      - .env
+    ports:
+      - "7602:7602"
+    volumes:
+      - ./:/app:cached
+      - /app/node_modules
+    command: npm run dev
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: sentinel_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - sentinel-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sentinel_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  sentinel-db-data:
+

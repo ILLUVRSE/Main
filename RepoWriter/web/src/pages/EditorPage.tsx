@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import Editor from "../components/Editor.tsx";
-import useToast from "../hooks/useToast.ts";
+import useToast from "../hooks/useToast";
 
 /**
  * EditorPage
@@ -115,4 +115,3 @@ export default function EditorPage() {
     </div>
   );
 }
-

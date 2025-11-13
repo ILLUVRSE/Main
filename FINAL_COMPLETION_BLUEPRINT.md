@@ -13,7 +13,7 @@ Your autorun will pass the whole line (after the checkbox) to RepoWriter as the 
 - [ ] TASK: RBAC & Auth || ACCEPTANCE: OIDC/SSO for humans and mTLS for service-to-service enforced on Kernel endpoints; SuperAdmin role exists and tests exercise positive and negative access. || ALLOWED: ["kernel/","infra/","RepoWriter/server/"] || TESTS: ./scripts/test-rbac.sh || OWNER: Security Engineer
 - [ ] TASK: Manifest signing || ACCEPTANCE: Kernel integrates with KMS/HSM to produce Ed25519 ManifestSignature objects; POST /kernel/sign returns signed manifest and signature verifies; key rotation and key use are audited by tests. || ALLOWED: ["kernel/","infra/"] || TESTS: ./scripts/test-signing.sh || OWNER: Security Engineer
 - [ ] TASK: Audit log (chained) || ACCEPTANCE: Kernel emits append-only AuditEvent objects with prevHash+SHA256+signature; events are published to Event Bus and archived to S3 with object-lock; verification script can replay and verify chain. || ALLOWED: ["kernel/","infra/"] || TESTS: python3 tools/verify_audit_chain.py || OWNER: Security Engineer
-- [ ] TASK: Multisig upgrade flow || ACCEPTANCE: 3-of-5 multisig process for kernel upgrades implemented with tooling and automated tests that simulate threshold approval and blocked upgrade when insufficient signatures. || ALLOWED: ["kernel/","commandpad/"] || TESTS: ./scripts/test-multisig.sh || OWNER: Ryan
+- [ ] TASK: Multisig upgrade flow || ACCEPTANCE: 3-of-5 multisig process for kernel upgrades implemented with tooling and automated tests that simulate threshold approval and blocked upgrade when insufficient signatures. || ALLOWED: ["kernel/","control-panel/"] || TESTS: ./scripts/test-multisig.sh || OWNER: Ryan
 - [ ] TASK: Operational SLOs & runbooks || ACCEPTANCE: SLOs documented for kernel, dashboards linked; incident runbooks exist and automated runbook tests simulate recovery steps. || ALLOWED: ["kernel/","docs/","devops/"] || TESTS: ./scripts/test-runbooks.sh || OWNER: SRE
 - [ ] TASK: Kernel acceptance sign-off || ACCEPTANCE: kernel/acceptance-criteria.md present and signed by Security Engineer + Ryan (signed files exist in kernel/signoffs/). || ALLOWED: ["kernel/","kernel/signoffs/"] || TESTS: test -f kernel/acceptance-criteria.md && test -f kernel/signoffs/security_engineer.sig || OWNER: Ryan
 
@@ -65,7 +65,7 @@ Your autorun will pass the whole line (after the checkbox) to RepoWriter as the 
 
 - [ ] TASK: Synchronous checks || ACCEPTANCE: Kernel pre-action synchronous checks implemented returning policyCheck events with explainability. || ALLOWED: ["sentinelnet/","kernel/"] || TESTS: npm --prefix sentinelnet run test || OWNER: Security Engineer
 - [ ] TASK: Event stream detection || ACCEPTANCE: subscribes to Event Bus and emits signed policy audit events; detection tests pass. || ALLOWED: ["sentinelnet/","infra/"] || TESTS: python3 tools/test_detection.py || OWNER: Security Engineer
-- [ ] TASK: Policy lifecycle tooling || ACCEPTANCE: versioning, simulation/dry-run, canary rollouts, and multisig gating implemented; tooling tests pass. || ALLOWED: ["sentinelnet/","commandpad/"] || TESTS: ./scripts/test-policy-lifecycle.sh || OWNER: Security Engineer
+- [ ] TASK: Policy lifecycle tooling || ACCEPTANCE: versioning, simulation/dry-run, canary rollouts, and multisig gating implemented; tooling tests pass. || ALLOWED: ["sentinelnet/","control-panel/"] || TESTS: ./scripts/test-policy-lifecycle.sh || OWNER: Security Engineer
 - [ ] TASK: SLOs & observability || ACCEPTANCE: latency metrics (p50/p95/p99) reported; runbooks present and tested. || ALLOWED: ["sentinelnet/","devops/"] || TESTS: ./scripts/test-observability.sh || OWNER: SRE
 - [ ] TASK: SentinelNet sign-off || ACCEPTANCE: Security Engineer + Ryan sign-off documented. || ALLOWED: ["sentinelnet/"] || TESTS: test -f sentinelnet/signoffs/security_engineer.sig || OWNER: Security Engineer
 
@@ -112,7 +112,7 @@ Your autorun will pass the whole line (after the checkbox) to RepoWriter as the 
 
 - [ ] TASK: IDEA service || ACCEPTANCE: UI + service implements /product/idea, scoring, /product/handoff creating Kernel manifests and storing evidence in Memory; handoff triggers multisig when required. || ALLOWED: ["IDEA/","RepoWriter/","kernel/"] || TESTS: npm --prefix IDEA run test || OWNER: Product Lead
 - [ ] TASK: RepoWriter automation || ACCEPTANCE: RepoWriter commits Kernel-signed manifests/SKUs/deployment templates to GitHub, triggers CI/preview deploys, attaches manifestSignatureId and emits AuditEvent; RepoWriter must never sign manifests itself. || ALLOWED: ["RepoWriter/",".github/"] || TESTS: npm --prefix RepoWriter run test || OWNER: Ryan
-- [ ] TASK: CommandPad integration || ACCEPTANCE: CommandPad multisig flow used to approve handoff/production commits; approvals recorded as AuditEvents. || ALLOWED: ["commandpad/","RepoWriter/"] || TESTS: ./scripts/test-commandpad.sh || OWNER: Security Engineer
+- [ ] TASK: ControlPanel integration || ACCEPTANCE: ControlPanel multisig flow used to approve handoff/production commits; approvals recorded as AuditEvents. || ALLOWED: ["control-panel/","RepoWriter/"] || TESTS: ./scripts/test-control-panel.sh || OWNER: Security Engineer
 
 ---
 
@@ -156,4 +156,3 @@ Your autorun will pass the whole line (after the checkbox) to RepoWriter as the 
 - [ ] TASK: Platform 100% complete summary || ACCEPTANCE: all module tasks complete and signed as above; final audit verification passed and recorded. || ALLOWED: ["progress/","kernel/","infra/"] || TESTS: python3 tools/check_acceptance.py && ./scripts/run_final_audit.sh || OWNER: Ryan
 
 ---
-

@@ -16,7 +16,7 @@
  * This is NOT a real policy engine, just a deterministic test double.
  */
 
-import * as express from 'express';
+import express, { Request, Response } from 'express';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -63,11 +63,11 @@ function createApp() {
   // Use express built-in json parser (no body-parser default import needed)
   app.use(express.json({ limit: '1mb' }));
 
-  app.get('/health', (_req, res) => {
+  app.get('/health', (_req: Request, res: Response) => {
     res.json({ ok: true, sentinel: SIGNER_ID });
   });
 
-  app.post('/evaluate', (req, res) => {
+  app.post('/evaluate', (req: Request, res: Response) => {
     try {
       const policy = req.body?.policy || req.body?.policyName || 'default';
       const ctx = req.body?.context ?? req.body?.ctx ?? {};
@@ -84,7 +84,7 @@ function createApp() {
     }
   });
 
-  app.post('/record', (req, res) => {
+  app.post('/record', (req: Request, res: Response) => {
     try {
       // no-op record endpoint
       // eslint-disable-next-line no-console
@@ -109,4 +109,3 @@ if (require.main === module) {
 }
 
 export default createApp;
-

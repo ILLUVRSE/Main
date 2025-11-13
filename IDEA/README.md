@@ -752,7 +752,7 @@ Say OPENAPI if you want that now, or IMPLEMENT PACKAGE to scaffold the POST /api
                                   |
        IDEA                           v
     +------------+          +--------------------+         +----------------+
-    |   Users /  |  <--->   |   Kernel API       |  <----> |  CommandPad /  |
+    |   Users /  |  <--->   |   Kernel API       |  <----> |  ControlPanel /  |
     |  Frontend  |          |  Gateway & Auth    |         |  Admin UI      |
     | (web/mobile)|         | (OpenAPI, RBAC,    |         +----------------+
     +------------+          |  mTLS, KMS signing)|

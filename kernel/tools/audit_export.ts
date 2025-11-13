@@ -35,7 +35,7 @@ async function exportAudit(outDir: string): Promise<{ filePath: string; head: Au
   }
   stream.end();
 
-  await new Promise((resolve) => stream.on('finish', resolve));
+  await new Promise<void>((resolve) => stream.on('finish', () => resolve()));
 
   const head = rows.length ? rows[rows.length - 1] : null;
   fs.writeFileSync(
@@ -91,4 +91,3 @@ main().catch((err) => {
   console.error('[audit_export] failed:', err.message || err);
   process.exit(1);
 });
-

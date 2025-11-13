@@ -12,7 +12,7 @@ Purpose: operational, implementation-ready guidance for deploying the Reasoning 
   - **S3** — store heavy payloads, full snapshot JSON, canonicalized exports, and signed snapshot artifacts.
 - **Audit pipeline** — Kafka/Redpanda topic for audit events; durable sink to S3 and Postgres index.
 - **Signing / Key service** — KMS/HSM (or signing proxy) for snapshot and important-node signatures.
-- **CommandPad / UI** — reads traces via the Reasoning Graph API; annotations written back through Kernel.
+- **ControlPanel / UI** — reads traces via the Reasoning Graph API; annotations written back through Kernel.
 - **SentinelNet** — policy checks are invoked before writes that could expose sensitive data (optional pre-write check).
 - **CI/CD & Canary** — controlled rollout with canary snapshots and verification.
 
@@ -67,7 +67,7 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 
 ## # 6) Security & access control
 - **mTLS**: Kernel must authenticate to Reasoning Graph via mTLS; reject non-mTLS writes. Map client CN to identity and apply RBAC.
-- **RBAC**: Kernel-authorized writes only. CommandPad/Command flows that write require elevated authorization via Kernel.
+- **RBAC**: Kernel-authorized writes only. ControlPanel/Command flows that write require elevated authorization via Kernel.
 - **PII & SentinelNet**: Call SentinelNet as a pre-write hook for nodes containing potential PII or sensitive payloads. If SentinelNet denies, record `policyCheck` node with rationale.
 - **Signing keys**: keep signer keys in KMS/HSM. Do not store private keys in cluster secrets. Public keys are exposed via `GET /kernel/security/status` or Key Registry.
 - **Network policies**: restrict Reasoning service egress and ingress to required services only.

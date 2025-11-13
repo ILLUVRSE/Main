@@ -11,48 +11,44 @@ import { S3 } from 'aws-sdk';
 import crypto from 'crypto';
 
 class AuditLogService {
-    private events: Array<{ prevHash: string; hash: string; signature: string }> = [];
-    private s3: S3;
+  private eventBus: EventBus;
+  private s3: S3;
+  private bucketName: string;
 
-    constructor() {
-        this.s3 = new S3();
-    }
+  constructor(eventBus: EventBus, bucketName: string) {
+    this.eventBus = eventBus;
+    this.s3 = new S3();
+    this.bucketName = bucketName;
+  }
 
-    public logEvent(eventData: any) {
-        const prevEvent = this.events[this.events.length - 1];
-        const prevHash = prevEvent ? prevEvent.hash : '';
-        const hash = this.generateHash(eventData);
-        const signature = this.signEvent(hash);
+  async logEvent(event: any, prevHash: string) {
+    const eventHash = this.generateHash(event);
+    const signature = this.signEvent(eventHash);
+    const auditEvent = { ...event, prevHash, eventHash, signature };
 
-        const auditEvent = { prevHash, hash, signature };
-        this.events.push(auditEvent);
+    await this.eventBus.publish(auditEvent);
+    await this.archiveToS3(auditEvent);
+  }
 
-        this.publishToEventBus(auditEvent);
-        this.archiveToS3(auditEvent);
-    }
+  private generateHash(event: any): string {
+    return crypto.createHash('sha256').update(JSON.stringify(event)).digest('hex');
+  }
 
-    private generateHash(data: any): string {
-        return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
-    }
+  private signEvent(eventHash: string): string {
+    // Implement signing logic here
+    return 'signature';
+  }
 
-    private signEvent(hash: string): string {
-        // Implement signing logic here
-        return 'signature'; // Placeholder
-    }
-
-    private publishToEventBus(auditEvent: any) {
-        EventBus.publish('auditEvent', auditEvent);
-    }
-
-    private async archiveToS3(auditEvent: any) {
-        const params = {
-            Bucket: 'your-s3-bucket',
-            Key: `audit-logs/${Date.now()}.json`,
-            Body: JSON.stringify(auditEvent),
-            ObjectLockMode: 'GOVERNANCE',
-        };
-        await this.s3.putObject(params).promise();
-    }
+  private async archiveToS3(auditEvent: any) {
+    const params = {
+      Bucket: this.bucketName,
+      Key: `audit-logs/${Date.now()}.json`,
+      Body: JSON.stringify(auditEvent),
+      ContentType: 'application/json',
+      ObjectLockMode: 'GOVERNANCE',
+    };
+    await this.s3.putObject(params).promise();
+  }
 }
 
-export default new AuditLogService();
+export default AuditLogService;

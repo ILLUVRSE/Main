@@ -10,6 +10,8 @@
 import request from 'supertest';
 import { createApp, createAppSync } from '../test/utils/testApp';
 
+const RUN_IDEMPOTENCY_SUFFIX = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
 let serverForTests: any;
 let createdServer = false;
 
@@ -63,15 +65,15 @@ describe('E2E create → sign → spawn → eval → allocate', () => {
     const divisionRes = await request(app)
       .post('/kernel/division')
       .set('Accept', 'application/json')
-      .set('Idempotency-Key', 'division-ik')
-      .send({ name: 'division-1', budget: 100 });
+      .set('Idempotency-Key', `division-ik-${RUN_IDEMPOTENCY_SUFFIX}`)
+      .send({ name: 'division-1', budget: 100, goals: ['stewardship'] });
     expect([201, 200]).toContain(divisionRes.status);
 
     // Create an agent (could return 201 or 202)
     const agentRes = await request(app)
       .post('/kernel/agent')
       .set('Accept', 'application/json')
-      .set('Idempotency-Key', 'agent-ik')
+      .set('Idempotency-Key', `agent-ik-${RUN_IDEMPOTENCY_SUFFIX}`)
       .send({ divisionId: 'division-1', role: 'scout', templateId: 'template-1' });
 
     // Accept either 201 Created or 202 Accepted. Try to extract agent id in both cases.
@@ -105,7 +107,7 @@ describe('E2E create → sign → spawn → eval → allocate', () => {
     const evalRes = await request(app)
       .post('/kernel/eval')
       .set('Accept', 'application/json')
-      .send({ agentId, code: 'return 42;' });
+      .send({ agentId, metricSet: { score: 42 } });
 
     expect([200, 201]).toContain(evalRes.status);
     // Optionally check result/parsing
@@ -122,4 +124,3 @@ describe('E2E create → sign → spawn → eval → allocate', () => {
     expect(allocRes.body).toBeDefined();
   }, 30_000);
 });
-

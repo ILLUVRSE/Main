@@ -15,6 +15,16 @@ import path from 'path';
 import yaml from 'js-yaml';
 import createKernelRouter from './routes/kernelRoutes';
 import { waitForDb, runMigrations } from './db';
+import {
+  observeHttpRequest,
+  incrementServerStart,
+  incrementReadinessSuccess,
+  incrementReadinessFailure,
+  incrementKmsProbeSuccess,
+  incrementKmsProbeFailure,
+  getMetrics,
+  getMetricsContentType,
+} from './metrics/prometheus';
 
 const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -31,36 +41,6 @@ function info(...args: any[]) { console.info(LOG_PREFIX, ...args); }
 function warn(...args: any[]) { console.warn(LOG_PREFIX, ...args); }
 function error(...args: any[]) { console.error(LOG_PREFIX, ...args); }
 function debug(...args: any[]) { if ((process.env.LOG_LEVEL || '').toLowerCase() === 'debug') console.debug(LOG_PREFIX, ...args); }
-
-/** Minimal in-memory metrics exposition */
-const metrics = {
-  server_start_total: 0,
-  readiness_success_total: 0,
-  readiness_failure_total: 0,
-  kms_probe_success_total: 0,
-  kms_probe_failure_total: 0,
-};
-
-function metricsText(): string {
-  return [
-    '# HELP kernel_server_start_total Count of server starts',
-    '# TYPE kernel_server_start_total counter',
-    'kernel_server_start_total ' + metrics.server_start_total,
-    '# HELP kernel_readiness_success_total Count of successful readiness probes',
-    '# TYPE kernel_readiness_success_total counter',
-    'kernel_readiness_success_total ' + metrics.readiness_success_total,
-    '# HELP kernel_readiness_failure_total Count of failed readiness probes',
-    '# TYPE kernel_readiness_failure_total counter',
-    'kernel_readiness_failure_total ' + metrics.readiness_failure_total,
-    '# HELP kernel_kms_probe_success_total Count of successful KMS probes',
-    '# TYPE kernel_kms_probe_success_total counter',
-    'kernel_kms_probe_success_total ' + metrics.kms_probe_success_total,
-    '# HELP kernel_kms_probe_failure_total Count of failed KMS probes',
-    '# TYPE kernel_kms_probe_failure_total counter',
-    'kernel_kms_probe_failure_total ' + metrics.kms_probe_failure_total,
-    '',
-  ].join('\n');
-}
 
 /** Probe KMS reachability (best-effort) */
 async function checkKmsReachable(timeoutMs = 3000): Promise<boolean> {
@@ -79,32 +59,27 @@ async function checkKmsReachable(timeoutMs = 3000): Promise<boolean> {
 
 /** Readiness checks: DB and KMS (if required) */
 async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
+  // DB quick check
   try {
-    // DB quick check
-    try {
-      await waitForDb(5_000, 500);
-    } catch (e) {
-      metrics.readiness_failure_total++;
-      return { ok: false, details: 'db.unreachable' };
-    }
-
-    // KMS check when required/configured
-    if (REQUIRE_KMS || KMS_ENDPOINT) {
-      const reachable = await checkKmsReachable(3000);
-      if (!reachable) {
-        metrics.kms_probe_failure_total++;
-        metrics.readiness_failure_total++;
-        return { ok: false, details: 'kms.unreachable' };
-      }
-      metrics.kms_probe_success_total++;
-    }
-
-    metrics.readiness_success_total++;
-    return { ok: true };
-  } catch (err) {
-    metrics.readiness_failure_total++;
-    return { ok: false, details: (err as Error).message || 'unknown' };
+    await waitForDb(5_000, 500);
+  } catch (e) {
+    incrementReadinessFailure();
+    return { ok: false, details: 'db.unreachable' };
   }
+
+  // KMS check when required/configured
+  if (REQUIRE_KMS || KMS_ENDPOINT) {
+    const reachable = await checkKmsReachable(3000);
+    if (!reachable) {
+      incrementKmsProbeFailure();
+      incrementReadinessFailure();
+      return { ok: false, details: 'kms.unreachable' };
+    }
+    incrementKmsProbeSuccess();
+  }
+
+  incrementReadinessSuccess();
+  return { ok: true };
 }
 
 /** Try to install OpenAPI validator if available (best-effort) */
@@ -112,22 +87,39 @@ async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const OpenApiValidatorModule: any = require('express-openapi-validator');
+    const middlewareFactory =
+      OpenApiValidatorModule?.middleware ||
+      OpenApiValidatorModule?.default?.middleware;
+
+    const validatorOptions = {
+      apiSpec,
+      validateRequests: true,
+      validateResponses: false,
+      ignoreUndocumented: true, // allow test-only/dev routes outside the published spec
+    };
+
+    if (typeof middlewareFactory === 'function') {
+      app.use(middlewareFactory(validatorOptions));
+      info('OpenAPI validation enabled using ' + OPENAPI_PATH);
+      return;
+    }
+
     const ValidatorCtor: any =
       OpenApiValidatorModule?.OpenApiValidator ||
+      OpenApiValidatorModule?.default?.OpenApiValidator ||
       OpenApiValidatorModule?.default ||
       OpenApiValidatorModule;
 
-    if (!ValidatorCtor || typeof ValidatorCtor !== 'function') {
-      throw new Error('express-openapi-validator export shape not recognized');
+    if (ValidatorCtor && typeof ValidatorCtor === 'function') {
+      const instance: any = new ValidatorCtor(validatorOptions);
+      if (typeof instance.install === 'function') {
+        await instance.install(app);
+        info('OpenAPI validation enabled using ' + OPENAPI_PATH);
+        return;
+      }
     }
 
-    const instance: any = new ValidatorCtor({ apiSpec, validateRequests: true, validateResponses: false });
-    if (typeof instance.install === 'function') {
-      await instance.install(app);
-      info('OpenAPI validation enabled using ' + OPENAPI_PATH);
-    } else {
-      throw new Error('OpenApiValidator instance does not expose install(app)');
-    }
+    throw new Error('express-openapi-validator export shape not recognized');
   } catch (err) {
     warn('Failed to load/install OpenAPI validator:', (err as Error).message || err);
   }
@@ -140,6 +132,27 @@ async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
 export async function createApp() {
   const app = express();
   app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '1mb' }));
+  app.use((req, res, next) => {
+    res.locals.routePath = req.path;
+    const start = process.hrtime.bigint();
+    let recorded = false;
+    const record = () => {
+      if (recorded) return;
+      recorded = true;
+      const durationSeconds = Number(process.hrtime.bigint() - start) / 1_000_000_000;
+      const routeLabel =
+        (res.locals.routePath as string) || (req.route && req.route.path) || req.path || req.originalUrl || 'unknown';
+      observeHttpRequest({
+        method: req.method,
+        route: routeLabel,
+        statusCode: res.statusCode || 0,
+        durationSeconds: durationSeconds < 0 ? 0 : durationSeconds,
+      });
+    };
+    res.once('finish', record);
+    res.once('close', record);
+    next();
+  });
 
   // simple request logging
   app.use((req, _res, next) => {
@@ -177,8 +190,8 @@ export async function createApp() {
 
   // Metrics endpoint
   app.get('/metrics', (_req: Request, res: Response) => {
-    res.setHeader('Content-Type', 'text/plain; version=0.0.4');
-    res.send(metricsText());
+    res.setHeader('Content-Type', getMetricsContentType());
+    res.send(getMetrics());
   });
 
   // Generic error handler
@@ -203,6 +216,7 @@ async function start() {
   try {
     info('Kernel server starting...');
     info('NODE_ENV=' + NODE_ENV + ' REQUIRE_KMS=' + REQUIRE_KMS + ' KMS_ENDPOINT=' + (KMS_ENDPOINT ? 'configured' : 'unset'));
+    incrementServerStart();
 
     if (NODE_ENV === 'production' && REQUIRE_KMS) {
       if (!KMS_ENDPOINT) {
@@ -213,11 +227,11 @@ async function start() {
       const ok = await checkKmsReachable(3_000);
       if (!ok) {
         error('Fatal: REQUIRE_KMS=true but KMS_ENDPOINT is unreachable. Exiting.');
-        metrics.kms_probe_failure_total++;
+        incrementKmsProbeFailure();
         process.exit(1);
       }
       info('KMS probe succeeded.');
-      metrics.kms_probe_success_total++;
+      incrementKmsProbeSuccess();
     }
 
     // Wait for DB and run migrations
@@ -235,7 +249,7 @@ async function start() {
     // Create and start app
     const app = await createApp();
     const server = app.listen(PORT, () => {
-      metrics.server_start_total++;
+      incrementServerStart();
       info('Kernel server listening on port ' + PORT);
       // Perform initial readiness check in background
       readinessCheck().then((r) => {
@@ -274,5 +288,3 @@ async function start() {
 if (require.main === module) {
   start();
 }
-
-

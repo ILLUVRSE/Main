@@ -47,27 +47,29 @@ BEGIN
   CREATE OR REPLACE FUNCTION convert_if_varchar_ok(tbl_schema TEXT, tbl_name TEXT, col_name TEXT) RETURNS VOID AS $fn$
   DECLARE
     full_table TEXT := quote_ident(tbl_schema) || '.' || quote_ident(tbl_name);
-    data_type TEXT;
+    column_data_type TEXT;
     non_uuid_count BIGINT;
     alter_sql TEXT;
     set_default_sql TEXT;
+    r RECORD;
+    local_uuid_regex CONSTANT TEXT := '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
   BEGIN
-    SELECT data_type INTO data_type
+    SELECT data_type INTO column_data_type
       FROM information_schema.columns
       WHERE table_schema = tbl_schema AND table_name = tbl_name AND column_name = col_name;
 
-    IF data_type IS NULL THEN
+    IF column_data_type IS NULL THEN
       RAISE NOTICE 'Column % not found on %.%', col_name, tbl_schema, tbl_name;
       RETURN;
     END IF;
 
-    IF data_type = 'uuid' THEN
+    IF column_data_type = 'uuid' THEN
       RAISE NOTICE 'Column % on %.% is already UUID — skipping', col_name, tbl_schema, tbl_name;
       RETURN;
     END IF;
 
     -- Ensure all non-null values match UUID regex
-    EXECUTE format('SELECT count(1) FROM %s WHERE %I IS NOT NULL AND NOT (%I ~* %L)', full_table, col_name, col_name, uuid_regex)
+    EXECUTE format('SELECT count(1) FROM %s WHERE %I IS NOT NULL AND NOT (%I ~* %L)', full_table, col_name, col_name, local_uuid_regex)
       INTO non_uuid_count;
 
     IF non_uuid_count > 0 THEN
@@ -131,4 +133,3 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- End of migration
-

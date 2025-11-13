@@ -1,5 +1,10 @@
 // kernel/jest.config.cjs
-module.exports = {
+const enforceCoverage =
+  (process.env.CI || '').toLowerCase() === 'true' ||
+  (process.env.ENFORCE_COVERAGE || '').toLowerCase() === 'true';
+
+/** @type {import('jest').Config} */
+const config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   rootDir: __dirname,
@@ -23,13 +28,17 @@ module.exports = {
     'src/internal/multisig.ts',
     'src/rbac.ts',
   ],
-  coverageThreshold: {
+  coverageReporters: ['text', 'lcov'],
+};
+
+if (enforceCoverage) {
+  config.coverageThreshold = {
     'src/auditStore.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
     'src/audit/auditPolicy.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
     'src/signingProxy.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
     'src/internal/multisig.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
     'src/rbac.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
-  },
-  coverageReporters: ['text', 'lcov'],
-};
+  };
+}
 
+module.exports = config;

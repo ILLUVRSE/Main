@@ -48,6 +48,7 @@ import { getReasoningClient, ReasoningClientError } from '../reasoning/client';
 
 const ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = ENV === 'production';
+const ENABLE_TEST_ENDPOINTS = ((process.env.ENABLE_TEST_ENDPOINTS || '').toLowerCase() === 'true') || ENV === 'test';
 
 function applyProductionGuards(...middlewares: RequestHandler[]): RequestHandler[] {
   return IS_PRODUCTION ? middlewares : [];
@@ -443,13 +444,13 @@ export default function createKernelRouter(): Router {
         }
       } catch (err) {
         // Unexpected errors: ensure client released if necessary, then propagate
-        if (client) {
+        if (managed && client) {
           try { await client.query('ROLLBACK').catch(() => {}); } catch(_) {}
           try { client.release(); } catch(_) {}
         }
         return next(err);
       } finally {
-        if (client) {
+        if (managed && client) {
           try { client.release(); } catch (_) {}
         }
       }
@@ -477,7 +478,7 @@ export default function createKernelRouter(): Router {
 
       try {
         const r = await query(
-          `INSERT INTO eval_reports (agent_id, payload, computed_score, ts)
+          `INSERT INTO eval_reports (agent_id, metric_set, computed_score, timestamp)
            VALUES ($1,$2,$3,$4) RETURNING id`,
           [agentId, asJsonString(metricSet), computedScore ?? null, timestamp],
         );
@@ -534,14 +535,29 @@ export default function createKernelRouter(): Router {
         }
 
         // Persist allocation (best-effort)
-        const allocId = body.id ?? `alloc-${crypto.randomUUID()}`;
+        const allocId = body.id ?? crypto.randomUUID();
 
         try {
           await query(
-            `INSERT INTO allocations (id, payload, created_at, updated_at)
-             VALUES ($1,$2, now(), now())
-             ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
-            [allocId, asJsonString(body)],
+            `INSERT INTO resource_allocations (id, entity_id, pool, delta, reason, requested_by, status, ts)
+             VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+             ON CONFLICT (id) DO UPDATE SET
+               entity_id = EXCLUDED.entity_id,
+               pool = EXCLUDED.pool,
+               delta = EXCLUDED.delta,
+               reason = EXCLUDED.reason,
+               requested_by = EXCLUDED.requested_by,
+               status = EXCLUDED.status,
+               ts = now()`,
+            [
+              allocId,
+              allocationContext.entityId,
+              allocationContext.pool,
+              allocationContext.delta,
+              body.reason ?? body.reason_for_request ?? null,
+              allocationContext.requester,
+              body.status ?? 'pending',
+            ],
           );
         } catch (e) {
           console.warn('persist allocation failed:', (e as Error).message || e);
@@ -657,7 +673,7 @@ export default function createKernelRouter(): Router {
    */
   router.get(
     '/kernel/reason/:node',
-    ...requireAuthInProduction(),
+    requireAnyAuthenticated,
     async (req: Request, res: Response, next: NextFunction) => {
       const nodeId = req.params.node;
       try {
@@ -680,6 +696,22 @@ export default function createKernelRouter(): Router {
     },
   );
 
+  if (ENABLE_TEST_ENDPOINTS) {
+    router.get('/principal', (req: Request, res: Response) => {
+      const principal = getPrincipalFromRequest(req);
+      return res.json(principal);
+    });
+
+    router.get('/require-any', requireAnyAuthenticated, (req: Request, res: Response) => {
+      const principal = (req as any).principal || getPrincipalFromRequest(req);
+      return res.json({ ok: true, principal });
+    });
+
+    router.get('/require-roles', requireRoles(Roles.SUPERADMIN, Roles.OPERATOR), (req: Request, res: Response) => {
+      const principal = (req as any).principal || getPrincipalFromRequest(req);
+      return res.json({ ok: true, principal });
+    });
+  }
+
   return router;
 }
-

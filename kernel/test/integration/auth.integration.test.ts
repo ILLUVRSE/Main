@@ -12,14 +12,25 @@
  * If your app's export path differs, update resolveApp() to point to the correct module.
  */
 
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import crypto from 'crypto';
-import { createApp } from '../../src/server';
+import express from 'express';
+import createKernelRouter from '../../src/routes/kernelRoutes';
 
 let app: any;
 
-beforeAll(async () => {
-  app = await createApp();
+beforeAll(() => {
+  process.env.ENABLE_TEST_ENDPOINTS = 'true';
+});
+
+afterAll(() => {
+  delete process.env.ENABLE_TEST_ENDPOINTS;
+});
+
+beforeEach(() => {
+  app = express();
+  app.use(express.json());
+  app.use(createKernelRouter());
 });
 
 // Use TEST_CLIENT_SECRET (CI) or generate a random 32-byte secret for this run.

@@ -1,5 +1,5 @@
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 import createKernelRouter, { IdempotencyRecord, IdempotencyStore } from '../../src/api/kernels/handler';
 import { resetAuthCaches } from '../../src/middleware/auth';

@@ -12,8 +12,8 @@
  */
 
 import { Router } from "express";
-import sandboxGuard from "../middleware/sandboxGuard.js";
-import validator from "../services/validator.js";
+import sandboxGuard from "../middleware/sandboxGuard";
+import validator from "../services/validator";
 
 const r = Router();
 
@@ -75,4 +75,3 @@ r.post("/", sandboxGuard, async (req, res, next) => {
 });
 
 export default r;
-

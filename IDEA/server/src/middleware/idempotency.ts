@@ -1,6 +1,6 @@
 // server/src/middleware/idempotency.ts
 import path from 'path';
-import { readJson, writeJsonAtomic } from '../utils/storage.js';
+import { readJson, writeJsonAtomic } from '../utils/storage';
 
 const IDEMP_PATH = path.resolve(process.cwd(), 'data', 'idempotency.json');
 
@@ -44,4 +44,3 @@ async function ensureIdemStore() {
     await writeJsonAtomic(IDEMP_PATH, {});
   }
 }
-

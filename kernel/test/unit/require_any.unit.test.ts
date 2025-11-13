@@ -1,6 +1,6 @@
 // kernel/test/unit/require_any.unit.test.ts
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import { requireAnyAuthenticated } from '../../src/rbac';
 
 describe('requireAnyAuthenticated middleware', () => {
@@ -45,4 +45,3 @@ describe('requireAnyAuthenticated middleware', () => {
     expect(Array.isArray(res.body.principal.roles)).toBe(true);
   });
 });
-

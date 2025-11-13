@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import { hasRole, requireRoles, requireAuthenticated, Roles } from '../../src/middleware/rbac';
 import { AuthenticatedPrincipal } from '../../src/middleware/auth';
 

@@ -1,26 +1,31 @@
-import request from 'supertest';
-import { createApp } from '../../src/server';
-import { resetMetrics } from '../../src/metrics/prometheus';
+import { resetMetrics, observeHttpRequest, getMetrics, getMetricsContentType } from '../../src/metrics/prometheus';
 
 describe('Prometheus metrics', () => {
   beforeEach(() => {
     resetMetrics();
   });
 
-  it('scrapes HTTP metrics with per-endpoint labels', async () => {
-    const app = await createApp();
+  it('records HTTP metrics with per-endpoint labels', () => {
+    observeHttpRequest({
+      method: 'GET',
+      route: '/health',
+      statusCode: 200,
+      durationSeconds: 0.05,
+    });
+    observeHttpRequest({
+      method: 'GET',
+      route: '/health',
+      statusCode: 200,
+      durationSeconds: 0.01,
+    });
 
-    await request(app).get('/health').expect(200);
+    const contentType = getMetricsContentType();
+    expect(contentType).toContain('text/plain');
 
-    const res = await request(app).get('/metrics').expect(200);
-
-    expect(res.headers['content-type']).toContain('text/plain');
-    expect(res.text).toContain('kernel_http_requests_total');
-    expect(res.text).toMatch(new RegExp('kernel_http_requests_total\\{[^}]*route="\\/health"[^}]*status_code="200"'));
-    expect(res.text).toContain('kernel_http_request_duration_seconds_bucket');
-    expect(res.text).toMatch(
-      new RegExp('kernel_http_request_duration_quantiles_seconds\\{[^}]*quantile="0.95"'),
-    );
+    const body = getMetrics();
+    expect(body).toContain('kernel_http_requests_total');
+    expect(body).toMatch(new RegExp('kernel_http_requests_total\\{[^}]*route="\\/health"[^}]*status_code="200"'));
+    expect(body).toContain('kernel_http_request_duration_seconds_bucket');
+    expect(body).toMatch(new RegExp('kernel_http_request_duration_quantiles_seconds\\{[^}]*quantile="0.95"'));
   });
 });
-

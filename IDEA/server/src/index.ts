@@ -3,24 +3,16 @@
 
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
 import crypto from 'crypto';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const require = createRequire(import.meta.url);
+import packageRouter from './routes/package';
+import kernelRouter from './routes/kernel';
+import sandboxRouter from './routes/sandbox';
+import agentRouter from './routes/agent';
+import gitRouter from './routes/git'; // existing
+import ideaRouter from './routes/idea'; // optional existing route
 
-import packageRouter from './routes/package.js';
-import kernelRouter from './routes/kernel.js';
-import sandboxRouter from './routes/sandbox.js';
-import agentRouter from './routes/agent.js';
-import gitRouter from './routes/git.js'; // existing
-import ideaRouter from './routes/idea.js'; // optional existing route
-
-import { idempotencyMiddleware } from './middleware/idempotency.js';
+import { idempotencyMiddleware } from './middleware/idempotency';
 
 // IMPORTANT: ensure rawBody is captured for signature verification endpoints.
 const app = express();
@@ -64,11 +56,7 @@ function resOnFinish(res:any, cb:() => void) {
 }
 
 // idempotency middleware (global)
-app.use(await (async () => {
-  // import lazily so TypeScript/Node ESM resolution works even if missing during dev
-  const mod = await import('./middleware/idempotency.js');
-  return mod.idempotencyMiddleware();
-})());
+app.use(idempotencyMiddleware());
 
 // Mount Creator API routers
 app.use('/api/v1', packageRouter);
@@ -101,21 +89,26 @@ app.use((err:any, _req:any, res:any, _next:any) => {
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5175;
 const HOST = process.env.HOST || '127.0.0.1';
 
-const server = app.listen(PORT, HOST, () => {
-  console.log(`[codex] server listening on http://${HOST}:${PORT}`);
-});
+let server: ReturnType<typeof app.listen> | null = null;
 
-// graceful shutdown
-function shutdown() {
-  console.log('Shutting down server...');
-  server.close(() => {
-    console.log('Server closed.');
-    process.exit(0);
+if (process.env.NODE_ENV !== 'test') {
+  server = app.listen(PORT, HOST, () => {
+    console.log(`[codex] server listening on http://${HOST}:${PORT}`);
   });
-  setTimeout(() => process.exit(1), 5000);
+
+  // graceful shutdown
+  const shutdown = () => {
+    console.log('Shutting down server...');
+    server?.close(() => {
+      console.log('Server closed.');
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 5000);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
 
+export { server };
 export default app;
-

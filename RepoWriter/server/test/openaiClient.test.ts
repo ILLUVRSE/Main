@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 
 describe('openaiClient', () => {
   let realFetch: any;
 
   beforeEach(() => {
-    vi.resetModules();
+    jest.resetModules();
     realFetch = globalThis.fetch;
     process.env.OPENAI_API_KEY = 'test-key';
     process.env.OPENAI_PROJECT_ID = 'proj-test';
@@ -14,11 +14,11 @@ describe('openaiClient', () => {
     globalThis.fetch = realFetch;
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_PROJECT_ID;
-    vi.restoreAllMocks();
+    jest.restoreAllMocks();
   });
 
   it('sends Authorization and OpenAI-Project headers and parses JSON', async () => {
-    globalThis.fetch = vi.fn(async (url: any, opts: any) => {
+    globalThis.fetch = jest.fn(async (url: any, opts: any) => {
       expect(String(url)).toContain('/v1/chat/completions');
       expect(opts?.method).toBe('POST');
       expect(opts?.headers?.Authorization).toBe('Bearer test-key');
@@ -32,7 +32,7 @@ describe('openaiClient', () => {
       };
     });
 
-    const { chatJson } = await import('../src/services/openaiClient.js');
+    const { chatJson } = await import('../src/services/openaiClient');
     const res = await chatJson('system', 'user');
     expect(res).toEqual({ result: 'ok' });
   });
@@ -40,7 +40,7 @@ describe('openaiClient', () => {
   it('omits OpenAI-Project header when not present', async () => {
     delete process.env.OPENAI_PROJECT_ID;
 
-    globalThis.fetch = vi.fn(async (_url: any, opts: any) => {
+    globalThis.fetch = jest.fn(async (_url: any, opts: any) => {
       expect(opts?.headers?.['OpenAI-Project']).toBeUndefined();
       return {
         ok: true,
@@ -51,9 +51,8 @@ describe('openaiClient', () => {
       };
     });
 
-    const { chatJson } = await import('../src/services/openaiClient.js');
+    const { chatJson } = await import('../src/services/openaiClient');
     const res = await chatJson('system', 'user');
     expect(res).toEqual({});
   });
 });
-

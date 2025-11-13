@@ -1,14 +1,12 @@
 import { Router } from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
-import { readJson, writeJsonAtomic } from '../utils/storage.js';
-import { chat as ollamaChat } from '../utils/ollama.js';
+import { readJson, writeJsonAtomic } from '../utils/storage';
+import { chat as ollamaChat } from '../utils/ollama';
 
 const router = Router();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_PATH = path.resolve(__dirname, '../../data/ideas.json');
+const DATA_PATH = path.resolve(process.cwd(), 'data/ideas.json');
 
 export interface IdeaGeneration {
   id: string;

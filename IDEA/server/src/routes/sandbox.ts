@@ -4,8 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs/promises';
 import { spawn } from 'child_process';
-import { requireAuth } from '../middleware/auth.js';
-import { emitEvent } from '../utils/events.js';
+import { requireAuth } from '../middleware/auth';
+import { emitEvent } from '../utils/events';
 
 const router = Router();
 
@@ -134,4 +134,3 @@ function runCommandCapture(cmd: string, opts: any = {}, timeout = 120000) {
     });
   });
 }
-

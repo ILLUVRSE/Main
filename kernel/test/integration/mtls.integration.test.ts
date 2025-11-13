@@ -3,7 +3,7 @@ import path from 'path';
 import express from 'express';
 import https from 'https';
 import { AddressInfo } from 'net';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { authMiddleware, resetAuthCaches } from '../../src/middleware/auth';
 

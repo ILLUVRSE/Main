@@ -1,5 +1,5 @@
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 
 const ORIGINAL_ENV = process.env.NODE_ENV;
 

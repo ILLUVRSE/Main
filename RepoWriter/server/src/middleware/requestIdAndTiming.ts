@@ -7,7 +7,7 @@
  */
 
 import { Request, Response, NextFunction } from "express";
-import { generateRequestId, logInfo, logError, logWarn } from "../telemetry/logger.js";
+import { generateRequestId, logInfo, logError, logWarn } from "../telemetry/logger";
 
 export function requestIdAndTiming(req: Request, res: Response, next: NextFunction) {
   try {
@@ -63,4 +63,3 @@ export function requestIdAndTiming(req: Request, res: Response, next: NextFuncti
 }
 
 export default requestIdAndTiming;
-

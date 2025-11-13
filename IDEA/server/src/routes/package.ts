@@ -4,8 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
-import { sha256FromFile } from '../utils/hash.js';
-import { requireAuth } from '../middleware/auth.js';
+import { sha256FromFile } from '../utils/hash';
+import { requireAuth } from '../middleware/auth';
 
 const router = Router();
 
@@ -97,4 +97,3 @@ router.post('/package/complete', requireAuth(['creator']), async (req:any, res) 
 });
 
 export default router;
-

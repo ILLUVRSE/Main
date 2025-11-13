@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { chat as ollamaChat } from '../utils/ollama.js';
-import type { ChatMessage } from '../utils/ollama.js';
+import { chat as ollamaChat } from '../utils/ollama';
+import type { ChatMessage } from '../utils/ollama';
 
 const router = Router();
 

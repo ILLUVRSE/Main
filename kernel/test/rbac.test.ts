@@ -4,7 +4,11 @@ import { createTestApp } from './utils/testApp';
 import { hasAnyRole, hasRole, Roles, Principal } from '../src/rbac';
 
 describe('RBAC unit tests', () => {
-  const app = createTestApp();
+  let app: any;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+  });
 
   describe('getPrincipalFromRequest via /principal', () => {
     test('returns human principal for x-oidc-sub + x-oidc-roles', async () => {
@@ -171,4 +175,3 @@ describe('RBAC unit tests', () => {
     });
   });
 });
-

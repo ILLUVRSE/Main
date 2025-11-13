@@ -3,10 +3,28 @@
     "RepoWriter/server/",
     "RepoWriter/web/",
     "RepoWriter/sandbox/",
+    "kernel/",
+    "agent-manager/",
+    "memory-layer/",
+    "reasoning-graph/",
+    "eval-engine/",
+    "sentinelnet/",
+    "ai-infra/",
+    "marketplace/",
+    "finance/",
+    "capital/",
+    "IDEA/",
+    "commandpad/",
+    "market-media/",
+    "market/",
     "src/",
     "services/",
-    "packages/",
-    "tests/"
+    "scripts/",
+    "docs/",
+    "devops/",
+    "tools/",
+    "tests/",
+    "packages/"
   ],
   "forbidden_paths": [
     "infra/",
@@ -16,6 +34,8 @@
     ".env",
     "RepoWriter/server/config.ts",
     "RepoWriter/server/.env",
-    "RepoWriter/.github/"
+    "RepoWriter/.github/",
+    "docker-data/",
+    ".git/"
   ]
 }

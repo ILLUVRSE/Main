@@ -1,0 +1,10 @@
+[
+  {
+    "path": "src/services/hello.ts",
+    "content": "// hello.ts\n\nimport express from 'express';\n\nconst router = express.Router();\n\n// GET /api/hello endpoint\nrouter.get('/hello', (req, res) => {\n    res.status(200).json({ msg: 'hello' });\n});\n\nexport default router;\n"
+  },
+  {
+    "path": "src/services/index.ts",
+    "content": "// index.ts\n\nimport express from 'express';\nimport helloRouter from './hello';\n\nconst app = express();\n\n// Use the hello router\napp.use('/api', helloRouter);\n\nexport default app;\n"
+  }
+]

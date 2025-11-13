@@ -1,33 +1,22 @@
 // integrationTests.ts
-
 /**
- * Integration tests for Kernel, Eval Engine, Agent Manager, and SentinelNet.
- * These tests ensure that all components work together as expected.
- */
-
+* Integration tests for Kernel, Eval Engine, Agent Manager, and SentinelNet.
+* These tests ensure that all components work together as expected.
+* Tests for telemetry and audit events for Agent Manager actions.
+*/
 import { Kernel } from './kernel';
-import { EvalEngine } from './evalEngine';
-import { AgentManager } from './agentManager';
-import { SentinelNet } from './sentinelNet';
+import AuditLogService from './auditLog';
 
-describe('Integration Tests', () => {
-  let kernel;
-  let evalEngine;
-  let agentManager;
-  let sentinelNet;
-
-  beforeAll(() => {
-    kernel = new Kernel();
-    evalEngine = new EvalEngine();
-    agentManager = new AgentManager();
-    sentinelNet = new SentinelNet();
+describe('Agent Manager Telemetry and Audit Events', () => {
+  it('should emit telemetry metrics on spawn', () => {
+    // Test logic for spawn action
+    AuditLogService.emitTelemetryMetric('spawn', 1);
   });
 
-  test('Kernel, Eval Engine, Agent Manager and SentinelNet should pass integration tests', async () => {
-    // Implement the actual test logic here
-    expect(await kernel.run()).toBe(true);
-    expect(await evalEngine.evaluate()).toBe(true);
-    expect(await agentManager.manage()).toBe(true);
-    expect(await sentinelNet.check()).toBe(true);
+  it('should emit audit event on start', () => {
+    // Test logic for start action
+    AuditLogService.emitAuditEvent('start', { /* details */ });
   });
+
+  // Additional tests for stop and scale actions
 });

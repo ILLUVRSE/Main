@@ -1,0 +1,31 @@
+name: repowriter-ci
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  server-checks:
+    name: Server: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install server dependencies
+        run: npm --prefix server ci
+
+      - name: Build server (TypeScript)
+        run: npm --prefix server run build
+
+      - name: Run server tests
+        run: npm --prefix server run test
+
+      - name: Security audit (fail on moderate+)
+        run: npm --prefix server audit --audit-level=moderate
+

@@ -50,7 +50,7 @@ Fields (required unless noted):
 2. Service requests canonicalization and hashing via Kernel helper or local library.
 3. Kernel (or authorized signing service) attaches `prevHash`, computes `hash`, requests signature from KMS/HSM, and receives `signature`.
 4. Kernel writes the completed AuditEvent to the append-only stream (Kafka topic `audit-events`) and a durable sink (Postgres index + S3 cold storage).
-5. Emit a short, signed pointer (event id + hash) to other consumers (SentinelNet, CommandPad).
+5. Emit a short, signed pointer (event id + hash) to other consumers (SentinelNet, ControlPanel).
 
 **Important:** The signing step must be atomic with the append step to avoid gaps; implement a two-phase or transactional pattern where supported.
 
@@ -85,7 +85,7 @@ Fields (required unless noted):
 
 ## # 9) Access control & roles (audit events)
 - **Producers:** Kernel core + authorized infra services (must use mTLS and be mapped to Producer role). Producers can write events to the primary stream.
-- **Consumers:** SentinelNet, CommandPad, Security tooling, and Auditors (read-only).
+- **Consumers:** SentinelNet, ControlPanel, Security tooling, and Auditors (read-only).
 - **Management:** Only SecurityEngineer / SuperAdmin may manage retention policies, legal holds, and run export proofs.
 
 **Auditor privileges:** read-only access to historical events; no ability to produce or modify events.

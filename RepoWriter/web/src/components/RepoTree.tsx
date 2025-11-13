@@ -1,19 +1,17 @@
 import React, { useEffect, useState } from "react";
 
-/**
- * RepoTree
- *
- * Simple file list for the repository. Features:
- *  - pattern input (glob) to filter files (defaults to "**/*.*")
- *  - file list with refresh
- *  - click a file to load its content and dispatch a global event "repo:open-file"
- *
- * The dispatched event is a CustomEvent with `detail = { path, content }`.
- * Consumers (EditorPage, CodeAssistant) can listen for this event to open files.
- *
- * This component is intentionally lightweight and dependency-free; for very large
- * repositories you should replace the list with a virtualized tree (react-window).
- */
+// RepoTree
+//
+// Simple file list for the repository. Features:
+//  - pattern input (glob) to filter files (defaults to "** / *.*")
+//  - file list with refresh
+//  - click a file to load its content and dispatch a global event "repo:open-file"
+//
+// The dispatched event is a CustomEvent with `detail = { path, content }`.
+// Consumers (EditorPage, CodeAssistant) can listen for this event to open files.
+//
+// This component is intentionally lightweight and dependency-free; for very large
+// repositories you should replace the list with a virtualized tree (react-window).
 
 export default function RepoTree() {
   const [pattern, setPattern] = useState("**/*.*");
@@ -133,4 +131,3 @@ const smallBtn: React.CSSProperties = {
   background: "#fff",
   cursor: "pointer",
 };
-

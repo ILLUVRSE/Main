@@ -1,8 +1,8 @@
 // index.ts
 
 import express from 'express';
-import catalogRoutes from './routes/catalog.route.js';
-import checkoutRoutes from './routes/checkout.route.js';
+import catalogRoutes from './routes/catalog.route';
+import checkoutRoutes from './routes/checkout.route';
 
 const app = express();
 app.use(express.json());

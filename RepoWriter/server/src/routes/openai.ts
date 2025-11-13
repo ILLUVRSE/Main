@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { planEdits } from "../services/planner.js";
-import { applyPatches } from "../services/patcher.js";
+import { planEdits } from "../services/planner";
+import { applyPatches } from "../services/patcher";
 
 const r = Router();
 
@@ -23,4 +23,3 @@ r.post("/apply", async (req, res, next) => {
 });
 
 export default r;
-

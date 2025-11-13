@@ -7,7 +7,7 @@
  * If your server export path is different, adjust resolveApp().
  */
 
-import request from 'supertest';
+import request, { type MockSupertestResponse } from '../utils/mockSupertest';
 import { createApp } from '../../src/server';
 
 let app: any;
@@ -34,7 +34,7 @@ describe('RBAC integration (test-only endpoints)', () => {
     const rawRoles = ['Operator', 'DivisionLead'];
 
     // Try each header name until one returns 200
-    let res: request.Response | undefined;
+    let res: MockSupertestResponse | undefined;
     for (const h of headerNames) {
       res = await request(app)
         .get('/principal')

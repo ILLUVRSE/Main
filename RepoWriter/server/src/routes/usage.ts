@@ -1,9 +1,8 @@
 import { Router } from "express";
-import { snapshotUsage } from "../services/usage.js";
+import { snapshotUsage } from "../services/usage";
 const r = Router();
 
 r.get("/snapshot", (_req, res) => {
   res.json(snapshotUsage());
 });
 export default r;
-

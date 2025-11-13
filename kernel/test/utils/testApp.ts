@@ -106,3 +106,41 @@ export default {
 };
 
 export { createApp as createTestApp, createAppSync as createTestAppSync };
+
+async function resolveExpressApp(value: any): Promise<any> {
+  if (!value) return value;
+  if (typeof value === 'function' && (value.use || value.handle)) return value;
+  if (value && typeof value.app === 'function' && (value.app.use || value.app.handle)) return value.app;
+  if (value && typeof value.default !== 'undefined') {
+    return resolveExpressApp(value.default);
+  }
+  if (typeof value === 'function') {
+    const maybe = value();
+    const resolved = (maybe && typeof maybe.then === 'function') ? await maybe : maybe;
+    return resolveExpressApp(resolved);
+  }
+  if (value && typeof value.server === 'object' && value.app) {
+    return resolveExpressApp(value.app);
+  }
+  return value;
+}
+
+export async function getExpressAppForTests(): Promise<any> {
+  let raw: any;
+  try {
+    raw = createAppSync();
+  } catch {
+    // ignore
+  }
+  if (!raw) {
+    raw = await createApp();
+  }
+  if (!raw && exportedApp) {
+    raw = exportedApp;
+  }
+  const app = await resolveExpressApp(raw);
+  if (!app || typeof app.use !== 'function') {
+    throw new Error('getExpressAppForTests: unable to resolve express app');
+  }
+  return app;
+}

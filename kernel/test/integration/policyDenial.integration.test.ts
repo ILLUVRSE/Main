@@ -1,5 +1,5 @@
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import createKernelRouter from '../../src/routes/kernelRoutes';
 import * as dbModule from '../../src/db';
 import { MockDb } from '../utils/mockDb';

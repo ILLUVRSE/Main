@@ -4,8 +4,8 @@
  * Lightweight wrapper that invokes the sandbox runner to validate patches (typecheck/tests/lint).
  */
 
-import { logInfo, logError } from "../telemetry/logger.js";
-import { runTestsInSandbox, SandboxOptions, SandboxResult, PatchInput } from "./sandboxRunner.js";
+import { logInfo, logError } from "../telemetry/logger";
+import { runTestsInSandbox, SandboxOptions, SandboxResult, PatchInput } from "./sandboxRunner";
 
 /**
  * validatePatches
@@ -28,4 +28,3 @@ export async function validatePatches(patches: PatchInput[], options: SandboxOpt
 }
 
 export default { validatePatches };
-

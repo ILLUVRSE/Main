@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { gitStatus, gitBranch, gitCommit, gitPush } from "../services/git.js";
+import { gitStatus, gitBranch, gitCommit, gitPush } from "../services/git";
 
 const r = Router();
 
@@ -17,4 +17,3 @@ r.post("/push", async (req, res, next) => {
 });
 
 export default r;
-

@@ -8,7 +8,9 @@ module.exports = {
   },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
-  transformIgnorePatterns: ['/node_modules/'],
+  transformIgnorePatterns: [
+    '/node_modules/(?!((\\.pnpm/(supertest|superagent)[^/]+/node_modules/(supertest|superagent))|(supertest|superagent))/)'
+  ],
   globals: {
     'ts-jest': {
       tsconfig: 'tsconfig.json',
@@ -16,4 +18,3 @@ module.exports = {
     }
   }
 };
-

@@ -1,7 +1,7 @@
 // catalog.route.ts
 
 import express from 'express';
-import { listItems, previewItem } from '../services/catalog.js';
+import { listItems, previewItem } from '../services/catalog';
 
 const router = express.Router();
 

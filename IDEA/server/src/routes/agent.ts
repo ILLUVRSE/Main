@@ -1,3 +1,10 @@
+import { Router } from 'express';
+import path from 'path';
+import fs from 'fs/promises';
+import { requireAuth } from '../middleware/auth';
+
+const router = Router();
+
 // GET /api/v1/agent/status/:agent_id
 // Returns agent registration / kernel status / latest signed manifest
 router.get('/agent/status/:agent_id', requireAuth(), async (req:any, res) => {
@@ -58,3 +65,4 @@ router.get('/agent/status/:agent_id', requireAuth(), async (req:any, res) => {
   });
 });
 
+export default router;

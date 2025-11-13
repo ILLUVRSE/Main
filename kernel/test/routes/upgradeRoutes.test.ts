@@ -1,5 +1,5 @@
 import express from 'express';
-import request from 'supertest';
+import request from '../utils/mockSupertest';
 import createUpgradeRouter from '../../src/routes/upgradeRoutes';
 import * as dbModule from '../../src/db';
 import * as auditStore from '../../src/auditStore';

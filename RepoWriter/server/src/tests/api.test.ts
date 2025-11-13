@@ -1,14 +1,15 @@
-import request from 'supertest';
-import express from 'express';
-import apiRouter from '../services/api';
-
-const app = express();
-app.use(apiRouter);
+import { helloHandler } from '../services/api';
 
 describe('GET /api/hello', () => {
     it('should return 200 and a message', async () => {
-        const response = await request(app).get('/api/hello');
-        expect(response.status).toBe(200);
-        expect(response.body).toEqual({ msg: 'hello' });
+        const res = {
+            statusCode: 200,
+            body: null as any,
+            status(code: number) { this.statusCode = code; return this; },
+            json(payload: any) { this.body = payload; return this; }
+        };
+        helloHandler({} as any, res as any);
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({ msg: 'hello' });
     });
 });

@@ -7,9 +7,10 @@ describe('audit-verify utility', () => {
   const keyPair = crypto.generateKeyPairSync('ed25519');
   const spkiPublicKey = keyPair.publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
   const publicKeyB64 = spkiPublicKey.slice(spkiPublicKey.length - 32).toString('base64');
+  const publicKeyPem = keyPair.publicKey.export({ format: 'pem', type: 'spki' }).toString();
   const signerMap = new Map([[signerId, { publicKey: publicKeyB64 }]]);
 
-  function buildEvent(id: string, eventType: string, payload: any, prevHash?: string | null) {
+  function buildEvent(id: string, eventType: string, payload: any, prevHash?: string | null): any {
     const canonical = canonicalize(payload) as Buffer;
     const prevBytes = prevHash ? Buffer.from(prevHash, 'hex') : Buffer.alloc(0);
     const hashBytes = crypto.createHash('sha256').update(Buffer.concat([canonical, prevBytes])).digest();
@@ -74,18 +75,41 @@ describe('audit-verify utility', () => {
       { signerId: 'a', publicKey: publicKeyB64 },
       { signer_id: 'b', public_key: publicKeyB64, algorithm: 'Ed25519' },
     ]);
-    expect(arrRegistry.get('a')?.publicKey).toBe(publicKeyB64);
-    expect(arrRegistry.get('b')?.publicKey).toBe(publicKeyB64);
+    expect(arrRegistry.get('a')?.publicKey).toMatch(/BEGIN PUBLIC KEY/);
+    expect(arrRegistry.get('b')?.publicKey).toMatch(/BEGIN PUBLIC KEY/);
 
     const mapRegistry = parseSignerRegistry({
       c: publicKeyB64,
       d: { publicKey: publicKeyB64 },
     });
-    expect(mapRegistry.get('c')?.publicKey).toBe(publicKeyB64);
-    expect(mapRegistry.get('d')?.publicKey).toBe(publicKeyB64);
+    expect(mapRegistry.get('c')?.publicKey).toMatch(/BEGIN PUBLIC KEY/);
+    expect(mapRegistry.get('d')?.publicKey).toMatch(/BEGIN PUBLIC KEY/);
   });
 
   it('rejects invalid public keys', () => {
     expect(() => parseSignerRegistry([{ signerId: 'bad', publicKey: 'not-base64' }])).toThrow(/Public key/);
+  });
+
+  it('normalizes algorithm names', () => {
+    const reg = parseSignerRegistry([{ signerId: 'hmac', publicKey: publicKeyPem, algorithm: 'HMAC' }]);
+    expect(reg.get('hmac')?.algorithm).toBe('hmac-sha256');
+  });
+
+  it('accepts hash_bytes override for ed25519 digest verification', () => {
+    const events = [] as any[];
+    let prevHash: string | undefined;
+    for (let i = 0; i < 2; i += 1) {
+      const event = buildEvent(`hash-bytes-${i}`, 'test.event', { index: i }, prevHash);
+      if (i === 0) {
+        event.hash_bytes = Buffer.from(event.hash, 'hex');
+      } else {
+        event.hash_bytes = event.hash; // hex string path
+      }
+      events.push(event);
+      prevHash = event.hash;
+    }
+
+    const head = verifyEvents(events, signerMap);
+    expect(head).toBe(prevHash);
   });
 });

@@ -21,17 +21,20 @@ describe('signingProxy', () => {
 
   test('falls back to local provider when KMS not configured and REQUIRE_KMS=false', async () => {
     // Mock kms config to indicate no endpoint and REQUIRE_KMS=false
-    jest.doMock('../../src/config/kms', () => {
+    jest.doMock('../src/config/kms', () => {
+      const loadKmsConfig = jest.fn(() => ({
+        endpoint: undefined,
+        requireKms: false,
+        signerId: 'local-signer',
+        bearerToken: undefined,
+        mtlsCertPath: undefined,
+        mtlsKeyPath: undefined,
+        timeoutMs: 5000,
+      }));
       return {
         __esModule: true,
-        default: {
-          endpoint: null,
-          requireKms: false,
-          signerId: 'local-signer',
-          bearerToken: null,
-          mtlsCertPath: null,
-          mtlsKeyPath: null,
-        },
+        default: loadKmsConfig,
+        loadKmsConfig,
       };
     });
 
@@ -48,11 +51,11 @@ describe('signingProxy', () => {
       };
     });
 
-    const localSignData = jest.fn(async (data: string) => {
+    const localSignData = jest.fn(async (data: string, _req?: any) => {
       return { signature: 'local-data-sig', signerId: 'local-signer' };
     });
 
-    jest.doMock('../../src/signingProvider', () => {
+    jest.doMock('../src/signingProvider', () => {
       class LocalSigningProvider {
         constructor(public signerId: string) {}
         async signManifest(manifest: any, _req: any) {
@@ -72,7 +75,7 @@ describe('signingProxy', () => {
     });
 
     // Import signingProxy after mocks
-    const signingProxy = (await import('../../src/signingProxy')).default;
+    const signingProxy = (await import('../src/signingProxy')).default;
 
     const manifest = { id: 'division-xyz', name: 'X' };
     const sig = await signingProxy.signManifest(manifest);
@@ -87,22 +90,25 @@ describe('signingProxy', () => {
   });
 
   test('throws when REQUIRE_KMS=true and KMS_ENDPOINT missing', async () => {
-    jest.doMock('../../src/config/kms', () => {
+    jest.doMock('../src/config/kms', () => {
+      const loadKmsConfig = jest.fn(() => ({
+        endpoint: undefined,
+        requireKms: true,
+        signerId: 'local-signer',
+        bearerToken: undefined,
+        mtlsCertPath: undefined,
+        mtlsKeyPath: undefined,
+        timeoutMs: 5000,
+      }));
       return {
         __esModule: true,
-        default: {
-          endpoint: null,
-          requireKms: true,
-          signerId: 'local-signer',
-          bearerToken: null,
-          mtlsCertPath: null,
-          mtlsKeyPath: null,
-        },
+        default: loadKmsConfig,
+        loadKmsConfig,
       };
     });
 
     // Provide basic signingProvider mock (should not be used)
-    jest.doMock('../../src/signingProvider', () => {
+    jest.doMock('../src/signingProvider', () => {
       class LocalSigningProvider {
         async signManifest() {
           return {};
@@ -120,24 +126,27 @@ describe('signingProxy', () => {
       };
     });
 
-    const signingProxyMod = await import('../../src/signingProxy');
+    const signingProxyMod = await import('../src/signingProxy');
 
     await expect(signingProxyMod.signManifest({ id: 'x' })).rejects.toThrow(/REQUIRE_KMS=true/);
     await expect(signingProxyMod.signData('abc')).rejects.toThrow(/REQUIRE_KMS=true/);
   });
 
   test('uses KMS provider when configured', async () => {
-    jest.doMock('../../src/config/kms', () => {
+    jest.doMock('../src/config/kms', () => {
+      const loadKmsConfig = jest.fn(() => ({
+        endpoint: 'http://kms.local',
+        requireKms: false,
+        signerId: 'kms-signer',
+        bearerToken: undefined,
+        mtlsCertPath: undefined,
+        mtlsKeyPath: undefined,
+        timeoutMs: 5000,
+      }));
       return {
         __esModule: true,
-        default: {
-          endpoint: 'http://kms.local',
-          requireKms: false,
-          signerId: 'kms-signer',
-          bearerToken: null,
-          mtlsCertPath: null,
-          mtlsKeyPath: null,
-        },
+        default: loadKmsConfig,
+        loadKmsConfig,
       };
     });
 
@@ -155,7 +164,7 @@ describe('signingProxy', () => {
     const kmsSignData = jest.fn(async (data: string) => ({ signature: 'kms-data-sig', signerId: 'kms-signer' }));
 
     // Mock createSigningProvider to return an object with signManifest/signData
-    jest.doMock('../../src/signingProvider', () => {
+    jest.doMock('../src/signingProvider', () => {
       return {
         __esModule: true,
         createSigningProvider: jest.fn(() => ({
@@ -168,7 +177,7 @@ describe('signingProxy', () => {
       };
     });
 
-    const signingProxy = (await import('../../src/signingProxy')).default;
+    const signingProxy = (await import('../src/signingProxy')).default;
 
     const manifest = { id: 'div-kms' };
     const sig = await signingProxy.signManifest(manifest);
@@ -180,4 +189,3 @@ describe('signingProxy', () => {
     expect(kmsSignData).toHaveBeenCalledTimes(1);
   });
 });
-

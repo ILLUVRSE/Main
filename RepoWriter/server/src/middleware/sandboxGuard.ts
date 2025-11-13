@@ -12,11 +12,12 @@
  *  - If SANDBOX_ALLOWED_ROLES is set (comma-separated, e.g., "admin,dev"),
  *    require request to include X-User-Role header (or x-user-role) that matches one of the allowed roles.
  *
- * Notes:
- *  - This is a light-weight guard for development/demo. Replace or augment with your real auth.
+ * IMPORTANT: This version is fail-closed. If the guard throws unexpectedly it will DENY the request
+ * and log a warning (do not silently allow requests).
  */
 
 import type { Request, Response, NextFunction } from "express";
+import { logWarn } from "../telemetry/logger.js";
 
 export function sandboxGuard(req: Request, res: Response, next: NextFunction) {
   try {
@@ -42,16 +43,21 @@ export function sandboxGuard(req: Request, res: Response, next: NextFunction) {
       return next();
     }
 
-    // Otherwise deny
+    // Otherwise deny with actionable message
     const msg =
       "Sandbox is not enabled. To allow sandbox/validate endpoints set SANDBOX_ENABLED=1 in the server environment. " +
       "For development only, set REPOWRITER_ALLOW_NO_KEY=1 to bypass this check. " +
       "If you need role-restricted access, set SANDBOX_ALLOWED_ROLES='admin,dev' and send X-User-Role header.";
+
     return res.status(503).json({ ok: false, error: msg });
   } catch (err: any) {
-    // Fail-open: if the guard throws unexpectedly, log and allow (so dev UX isn't blocked).
-    console.warn("[sandboxGuard] error:", err && (err.stack || err.message || err));
-    return next();
+    // Fail-closed: log and deny on unexpected errors
+    try {
+      logWarn(req as any, `[sandboxGuard] error: ${String(err?.stack || err?.message || err)}`);
+    } catch {
+      try { console.warn("[sandboxGuard] error:", err && (err.stack || err.message || err)); } catch {}
+    }
+    return res.status(503).json({ ok: false, error: "sandboxGuard internal error — request denied" });
   }
 }
 

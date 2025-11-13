@@ -3,33 +3,56 @@
  *
  * TypeScript telemetry/logger shim for RepoWriter.
  *
- * Provides:
- *  - generateRequestId(prefix?)
- *  - logInfo(reqOrMeta?, msg?, meta?)
- *  - logWarn(reqOrMeta?, msg?, meta?)
- *  - logError(reqOrMeta?, msg?, meta?)
+ * Changes:
+ * - Redact sensitive headers (authorization, cookie, set-cookie, x-api-key)
+ *   when extracting request metadata to avoid logging secrets.
  *
- * Each log function accepts either:
- *  - logInfo(req, "message", { ...meta })
- *  - logInfo("message", { ...meta })
- *  - logInfo("message")
- *  - logInfo(req)  // logs req as meta and empty message
+ * Keep the same public surface as before.
  */
+
+import type { IncomingHttpHeaders } from "http";
 
 export function generateRequestId(prefix = ""): string {
   const rnd = Math.random().toString(36).slice(2, 10);
   return prefix ? `${prefix}-${rnd}` : rnd;
 }
 
+function redactHeaders(hdrs: any): Record<string, any> {
+  if (!hdrs || typeof hdrs !== "object") return {};
+  const out: Record<string, any> = {};
+  const sensitive = new Set(["authorization", "cookie", "set-cookie", "x-api-key", "x-access-token"]);
+  for (const [k, v] of Object.entries(hdrs as Record<string, any>)) {
+    const key = String(k || "").toLowerCase();
+    if (sensitive.has(key)) {
+      out[key] = "[REDACTED]";
+    } else {
+      out[key] = v;
+    }
+  }
+  return out;
+}
+
 function extractReqMeta(reqOrMeta?: any): Record<string, any> {
   if (!reqOrMeta) return {};
   try {
     if (typeof reqOrMeta === "object" && (reqOrMeta.method || reqOrMeta.url || reqOrMeta.path)) {
+      // Normalized request metadata
+      const ip =
+        reqOrMeta.ip ||
+        (reqOrMeta.headers &&
+          (reqOrMeta.headers["x-forwarded-for"] || reqOrMeta.headers["X-Forwarded-For"])) ||
+        reqOrMeta.socket?.remoteAddress ||
+        reqOrMeta.connection?.remoteAddress;
+      const ua = reqOrMeta.headers && (reqOrMeta.headers["user-agent"] || reqOrMeta.headers["User-Agent"]);
+      const pathVal = reqOrMeta.url || reqOrMeta.path;
+      const hdrs = redactHeaders(reqOrMeta.headers || {});
+      // Return compact meta
       return {
         method: reqOrMeta.method,
-        path: reqOrMeta.url || reqOrMeta.path,
-        ip: reqOrMeta.ip || (reqOrMeta.headers && (reqOrMeta.headers["x-forwarded-for"] || reqOrMeta.headers["X-Forwarded-For"])),
-        userAgent: reqOrMeta.headers && (reqOrMeta.headers["user-agent"] || reqOrMeta.headers["User-Agent"])
+        path: pathVal,
+        ip,
+        userAgent: ua,
+        headers: hdrs
       };
     }
   } catch {
@@ -71,9 +94,6 @@ function normalizeLoggerArgs(arg1?: any, arg2?: any, arg3?: any): { meta: Record
   }
 
   // If arg2 present and arg1 is object or request-like and arg2 is object => treat as (msg, meta)
-  // But prefer these forms:
-  // - (req, msg)
-  // - (msg, meta)
   if (arg2 !== undefined) {
     // If arg1 looks like a request/object with method/url -> treat as (req, msg)
     if (arg1 && typeof arg1 === "object" && (arg1.method || arg1.url || arg1.path)) {
@@ -84,7 +104,6 @@ function normalizeLoggerArgs(arg1?: any, arg2?: any, arg3?: any): { meta: Record
   }
 
   // Only one argument provided:
-  // - If arg1 is object that looks like req/meta -> meta only; empty message
   if (arg1 !== undefined) {
     if (typeof arg1 === "object") {
       return { meta: extractReqMeta(arg1), msg: "" };

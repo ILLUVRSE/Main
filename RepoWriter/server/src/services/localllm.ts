@@ -3,17 +3,11 @@
  *
  * Server-side adapter to proxy requests to a LOCAL_LLM_URL.
  *
- * This implementation is defensive:
- *  - Accepts different response shapes (OpenAI-like {choices}, webui {text|results})
- *  - Casts/resolves various stream shapes (Node streams vs DOM ReadableStream)
- *  - Avoids unsafe accesses on `err` objects
- *
- * Exports:
- *  - generateLocalPlan(prompt: string): Promise<any>
- *  - streamLocalPlan(system: string, user: string): AsyncGenerator<{ raw: string }>
+ * Defensive and now performs server-side prompt sanitization before forwarding.
  */
 
 import fetch from "node-fetch";
+import { sanitizePrompt } from "./promptSanitizer.js";
 
 const LOCAL_LLM_URL = (process.env.LOCAL_LLM_URL || "").replace(/\/$/, "");
 
@@ -79,6 +73,14 @@ async function callTextGenerationWebuiOnce(prompt: string) {
 
 /** Public synchronous plan generator */
 export async function generateLocalPlan(prompt: string) {
+  // Sanitize incoming user prompt before doing anything
+  try {
+    sanitizePrompt(prompt);
+  } catch (err: any) {
+    // Surface a clear error to caller
+    throw new Error(`Prompt rejected by sanitizer: ${String(err?.message || err)}`);
+  }
+
   const system = [
     "You are RepoWriter's planning agent. Produce a structured plan as JSON only.",
     "JSON schema: { steps: [ { explanation: string, patches: [ { path: string, content?: string, diff?: string } ] } ] }",
@@ -124,6 +126,23 @@ export async function generateLocalPlan(prompt: string) {
  */
 export async function* streamLocalPlan(system: string, user: string) {
   if (!LOCAL_LLM_URL) throw new Error("LOCAL_LLM_URL not configured");
+
+  // Attempt to extract and sanitize the user prompt (user may be a JSON string)
+  try {
+    let userPrompt: string | null = null;
+    try {
+      const parsed = JSON.parse(user);
+      if (parsed && typeof parsed === "object" && typeof parsed.prompt === "string") {
+        userPrompt = parsed.prompt;
+      }
+    } catch {
+      // not JSON, treat whole user string as prompt
+      userPrompt = user;
+    }
+    if (userPrompt) sanitizePrompt(userPrompt);
+  } catch (err: any) {
+    throw new Error(`Prompt rejected by sanitizer: ${String(err?.message || err)}`);
+  }
 
   // Try OpenAI-like SSE streaming endpoint first
   try {

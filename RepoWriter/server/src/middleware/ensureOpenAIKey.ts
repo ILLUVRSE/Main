@@ -12,14 +12,13 @@
  *  - If process.env.SANDBOX_ENABLED === "1" -> allow (CI/local mode where sandbox/mock is used).
  *  - Otherwise -> respond 503 with an explanatory JSON payload.
  *
- * Additional:
- *  - When SANDBOX_ENABLED is set but no SANDBOX_IMAGE or SANDBOX_COMMAND is configured, emit a server-side warning.
- *
- * Attach early (before routes that call OpenAI).
+ * IMPORTANT: This version is fail-closed. If the middleware itself errors, it
+ * will refuse the request (503) and log a warning. This avoids silently allowing
+ * potentially dangerous operations when checks fail.
  */
 
 import { Request, Response, NextFunction } from "express";
-import { logWarn } from "../telemetry/logger.js"; // best-effort import if logger exists
+import { logWarn } from "../telemetry/logger.js";
 
 export function ensureOpenAIKey(req: Request, res: Response, next: NextFunction) {
   try {
@@ -49,11 +48,11 @@ export function ensureOpenAIKey(req: Request, res: Response, next: NextFunction)
     // Allow if sandbox mode explicitly enabled (CI / dev mode). This permits calling endpoints
     // when a sandbox / mock is used instead of real OpenAI.
     if (sandboxEnabled) {
-      // Warn if sandboxEnabled but no known sandbox runner config present (helpful diag)
-      const sandboxImage = process.env.SANDBOX_IMAGE || process.env.SANDBOX_COMMAND;
+      // Warn if SANDBOX_ENABLED but no known sandbox runner config present (helpful diag)
+      const sandboxImage = process.env.SANDBOX_IMAGE || process.env.SANDBOX_COMMAND || process.env.SANDBOX_DOCKER_IMAGE;
       if (!sandboxImage) {
         try {
-          console.warn("[ensureOpenAIKey] SANDBOX_ENABLED=1 but SANDBOX_IMAGE / SANDBOX_COMMAND not set; ensure your sandbox runner is configured.");
+          console.warn("[ensureOpenAIKey] SANDBOX_ENABLED=1 but no SANDBOX_IMAGE/SANDBOX_COMMAND configured; ensure your sandbox runner is configured.");
         } catch {}
       }
       return next();
@@ -66,19 +65,20 @@ export function ensureOpenAIKey(req: Request, res: Response, next: NextFunction)
       "For development only, set REPOWRITER_ALLOW_NO_KEY=1 to bypass this check. " +
       "Alternatively, to enable CI/local sandbox mode set SANDBOX_ENABLED=1 and configure your sandbox runner (SANDBOX_IMAGE or SANDBOX_COMMAND).";
 
+    // Log the warning
     try {
       logWarn(req, "ensureOpenAIKey: blocking request due to missing OpenAI key");
     } catch {
-      // If telemetry logger not present, ignore
       try { console.warn("[ensureOpenAIKey] blocking request due to missing OpenAI key"); } catch {}
     }
+
     return res.status(503).json({ ok: false, error: msg });
   } catch (err: any) {
-    // Fail-open: allow request if middleware itself errors, but log the issue
+    // Fail-closed: do not allow requests if middleware fails. Log and return 503.
     try {
       logWarn(req as any, `ensureOpenAIKey middleware error: ${String(err?.message || err)}`);
     } catch {}
-    return next();
+    return res.status(503).json({ ok: false, error: "ensureOpenAIKey middleware failed (see server logs)." });
   }
 }
 

@@ -3,29 +3,82 @@
  *
  * Helpers for creating branches, pushing and opening PRs.
  *
- * NOTES / Requirements:
- *  - Local git must be available on the server.
- *  - Pushing requires that the server's git environment is configured to authenticate
- *    with the remote (e.g., SSH key loaded, or remote URL using token).
- *  - For PR creation, provide GITHUB_TOKEN or pass token to createPullRequest().
- *
- * Exports:
- *  - getRepoFullName(): Promise<string>  // owner/repo
- *  - createBranchAndCommit(branchName, files, commitMessage, author?): Promise<{ branch: string }>
- *  - pushBranch(branchName, remote?): Promise<void>
- *  - createPullRequest(branchName, base, title, body, token?): Promise<{ url, number }>
+ * Added: allowlist enforcement and audit logging (repowriter_allowlist.json & audit.log)
  */
 
 import path from "path";
+import fs from "fs/promises";
 import fetch from "node-fetch";
 import simpleGit, { SimpleGit } from "simple-git";
 import { REPO_PATH, GITHUB_REMOTE, GIT_USER_NAME, GIT_USER_EMAIL } from "../config.js";
+import auditLog from "../services/auditLog.js";
 
 type CreateCommitOpts = {
   authorName?: string;
   authorEmail?: string;
 };
 
+/** Allowlist file path */
+const ALLOWLIST_FILE = path.join(REPO_PATH, "repowriter_allowlist.json");
+type AllowCfg = { allowed_paths?: string[]; forbidden_paths?: string[] };
+
+function normalizeRel(p: string) {
+  // normalize and use forward-slash style
+  return path.normalize(p).replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+async function loadAllowlist(): Promise<AllowCfg> {
+  try {
+    const raw = await fs.readFile(ALLOWLIST_FILE, "utf8");
+    const parsed = JSON.parse(raw) as AllowCfg;
+    parsed.allowed_paths = Array.isArray(parsed.allowed_paths) ? parsed.allowed_paths : [];
+    parsed.forbidden_paths = Array.isArray(parsed.forbidden_paths) ? parsed.forbidden_paths : [];
+    return parsed;
+  } catch {
+    // conservative default: no allowed paths (will reject)
+    return { allowed_paths: [], forbidden_paths: [] };
+  }
+}
+
+function pathIsForbidden(rel: string, allow: AllowCfg): boolean {
+  const nf = normalizeRel(rel);
+  for (const forbRaw of (allow.forbidden_paths || [])) {
+    if (!forbRaw) continue;
+    const forb = normalizeRel(forbRaw);
+    if (nf === forb || nf.startsWith(forb + "/")) return true;
+  }
+  return false;
+}
+
+function pathIsAllowedByPrefix(rel: string, allow: AllowCfg): boolean {
+  const np = normalizeRel(rel);
+  const allowed = allow.allowed_paths || [];
+  if (!Array.isArray(allowed) || allowed.length === 0) {
+    // conservative: if none defined, nothing is allowed
+    return false;
+  }
+  for (const prefRaw of allowed) {
+    if (!prefRaw) continue;
+    const pref = normalizeRel(prefRaw);
+    if (np === pref || np.startsWith(pref)) return true;
+  }
+  return false;
+}
+
+function ensureFilesAllowed(files: string[], allow: AllowCfg) {
+  const bad: string[] = [];
+  for (const f of files) {
+    const rel = normalizeRel(f);
+    if (pathIsForbidden(rel, allow) || !pathIsAllowedByPrefix(rel, allow)) {
+      bad.push(rel);
+    }
+  }
+  if (bad.length) {
+    throw new Error(`Refusing to commit files outside allowed paths or touching forbidden paths: ${bad.join(", ")}`);
+  }
+}
+
+/** Git client helper */
 function getGitClient(): SimpleGit {
   const git = simpleGit(REPO_PATH);
   return git;
@@ -35,28 +88,19 @@ function getGitClient(): SimpleGit {
 async function parseRemoteToRepoFullName(remoteName = GITHUB_REMOTE): Promise<string> {
   const git = getGitClient();
   try {
-    // Try to get remote URL via git
     const url = await git.remote(["get-url", remoteName]) as string;
     if (!url) throw new Error("empty remote url");
-    // examples:
-    // git@github.com:owner/repo.git
-    // https://github.com/owner/repo.git
-    // https://x-access-token:xxxxx@github.com/owner/repo.git
     let m = null;
     if (url.startsWith("git@")) {
-      // git@github.com:owner/repo.git
       m = url.match(/^[^:]+:([^/]+\/[^.]+)(?:\.git)?$/);
       if (m) return m[1].replace(/\.git$/, "");
     } else {
-      // https://...github.com/owner/repo.git
       m = url.match(/github\.com[:\/]([^\/]+\/[^.]+)(?:\.git)?$/);
       if (m) return m[1].replace(/\.git$/, "");
     }
-    // fallback: if GITHUB_REPO env present
     if (process.env.GITHUB_REPO) return process.env.GITHUB_REPO;
     throw new Error(`Unable to parse remote URL: ${url}`);
   } catch (err: any) {
-    // fallback to env var
     if (process.env.GITHUB_REPO) return process.env.GITHUB_REPO;
     throw new Error(`Failed to determine repo full name: ${String(err?.message || err)}`);
   }
@@ -65,6 +109,8 @@ async function parseRemoteToRepoFullName(remoteName = GITHUB_REMOTE): Promise<st
 /**
  * Create a new branch locally, add files, commit with message and author.
  * Does not push. Returns branch name.
+ *
+ * Security: Enforces repowriter_allowlist.json before staging files.
  */
 export async function createBranchAndCommit(
   branchName: string,
@@ -75,14 +121,16 @@ export async function createBranchAndCommit(
   if (!branchName) throw new Error("branchName required");
   const git = getGitClient();
 
+  // Load allowlist and enforce it for each file
+  const allow = await loadAllowlist();
+  ensureFilesAllowed(files || [], allow);
+
   // checkout new branch (create)
   await git.checkoutLocalBranch(branchName);
 
   // stage files (paths should be repo-relative)
   if (files && files.length > 0) {
     await git.add(files);
-  } else {
-    // nothing to add
   }
 
   // commit
@@ -103,7 +151,6 @@ export async function createBranchAndCommit(
 export async function pushBranch(branchName: string, remote = GITHUB_REMOTE): Promise<void> {
   const git = getGitClient();
   if (!branchName) throw new Error("branchName required for push");
-  // push branch and set upstream
   await git.push(remote, branchName, { "-u": null });
 }
 
@@ -155,6 +202,8 @@ export async function createPullRequest(
 /**
  * Convenience: create branch, commit files, push and open PR.
  * Returns { branch, commitSha, prUrl, prNumber }
+ *
+ * This function now records audit entries for attempt/success/failure.
  */
 export async function createBranchCommitPushPR(
   branchName: string,
@@ -165,13 +214,48 @@ export async function createBranchCommitPushPR(
   prBody?: string,
   opts: { authorName?: string; authorEmail?: string; pushRemote?: string; token?: string } = {}
 ) : Promise<{ branch: string; commitSha?: string; prUrl?: string; prNumber?: number }> {
-  const res = await createBranchAndCommit(branchName, files, commitMessage, { authorName: opts.authorName, authorEmail: opts.authorEmail });
-  const pushRemote = opts.pushRemote || GITHUB_REMOTE;
-  await pushBranch(branchName, pushRemote);
+  // Log attempt
+  await auditLog.logAction({
+    action: "create-branch-commit:attempt",
+    user: process.env.REPOWRITER_USER || null,
+    files,
+    branch: branchName,
+    ok: false
+  });
 
-  // create PR
-  const pr = await createPullRequest(branchName, prBase, prTitle || commitMessage, prBody || "", opts.token);
-  return { branch: branchName, commitSha: res.commitSha, prUrl: pr.url, prNumber: pr.number };
+  try {
+    const res = await createBranchAndCommit(branchName, files, commitMessage, { authorName: opts.authorName, authorEmail: opts.authorEmail });
+    const pushRemote = opts.pushRemote || GITHUB_REMOTE;
+    await pushBranch(branchName, pushRemote);
+
+    // create PR
+    const pr = await createPullRequest(branchName, prBase, prTitle || commitMessage, prBody || "", opts.token);
+
+    // Log success
+    await auditLog.logAction({
+      action: "create-branch-commit:success",
+      user: process.env.REPOWRITER_USER || null,
+      files,
+      branch: branchName,
+      prUrl: pr.url,
+      ok: true
+    });
+
+    return { branch: branchName, commitSha: res.commitSha, prUrl: pr.url, prNumber: pr.number };
+  } catch (err: any) {
+    // Log failure
+    try {
+      await auditLog.logAction({
+        action: "create-branch-commit:failure",
+        user: process.env.REPOWRITER_USER || null,
+        files,
+        branch: branchName,
+        ok: false,
+        meta: { error: String(err?.message || err) }
+      });
+    } catch {}
+    throw err;
+  }
 }
 
 /**
@@ -182,7 +266,6 @@ export async function getRepoDefaultBranch(token?: string): Promise<string> {
   const repoFull = await parseRemoteToRepoFullName();
   const [owner, repo] = repoFull.split("/");
   if (!ghToken) {
-    // fallback to main
     return "main";
   }
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;

@@ -1,26 +1,22 @@
 // sandboxRunner.ts
-//
-// Lightweight sandbox runner for RepoWriter.
-//
-// NOTE: This implementation now defaults to running commands inside a Docker container for isolation.
-// To use the legacy host-based runner, set SANDBOX_RUNTIME=host (not recommended for production).
-//
-// PII detection and SentinelNet gating implementation
 
-const PII_DETECTION_ENABLED = true; // Toggle for PII detection
-const SENTINELNET_GATING_ENABLED = true; // Toggle for SentinelNet gating
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
-function detectPII(data) {
-    // Logic for PII detection
-    return data.includes('PII'); // Simplified example
-}
+const execPromise = promisify(exec);
 
-function applySentinelNetGating(data) {
-    // Logic for SentinelNet gating
-    if (detectPII(data)) {
-        // Apply gating logic
-        console.log('SentinelNet gating applied.');
+export async function runSandbox(command: string): Promise<{ status: string }> {
+    try {
+        const { stdout, stderr } = await execPromise(command);
+        console.log(stdout);
+        if (stderr) {
+            return { status: 'fail' };
+        }
+        return { status: 'complete' };
+    } catch (error) {
+        console.error(error);
+        return { status: 'fail' };
     }
 }
 
-export { detectPII, applySentinelNetGating };
+// Additional code to secure the runtime and ensure auditability would go here.

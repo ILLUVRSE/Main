@@ -1,11 +1,13 @@
-import { Client } from 'pg';
+import { Pool } from 'pg';
 
-const client = new Client();
+const pool = new Pool();
 
-export const storeEmbedding = async (embeddingData) => {
-    // Logic to store embedding in the database
+export const storeEmbedding = async (embedding: Buffer) => {
+    const result = await pool.query('INSERT INTO memory_nodes (embedding) VALUES ($1) RETURNING id', [embedding]);
+    return result.rows[0].id;
 };
 
-export const searchEmbedding = async (query) => {
-    // Logic to search for embeddings in the database
+export const searchEmbedding = async (embedding: Buffer) => {
+    const result = await pool.query('SELECT * FROM memory_nodes WHERE embedding = $1', [embedding]);
+    return result.rows;
 };

@@ -16,38 +16,30 @@ router.post('/api/v1/agent/spawn', (req, res) => {
 // Lifecycle actions
 router.post('/api/v1/agent/:id/start', (req, res) => {
     const agentId = req.params.id;
-    if (agents[agentId]) {
-        agents[agentId].status = 'running';
-        return res.status(200).json({ status: 'started' });
-    }
-    return res.status(404).json({ error: 'Agent not found' });
+    if (!agents[agentId]) return res.status(404).send('Agent not found');
+    agents[agentId].status = 'running';
+    res.status(200).send('Started');
 });
 
 router.post('/api/v1/agent/:id/stop', (req, res) => {
     const agentId = req.params.id;
-    if (agents[agentId]) {
-        agents[agentId].status = 'stopped';
-        return res.status(200).json({ status: 'stopped' });
-    }
-    return res.status(404).json({ error: 'Agent not found' });
+    if (!agents[agentId]) return res.status(404).send('Agent not found');
+    agents[agentId].status = 'stopped';
+    res.status(200).send('Stopped');
 });
 
 router.post('/api/v1/agent/:id/restart', (req, res) => {
     const agentId = req.params.id;
-    if (agents[agentId]) {
-        agents[agentId].status = 'running';
-        return res.status(200).json({ status: 'restarted' });
-    }
-    return res.status(404).json({ error: 'Agent not found' });
+    if (!agents[agentId]) return res.status(404).send('Agent not found');
+    agents[agentId].status = 'running';
+    res.status(200).send('Restarted');
 });
 
 router.post('/api/v1/agent/:id/scale', (req, res) => {
     const agentId = req.params.id;
-    if (agents[agentId]) {
-        // Scaling logic here (if applicable)
-        return res.status(200).json({ status: 'scaled' });
-    }
-    return res.status(404).json({ error: 'Agent not found' });
+    if (!agents[agentId]) return res.status(404).send('Agent not found');
+    // Scaling logic here (not implemented)
+    res.status(200).send('Scaled');
 });
 
 export default router;

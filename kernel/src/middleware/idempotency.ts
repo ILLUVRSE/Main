@@ -9,6 +9,7 @@ interface IdempotencyContext {
   client: PoolClient;
   key: string;
   requestHash: string;
+  release?: () => void;
 }
 
 const DEFAULT_LIMIT = 1024 * 1024; // 1MB
@@ -190,17 +191,25 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
   const requestHash = computeRequestHash(req);
   const client = await getClient();
 
-  const finalizeCleanup = async (ctx: IdempotencyContext, done: { finished: boolean }): Promise<void> => {
-    if (done.finished) {
-      return;
-    }
-    done.finished = true;
-    try {
-      await ctx.client.query('ROLLBACK');
-    } catch {
-      // ignore rollback error during cleanup
-    }
-    ctx.client.release();
+const finalizeCleanup = async (ctx: IdempotencyContext, done: { finished: boolean }): Promise<void> => {
+  if (done.finished) {
+    return;
+  }
+  done.finished = true;
+  try {
+    await ctx.client.query('ROLLBACK');
+  } catch {
+    // ignore rollback error during cleanup
+  }
+  const releaseFn = ctx.release || (() => ctx.client.release());
+  releaseFn();
+};
+
+  let released = false;
+  const releaseClient = () => {
+    if (released) return;
+    released = true;
+    client.release();
   };
 
   try {
@@ -215,7 +224,7 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
       const storedHash = row.request_hash ? String(row.request_hash) : '';
       if (storedHash && storedHash !== requestHash) {
         await client.query('ROLLBACK').catch(() => {});
-        client.release();
+        releaseClient();
         res.setHeader('Idempotency-Key', trimmedKey);
         res.status(412).json({ error: 'idempotency_key_conflict' });
         return;
@@ -228,7 +237,7 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
       const normalized = normalizeResponseShape(body);
 
       await client.query('ROLLBACK').catch(() => {});
-      client.release();
+      releaseClient();
       res.setHeader('Idempotency-Key', trimmedKey);
       res.status(status).json(normalized);
       return;
@@ -241,7 +250,7 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
       [trimmedKey, req.method, req.originalUrl || req.path, requestHash, expiresAtIso],
     );
 
-    const context: IdempotencyContext = { client, key: trimmedKey, requestHash };
+    const context: IdempotencyContext = { client, key: trimmedKey, requestHash, release: releaseClient };
     res.locals.idempotency = context;
     const state = { finished: false };
 
@@ -278,7 +287,7 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
         await client.query('ROLLBACK').catch(() => {});
         state.finished = true;
         res.removeListener('close', cleanup);
-        client.release();
+        releaseClient();
         res.setHeader('Idempotency-Key', trimmedKey);
         res.status(413);
         return sender({ error: 'idempotency_response_too_large' });
@@ -307,14 +316,14 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
         // Release client and mark finished so cleanup doesn't attempt a second time.
         state.finished = true;
         res.removeListener('close', cleanup);
-        client.release();
+        releaseClient();
         res.setHeader('Idempotency-Key', trimmedKey);
         return sender(normalizedBody);
       }
 
       state.finished = true;
       res.removeListener('close', cleanup);
-      client.release();
+      releaseClient();
       res.setHeader('Idempotency-Key', trimmedKey);
       return sender(normalizedBody);
     };
@@ -335,10 +344,9 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
     } catch {
       // ignore
     }
-    client.release();
+    releaseClient();
     return next(err);
   }
 }
 
 export default idempotencyMiddleware;
-

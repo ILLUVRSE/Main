@@ -11,20 +11,28 @@
 type MaybeApp = any;
 
 function loadServer(): any {
-  // Load the compiled server (js under kernel/dist)
-  // Keep this in try/catch to surface helpful errors during development.
-  try {
-    // Use require with relative path from this file (kernel/test/utils)
-    // The compiled server is expected at kernel/dist/server.js
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const srv = require('../../dist/server');
-    return srv;
-  } catch (err) {
-    // Re-throw with clearer message
-    throw new Error(
-      `Failed to require kernel/dist/server from kernel/test/utils/testApp.ts - ensure kernel is built. Underlying error: ${(err as Error).message}`
-    );
+  // During Jest runs we prefer the TypeScript source so we never rely on a stale build.
+  const preferSrc = Boolean(process.env.JEST_WORKER_ID);
+  const candidates = preferSrc
+    ? ['../../src/server', '../../dist/server']
+    : ['../../dist/server', '../../src/server'];
+
+  const errors: string[] = [];
+
+  for (const candidate of candidates) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      return require(candidate);
+    } catch (err) {
+      errors.push(`${candidate}: ${(err as Error).message}`);
+    }
   }
+
+  throw new Error(
+    `Failed to load kernel server entrypoint from any candidate (${candidates.join(
+      ', '
+    )}). Underlying errors: ${errors.join(' | ')}`
+  );
 }
 
 const srv = loadServer();

@@ -8,35 +8,13 @@
  */
 
 import request from 'supertest';
-import path from 'path';
-import fs from 'fs';
+import { createApp } from '../../src/server';
 
-// Reuse the app resolver used in other integration tests
-function resolveApp(): any {
-  const candidates = [
-    path.resolve(__dirname, '..', '..', '..', 'dist', 'server'),
-    path.resolve(__dirname, '..', '..', '..', 'src', 'server'),
-    path.resolve(__dirname, '..', '..', '..', 'src', 'app'),
-    path.resolve(__dirname, '..', '..', '..', 'dist', 'app'),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c + '.js') || fs.existsSync(c + '.ts')) {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const mod = require(c);
-      return mod.app || mod.default || mod;
-    }
-  }
-  try {
-    // fallback
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require(path.resolve(process.cwd(), 'kernel', 'dist', 'server'));
-    return mod.app || mod.default || mod;
-  } catch (err) {
-    throw new Error('Could not resolve server app. Please ensure kernel server exports `app` or update resolveApp() in this test.');
-  }
-}
+let app: any;
 
-const app = resolveApp();
+beforeAll(async () => {
+  app = await createApp();
+});
 
 function normalizeRole(r: string): string {
   // Convert camelCase or PascalCase or underscore/space to kebab-case, then lower-case.
@@ -56,13 +34,17 @@ describe('RBAC integration (test-only endpoints)', () => {
     const rawRoles = ['Operator', 'DivisionLead'];
 
     // Try each header name until one returns 200
-    let res;
+    let res: request.Response | undefined;
     for (const h of headerNames) {
       res = await request(app)
         .get('/principal')
         .set(h, rawRoles.join(','))  // server-side role parser should parse comma-separated list
         .set('Accept', 'application/json');
       if (res.status === 200) break;
+    }
+
+    if (!res) {
+      throw new Error('No response received from /principal during RBAC test');
     }
 
     // If server returned non-200, fail with helpful debug
@@ -91,4 +73,3 @@ describe('RBAC integration (test-only endpoints)', () => {
     }
   });
 });
-

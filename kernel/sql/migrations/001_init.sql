@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS agents (
   resource_allocation JSONB DEFAULT '{}'::jsonb,
   last_heartbeat TIMESTAMPTZ,
   owner VARCHAR,
+  profile JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -178,4 +179,3 @@ COMMIT;
 -- 6) Migration idempotency:
 --    - Running this migration twice must not fail.
 --    Test: Execute the script twice: second run shouldn't error and should leave schema intact.
-

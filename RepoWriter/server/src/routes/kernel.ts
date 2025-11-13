@@ -3,35 +3,33 @@ import express from 'express';
 const router = express.Router();
 
 router.post('/sign', (req, res) => {
-  // Implementation of sign logic
-  res.status(200).send('Signed');
+  // Implementation for signing a document
+  res.status(200).send();
 });
 
 router.post('/agent', (req, res) => {
-  // Implementation of agent creation logic
-  res.status(200).send('Agent created');
+  // Implementation for creating an agent
+  res.status(200).send();
 });
 
 router.post('/allocate', (req, res) => {
-  // Implementation of resource allocation logic
-  res.status(200).send('Resources allocated');
+  // Implementation for allocating resources
+  res.status(200).send();
 });
 
 router.post('/division', (req, res) => {
-  // Implementation of division creation logic
-  res.status(200).send('Division created');
+  // Implementation for creating a division
+  res.status(200).send();
 });
 
 router.get('/audit/:id', (req, res) => {
-  const { id } = req.params;
-  // Implementation of audit retrieval logic
-  res.status(200).send(`Audit details for ${id}`);
+  // Implementation for getting audit details
+  res.status(200).send();
 });
 
 router.get('/reason/:node', (req, res) => {
-  const { node } = req.params;
-  // Implementation of reason retrieval logic
-  res.status(200).send(`Reason for node ${node}`);
+  // Implementation for getting reason details
+  res.status(200).send();
 });
 
 export default router;

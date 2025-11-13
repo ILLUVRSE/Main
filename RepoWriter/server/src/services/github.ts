@@ -1,26 +1,30 @@
+// gitHub.ts
 /**
- * gitHub.ts
- *
- * Helpers for creating branches, pushing and opening PRs.
- *
- * Added: allowlist enforcement and audit logging (repowriter_allowlist.json & audit.log)
- *
- * Telemetry & audit: emits metrics and AuditEvents for critical actions.
- * Telemetry aligns with Eval Engine needs.
- */
+* Helpers for creating branches, pushing and opening PRs.
+*
+* Added: allowlist enforcement and audit logging (repowriter_allowlist.json & audit.log)
+* Telemetry & audit: emits metrics and AuditEvents for critical actions.
+* Telemetry aligns with Eval Engine needs.
+*/
 
-// Import necessary modules for telemetry and audit logging
-import { emitMetric, logAuditEvent } from '../telemetry';
+import { emitMetric, logAuditEvent } from './telemetry';
 
-// Example function that performs a critical action
-export const createBranch = (branchName) => {
-  // Emit metric for branch creation
-  emitMetric('branch_creation', { branchName });
+function createBranch(branchName) {
+    // Logic to create a branch
+    emitMetric('branch_created');
+    logAuditEvent(`Branch created: ${branchName}`);
+}
 
-  // Perform branch creation logic here...
+function pushChanges(branchName) {
+    // Logic to push changes
+    emitMetric('changes_pushed');
+    logAuditEvent(`Changes pushed to: ${branchName}`);
+}
 
-  // Log audit event
-  logAuditEvent('Branch created', { branchName });
-};
+function openPullRequest(branchName) {
+    // Logic to open a pull request
+    emitMetric('pr_opened');
+    logAuditEvent(`Pull request opened for: ${branchName}`);
+}
 
-// Other functions that require telemetry and audit logging can be similarly updated.
+// Other existing functions...

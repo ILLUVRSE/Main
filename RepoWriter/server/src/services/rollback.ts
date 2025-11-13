@@ -4,19 +4,13 @@
  * Helpers to rollback a commit or to apply rollback metadata (previousContents)
  * returned by the patcher after an apply.
  *
- * Exports:
- *  - rollbackCommit(commitSha: string): Promise<{ok:boolean, error?:string}>
- *  - applyRollbackMetadata(metadata: { previousContents: Record<string, string|null> }): Promise<{ok:boolean, error?:string}>
+ * Changes:
+ * - rollbackCommit now requires an explicit confirmation token when
+ *   REPOWRITER_REQUIRE_ROLLBACK_CONFIRM=1 is set. This prevents accidental
+ *   destructive resets from server runtime.
  *
- * Notes:
- *  - rollbackCommit performs a `git reset --hard <commitSha>^` to move HEAD back to the parent of the given commit.
- *    This is a destructive operation (resets working tree). It is intended for local/dev use only; servers should
- *    restrict or require explicit confirmation before invoking.
- *  - applyRollbackMetadata writes previousContents back to disk (null -> delete), stages the changed files and commits
- *    a `repowriter: rollback applied` commit. This approach is safer for programmatic rollbacks where we have the
- *    exact previous file contents.
- *
- * Both functions return a small status object indicating success or failure.
+ * Note: This function preserves backward compatibility: if the env flag is
+ * not set, behavior is unchanged.
  */
 
 import fs from "fs/promises";
@@ -55,11 +49,32 @@ function safeRepoPath(candidate: string): string {
 /**
  * Roll back a single commit by resetting the repository to the parent of commitSha.
  * This is a hard reset and will modify working tree and HEAD.
+ *
+ * Security change:
+ * If REPOWRITER_REQUIRE_ROLLBACK_CONFIRM === "1", a confirmation token is required.
+ * The token must be passed in opts.confirmToken and equal the env var
+ * REPOWRITER_ROLLBACK_TOKEN. This prevents accidental destructive resets from server.
  */
-export async function rollbackCommit(commitSha: string): Promise<{ ok: boolean; error?: string }> {
+export async function rollbackCommit(
+  commitSha: string,
+  opts: { confirmToken?: string } = {}
+): Promise<{ ok: boolean; error?: string }> {
   try {
     if (!commitSha || typeof commitSha !== "string") {
       return { ok: false, error: "commitSha required" };
+    }
+
+    // If configured, require explicit confirmation token
+    if (process.env.REPOWRITER_REQUIRE_ROLLBACK_CONFIRM === "1") {
+      const provided = opts?.confirmToken || "";
+      const required = process.env.REPOWRITER_ROLLBACK_TOKEN || "";
+      if (!required) {
+        // misconfiguration: refuse safe by default
+        return { ok: false, error: "Rollback requires confirmation token but none configured on server" };
+      }
+      if (!provided || provided !== required) {
+        return { ok: false, error: "Rollback not allowed: missing or invalid confirmation token" };
+      }
     }
 
     // Verify commit exists
@@ -81,7 +96,6 @@ export async function rollbackCommit(commitSha: string): Promise<{ ok: boolean; 
     // Perform hard reset
     await git.reset(["--hard", parent]);
 
-    // Optionally create a rollback commit note – here we just perform the reset.
     return { ok: true };
   } catch (err: any) {
     logError(`rollbackCommit failed: ${String(err?.message || err)}`);

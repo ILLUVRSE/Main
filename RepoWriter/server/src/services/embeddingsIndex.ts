@@ -7,20 +7,10 @@
  * - If embeddings endpoint is not available (or fails), the module gracefully falls back to
  *   a lexical scoring fallback (so users without embeddings still get functionality).
  *
- * Index format:
- *   {
- *     updatedAt: "...",
- *     model: "text-embedding-xxx",
- *     items: [
- *       { path: "src/foo.ts", vector: [0.1, ...], textSample: "..." },
- *       ...
- *     ]
- *   }
- *
- * Exports:
- *   - buildIndex(options)
- *   - queryEmbeddings(text, { topK })
- *   - upsertFile(path)
+ * Changes:
+ * - Persist the index outside the repository when REPOWRITER_DATA_DIR is set.
+ * - Skip sensitive files (env, keys, secret dirs, production configs).
+ * - Keep existing truncation behavior for samples.
  */
 
 import fs from "fs/promises";
@@ -65,11 +55,16 @@ function cosine(a: number[] = [], b: number[] = []) {
   return adot / (Math.sqrt(anorm) * Math.sqrt(bnorm));
 }
 
-/** Read index file (create default if missing) */
+/** Determine index file path using REPOWRITER_DATA_DIR when provided. */
 async function indexFilePath() {
-  return path.join(REPO_PATH, INDEX_REL_PATH);
+  const dataRootEnv = process.env.REPOWRITER_DATA_DIR || REPO_PATH;
+  const dataRoot = path.isAbsolute(dataRootEnv) ? dataRootEnv : path.resolve(REPO_PATH, dataRootEnv);
+  const idxPath = path.join(dataRoot, INDEX_REL_PATH);
+  // Ensure directory exists when saving later; caller can create as needed.
+  return idxPath;
 }
 
+/** Read index file (create default if missing) */
 async function loadIndex(): Promise<IndexFile> {
   const idxPath = await indexFilePath();
   try {
@@ -108,9 +103,31 @@ async function readFileSample(absPath: string, maxChars = 3000) {
   }
 }
 
+/** Decide whether a repo-relative path should be skipped for embeddings (secrets/configs). */
+function isSensitiveRelPath(rel: string): boolean {
+  const lower = rel.toLowerCase();
+
+  // obvious secret files or keys
+  if (/\.(env|pem|key|p12|jks|crt|csr)$/.test(lower)) return true;
+
+  // dot env files
+  if (path.basename(lower).startsWith(".env")) return true;
+
+  // secrets directory or config production files
+  if (lower.startsWith("secrets/") || lower.includes("/secrets/")) return true;
+  if (lower === "config/production.yml" || lower.endsWith("/config/production.yml")) return true;
+
+  // common config files that might contain secrets
+  if (lower.includes("config/") && (lower.endsWith("credentials.json") || lower.endsWith("credentials.yml"))) return true;
+
+  // node_modules, build artifacts, binary assets are not useful (already skipped by walk ignore)
+  if (lower.startsWith("node_modules/") || lower.startsWith("dist/") || lower.startsWith("build/")) return true;
+
+  return false;
+}
+
 /** Request embeddings from OpenAI-style endpoint. Returns vector or null on failure. */
 async function requestEmbedding(text: string, model = DEFAULT_MODEL): Promise<number[] | null> {
-  // If no OPENAI_API_KEY and no OPENAI_API_URL, bail
   try {
     const headers = getOpenAIHeaders();
     const OPENAI_BASE = process.env.OPENAI_API_URL || "https://api.openai.com";
@@ -122,7 +139,6 @@ async function requestEmbedding(text: string, model = DEFAULT_MODEL): Promise<nu
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      // If server returns non-OK (e.g., local mock), return null to enable lexical fallback
       return null;
     }
     const j = await res.json();
@@ -143,6 +159,7 @@ export async function buildIndex(options: { model?: string; maxFiles?: number; m
   // Collect files (simple walk, skip node_modules/.git)
   const collected: string[] = [];
   const ignore = new Set([".git", "node_modules", "dist", "build", "out", "coverage"]);
+
   async function walk(dir: string) {
     let ents;
     try {
@@ -158,7 +175,9 @@ export async function buildIndex(options: { model?: string; maxFiles?: number; m
         await walk(full);
       } else if (ent.isFile()) {
         if (/\.(png|jpg|jpeg|gif|wasm)$/.test(name)) continue;
-        collected.push(path.relative(REPO_PATH, full));
+        // record repo-relative path
+        const rel = path.relative(REPO_PATH, full).replace(/\\/g, "/");
+        collected.push(rel);
       }
     }
   }
@@ -168,10 +187,18 @@ export async function buildIndex(options: { model?: string; maxFiles?: number; m
   let count = 0;
   for (const rel of collected) {
     if (count >= maxFiles) break;
+
+    // Skip obvious sensitive files
+    if (isSensitiveRelPath(rel)) continue;
+
     const abs = path.resolve(REPO_PATH, rel);
     const sample = await readFileSample(abs, maxChars);
     if (!sample) continue;
+
+    // Use truncated sample
     const truncated = truncateTextForEmbedding(sample, maxChars);
+
+    // Request embedding safely — if fails, fall back to lexical
     const vec = await requestEmbedding(truncated, model);
     idx.items.push({ path: rel, vector: vec, textSample: truncated });
     count++;
@@ -185,23 +212,26 @@ export async function upsertFile(relPath: string, options: { maxChars?: number; 
   const model = options.model || DEFAULT_MODEL;
   const maxChars = options.maxChars ?? 3000;
   const abs = path.resolve(REPO_PATH, relPath);
+
+  const relNormalized = path.relative(REPO_PATH, abs).replace(/\\/g, "/");
+  if (isSensitiveRelPath(relNormalized)) throw new Error("Refuse to upsert sensitive file");
+
   const sample = await readFileSample(abs, maxChars);
   if (!sample) throw new Error("File not found or empty");
   const truncated = truncateTextForEmbedding(sample, maxChars);
   const vec = await requestEmbedding(truncated, model);
   const idx = await loadIndex();
-  // replace or append
-  const found = idx.items.find(i => i.path === relPath);
+  const found = idx.items.find(i => i.path === relNormalized);
   if (found) {
     found.vector = vec;
     found.textSample = truncated;
   } else {
-    idx.items.push({ path: relPath, vector: vec, textSample: truncated });
+    idx.items.push({ path: relNormalized, vector: vec, textSample: truncated });
   }
   idx.updatedAt = new Date().toISOString();
   idx.model = model;
   await saveIndex(idx);
-  return { path: relPath, vector: vec };
+  return { path: relNormalized, vector: vec };
 }
 
 /**
@@ -212,7 +242,6 @@ export async function upsertFile(relPath: string, options: { maxChars?: number; 
 export async function queryEmbeddings(queryText: string, opts: { topK?: number } = {}) {
   const topK = opts.topK ?? 8;
   const idx = await loadIndex();
-  // If there are vectorized items, and we can compute query embedding, use it.
   const hasVectors = idx.items.some(i => Array.isArray(i.vector) && i.vector.length > 0);
 
   let queryVec: number[] | null = null;
@@ -230,7 +259,6 @@ export async function queryEmbeddings(queryText: string, opts: { topK?: number }
       hits.push({ path: it.path, score: s, sample: it.textSample });
     }
   } else {
-    // lexical fallback: simple substring + token overlap scoring
     const qwords = Array.from(new Set(queryText.toLowerCase().split(/\W+/).filter(Boolean)));
     for (const it of idx.items) {
       const txt = (it.textSample || "").toLowerCase();
@@ -238,7 +266,6 @@ export async function queryEmbeddings(queryText: string, opts: { topK?: number }
       for (const w of qwords) {
         if (txt.includes(w)) score += 1;
       }
-      // small boost for filename match
       const name = it.path.toLowerCase();
       for (const w of qwords) {
         if (name.includes(w)) score += 1.5;

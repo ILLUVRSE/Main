@@ -25,9 +25,6 @@ Maintain a single source of truth for all core platform modules and ensure workf
 ├─ marketplace/
 ├─ finance/
 ├─ ai-infra/
-├─ capital/
-├─ product-development/
-├─ market-media/
 ├─ .gitignore
 └─ README.md
 ```

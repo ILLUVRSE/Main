@@ -1,11 +1,26 @@
-// Import necessary modules
-import express from 'express';
+import { NodeModel } from '../models/nodes';
+import { EdgeModel } from '../models/edges';
+import { TraceModel } from '../models/traces';
 
-const router = express.Router();
+const nodeModel = new NodeModel();
+const edgeModel = new EdgeModel();
+const traceModel = new TraceModel();
 
-// Define the /api/hello endpoint
-router.get('/api/hello', (req, res) => {
-    res.status(200).json({ msg: 'hello' });
-});
+export const createNode = (node) => {
+  // Implement mTLS and RBAC checks here
+  nodeModel.createNode(node);
+};
 
-export default router;
+export const createEdge = (edge) => {
+  // Implement mTLS and RBAC checks here
+  edgeModel.createEdge(edge);
+};
+
+export const createTrace = (trace) => {
+  // Implement mTLS and RBAC checks here
+  traceModel.createTrace(trace);
+};
+
+export const getNodes = () => nodeModel.getNodes();
+export const getEdges = () => edgeModel.getEdges();
+export const getTraces = () => traceModel.getTraces();

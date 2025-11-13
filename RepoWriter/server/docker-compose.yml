@@ -1,16 +1,17 @@
 version: '3.8'
-
 services:
   app:
-    build: .
-    volumes:
-      - .:/app
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - '3000:3000'
+    volumes:
+      - .:/app
     environment:
       - NODE_ENV=development
-      - LOCAL_LLM_URL=http://localhost:5000
-
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_URL=${OPENAI_API_URL}
   db:
     image: postgres:latest
     environment:
@@ -19,8 +20,3 @@ services:
       POSTGRES_DB: dev_db
     ports:
       - '5432:5432'
-    volumes:
-      - db_data:/var/lib/postgresql/data
-
-volumes:
-  db_data:

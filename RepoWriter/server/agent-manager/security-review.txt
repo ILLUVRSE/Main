@@ -1,0 +1,5 @@
+TASK: Security review
+ACCEPTANCE: KMS/signing reviewed and documented; Security Engineer stamp file present.
+ALLOWED: ["agent-manager/","kernel/","infra/"]
+TESTS: test -f agent-manager/security-review.txt
+OWNER: Security Engineer

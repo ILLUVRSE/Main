@@ -8,25 +8,25 @@ paths:
       summary: Sign a request
       responses:
         '200':
-          description: Successful response
+          description: Successful sign
   /kernel/agent:
     post:
       summary: Create an agent
       responses:
         '200':
-          description: Successful response
+          description: Agent created
   /kernel/allocate:
     post:
       summary: Allocate resources
       responses:
         '200':
-          description: Successful response
+          description: Resources allocated
   /kernel/division:
     post:
-      summary: Perform division operation
+      summary: Create a division
       responses:
         '200':
-          description: Successful response
+          description: Division created
   /kernel/audit/{id}:
     get:
       summary: Get audit details
@@ -39,7 +39,7 @@ paths:
             type: string
       responses:
         '200':
-          description: Successful response
+          description: Audit details retrieved
   /kernel/reason/{node}:
     get:
       summary: Get reason for a node
@@ -52,4 +52,4 @@ paths:
             type: string
       responses:
         '200':
-          description: Successful response
+          description: Reason retrieved

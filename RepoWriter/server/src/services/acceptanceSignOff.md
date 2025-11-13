@@ -1,0 +1,1 @@
+**Acceptance & sign-off**: scoring correctness, policy enforcement tests, and operational SLOs validated; Ryan sign-off.

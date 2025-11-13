@@ -1,29 +1,15 @@
 // authentication.ts
 
-import { OIDCClient } from 'oidc-client';
-import { createServer } from 'https';
-import { readFileSync } from 'fs';
+// Implement OIDC/SSO authentication
 
-// OIDC Configuration
-const oidcClient = new OIDCClient({
-  // OIDC configuration details
-});
+export function authenticateUser(token) {
+    // Logic for OIDC/SSO authentication
+}
 
-// mTLS Configuration
-const options = {
-  key: readFileSync('path/to/key.pem'),
-  cert: readFileSync('path/to/cert.pem'),
-  ca: readFileSync('path/to/ca.pem')
-};
+export function enforceMTLS() {
+    // Logic for mTLS enforcement on Kernel endpoints
+}
 
-const server = createServer(options, (req, res) => {
-  // Handle requests with mTLS
-});
-
-// SuperAdmin role implementation
-const roles = {
-  SuperAdmin: 'SuperAdmin',
-  // other roles
-};
-
-export { oidcClient, server, roles };
+export function checkSuperAdminRole(user) {
+    // Logic to check if user has SuperAdmin role
+}

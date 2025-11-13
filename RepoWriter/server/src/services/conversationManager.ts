@@ -7,11 +7,7 @@
  *  - Conversations are kept in-memory and periodically flushed to disk at .repowriter/conversations.json
  *  - On startup we attempt to load persisted conversations.
  *
- * Broadcasts:
- *  - Calls broadcast('conversation:update', { conversation }) when a conversation is updated.
- *
- * NOTE: This module is intentionally small and synchronous-friendly. For heavy usage or multi-process
- * deployments you should replace with a centralized store (Redis, DB).
+ * CHANGE: persist outside the repo when REPOWRITER_DATA_DIR is set.
  */
 
 import fs from "fs/promises";
@@ -48,7 +44,18 @@ const FLUSH_INTERVAL_MS = 5000;
 let storePathCache: string | null = null;
 function getStorePath() {
   if (storePathCache) return storePathCache;
-  storePathCache = path.join(REPO_PATH, STORE_REL);
+
+  // If a dedicated data directory is configured, prefer it to keep runtime artifacts
+  // out of the repository tree. Otherwise fall back to REPO_PATH (original behavior).
+  let dataRoot = process.env.REPOWRITER_DATA_DIR || REPO_PATH;
+
+  // If a relative path is supplied, resolve it relative to the repo root for determinism.
+  if (!path.isAbsolute(dataRoot)) {
+    dataRoot = path.resolve(REPO_PATH, dataRoot);
+  }
+
+  // Ensure we return an absolute path joining the desired data root and the store rel path.
+  storePathCache = path.join(dataRoot, STORE_REL);
   return storePathCache;
 }
 

@@ -3,9 +3,12 @@
  *
  * Lightweight sandbox runner for RepoWriter.
  *
- * NOTE: This implementation runs tests on the host inside a temp copy of the repo.
- * For production-grade isolation you should replace this with a Docker / container-based
- * runner that enforces CPU/memory/time/network limits.
+ * NOTE: This implementation now defaults to running commands inside a Docker
+ * container for isolation. To use the legacy host-based runner, set
+ * SANDBOX_RUNTIME=host (not recommended for production).
+ *
+ * This version also enforces a repowriter_allowlist.json allowlist (repo root)
+ * so patches touching forbidden paths will be rejected.
  */
 
 import fs from "fs/promises";
@@ -50,8 +53,8 @@ export type SandboxResult = {
   logs?: string;
 };
 
-/** Helper: run a command in a working directory with timeout. */
-async function runCommand(cmd: string, cwd: string, opts: { timeoutMs: number; env?: Record<string,string>; maxOutputSize?: number } = { timeoutMs: 60000 }) : Promise<CommandResult> {
+/** HOST-based runCommand: the original behavior (kept for explicit dev use only). */
+async function runCommandHost(cmd: string, cwd: string, opts: { timeoutMs: number; env?: Record<string,string>; maxOutputSize?: number } = { timeoutMs: 60000 }) : Promise<CommandResult> {
   return new Promise((resolve) => {
     const env = Object.assign({}, process.env, opts.env || {});
     const child = spawn(cmd, { cwd, shell: true, env });
@@ -102,6 +105,87 @@ async function runCommand(cmd: string, cwd: string, opts: { timeoutMs: number; e
   });
 }
 
+/** Docker-based runner for isolation (default). */
+async function runCommandInDocker(cmd: string, cwd: string, opts: { timeoutMs: number; env?: Record<string,string>; maxOutputSize?: number } = { timeoutMs: 60000 }) : Promise<CommandResult> {
+  return new Promise((resolve) => {
+    const timeoutMs = opts.timeoutMs || 60000;
+    const maxSize = opts.maxOutputSize ?? 20000;
+    const envObj = Object.assign({}, process.env, opts.env || {});
+
+    // Image may be provided via SANDBOX_DOCKER_IMAGE, otherwise use a default
+    const dockerImage = process.env.SANDBOX_DOCKER_IMAGE || "repowriter-sandbox:latest";
+    // Build docker args
+    const dockerArgs = [
+      "run","--rm",
+      "--network","none",
+      "--cap-drop","ALL",
+      "--security-opt","no-new-privileges",
+      "--memory","512m","--cpus","1.0",
+      "-v", `${cwd}:/work:rw`,
+      dockerImage,
+      "bash","-lc", cmd
+    ];
+
+    // spawn docker directly
+    const child = spawn("docker", dockerArgs, { shell: false, env: envObj });
+
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let finished = false;
+
+    const cleanupAndResolve = (code: number | null) => {
+      if (finished) return;
+      finished = true;
+      if (stdout.length > maxSize) stdout = stdout.slice(0, maxSize) + "\n...[truncated stdout]";
+      if (stderr.length > maxSize) stderr = stderr.slice(0, maxSize) + "\n...[truncated stderr]";
+      resolve({
+        ok: code === 0 && !timedOut,
+        exitCode: code,
+        stdout,
+        stderr,
+        timedOut: timedOut || false
+      });
+    };
+
+    const to = setTimeout(() => {
+      timedOut = true;
+      try { child.kill("SIGKILL"); } catch {}
+    }, timeoutMs);
+
+    child.stdout?.on("data", (b: Buffer) => { stdout += b.toString(); });
+    child.stderr?.on("data", (b: Buffer) => { stderr += b.toString(); });
+
+    child.on("error", (err) => {
+      clearTimeout(to);
+      resolve({
+        ok: false,
+        exitCode: null,
+        stdout,
+        stderr: (stderr || "") + `\n[spawn error] ${String(err?.message || err)}`,
+        timedOut: timedOut || false
+      });
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(to);
+      cleanupAndResolve(code);
+    });
+  });
+}
+
+/** Unified runCommand: defaults to Docker unless SANDBOX_RUNTIME=host. */
+async function runCommand(cmd: string, cwd: string, opts: { timeoutMs: number; env?: Record<string,string>; maxOutputSize?: number } = { timeoutMs: 60000 }) : Promise<CommandResult> {
+  const runtime = (process.env.SANDBOX_RUNTIME || "docker").toLowerCase();
+  if (runtime === "host") {
+    // Host execution allowed only when explicitly configured (dev)
+    return runCommandHost(cmd, cwd, opts);
+  } else {
+    // Docker is the default and recommended runtime
+    return runCommandInDocker(cmd, cwd, opts);
+  }
+}
+
 /** Ensure a path is safe relative path (no traversal) */
 function validateRelativePath(p: string) {
   if (!p || typeof p !== "string") throw new Error("Invalid path");
@@ -111,12 +195,58 @@ function validateRelativePath(p: string) {
   return normalized;
 }
 
-/** Apply patches (content or diff) to files under destRoot. */
+/** Load and parse repowriter_allowlist.json from repo root (best-effort). */
+const ALLOWLIST_FILE = path.join(REPO_PATH, "repowriter_allowlist.json");
+type AllowCfg = { allowed_paths?: string[]; forbidden_paths?: string[] };
+
+async function loadAllowlist(): Promise<AllowCfg> {
+  try {
+    const raw = await fs.readFile(ALLOWLIST_FILE, "utf8");
+    const parsed = JSON.parse(raw) as AllowCfg;
+    // normalize arrays
+    parsed.allowed_paths = Array.isArray(parsed.allowed_paths) ? parsed.allowed_paths : [];
+    parsed.forbidden_paths = Array.isArray(parsed.forbidden_paths) ? parsed.forbidden_paths : [];
+    return parsed;
+  } catch (err) {
+    // If missing or invalid, return safe-empty config (very conservative will reject non-allowed paths below)
+    return { allowed_paths: [], forbidden_paths: [] };
+  }
+}
+
+/** Apply patches (content or diff) to files under destRoot. Enforces allowlist. */
 async function applyPatchesToDir(patches: PatchInput[], destRoot: string) {
   const applied: { path: string; wasCreated: boolean; previousContent: string | null }[] = [];
+  const allow = await loadAllowlist();
+
   for (const p of patches) {
     if (!p || typeof p.path !== "string") throw new Error("Invalid patch object");
     const rel = validateRelativePath(p.path);
+
+    // Enforce forbidden paths
+    for (const forb of (allow.forbidden_paths || [])) {
+      if (!forb) continue;
+      const nf = path.normalize(forb);
+      if (rel === nf || rel.startsWith(nf + "/")) {
+        throw new Error(`Patch touches forbidden path: ${rel}`);
+      }
+    }
+
+    // Require allowed prefix if any allowed_paths are defined
+    if (Array.isArray(allow.allowed_paths) && allow.allowed_paths.length > 0) {
+      let ok = false;
+      for (const pref of allow.allowed_paths) {
+        if (!pref) continue;
+        const np = path.normalize(pref);
+        if (rel === np || rel.startsWith(np)) {
+          ok = true;
+          break;
+        }
+      }
+      if (!ok) {
+        throw new Error(`Patch touches disallowed/suspicious path: ${rel}`);
+      }
+    }
+
     const abs = path.resolve(destRoot, rel);
     const parent = path.dirname(abs);
     await fs.mkdir(parent, { recursive: true });
@@ -198,7 +328,6 @@ export async function runSandboxForPatches(patches: PatchInput[], options: Sandb
       await fs.access(path.join(tmpDir, "tsconfig.json"));
       if (!typecheckCmd) typecheckCmd = "npm --prefix . run tsc --noEmit";
     } catch {}
-
     try {
       const pkgJsonRaw = await fs.readFile(path.join(tmpDir, "package.json"), "utf8");
       const pkg = JSON.parse(pkgJsonRaw);

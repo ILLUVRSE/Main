@@ -93,6 +93,18 @@ export async function chatJson(system: string, user: string, opts: ChatJsonOpts 
   while (attempt < retries) {
     attempt++;
     try {
+      // Diagnostic logging: show target and headers (Authorization redacted)
+      try {
+        const safeHeaders: any = Object.assign({}, headers);
+        if (typeof safeHeaders.Authorization === "string") {
+          safeHeaders.Authorization = safeHeaders.Authorization.slice(0, 12) + "[REDACTED]";
+        }
+        console.log("[openaiClient] POST", `${OPENAI_BASE}/v1/chat/completions`);
+        console.log("[openaiClient] HEADERS:", safeHeaders);
+      } catch (e) {
+        // ignore logging errors
+      }
+
       const res = await fetch(`${OPENAI_BASE}/v1/chat/completions`, {
         method: "POST",
         headers,
@@ -102,6 +114,10 @@ export async function chatJson(system: string, user: string, opts: ChatJsonOpts 
       const text = await res.text();
 
       if (!res.ok) {
+        // Log response for diagnostics, but keep the original behavior
+        try {
+          console.error("[openaiClient] OpenAI response:", res.status, text && (text.slice ? text.slice(0, 2000) : text));
+        } catch {}
         // For 4xx/5xx return a helpful error including body
         throw new Error(`OpenAI HTTP ${res.status}: ${text}`);
       }

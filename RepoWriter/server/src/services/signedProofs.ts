@@ -1,26 +1,8 @@
 // src/services/signedProofs.ts
-
 /**
  * KMS/HSM-signed proofs for ledger ranges and signed export formats for auditors.
+ *
+ * Isolation & governance: isolated high-trust environment, multi-sig for high-value actions, mTLS & OIDC for access.
  */
-
 export class SignedProofs {
-    constructor() {
-        // Initialization logic for KMS/HSM
-    }
-
-    signLedgerRange(range: any): string {
-        // Logic to sign a ledger range
-        return 'signedLedgerRange';
-    }
-
-    signExportFormat(format: any): string {
-        // Logic to sign an export format
-        return 'signedExportFormat';
-    }
-}
-
-// Example usage:
-// const proofs = new SignedProofs();
-// const signedRange = proofs.signLedgerRange(range);
-// const signedFormat = proofs.signExportFormat(format);
+  constructor() {

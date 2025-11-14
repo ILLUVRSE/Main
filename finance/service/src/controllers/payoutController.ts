@@ -16,5 +16,17 @@ export default function payoutRouter(payoutService: PayoutService): Router {
     }
   });
 
+  router.get('/:payoutId', async (req, res, next) => {
+    try {
+      const payout = await payoutService.getPayout(req.params.payoutId);
+      res.json(payout);
+    } catch (error) {
+      if ((error as Error).message.includes('not found')) {
+        return res.status(404).json({ message: (error as Error).message });
+      }
+      next(error);
+    }
+  });
+
   return router;
 }

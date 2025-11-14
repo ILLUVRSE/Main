@@ -3,16 +3,16 @@
 This runbook captures day-2 procedures for Finance operations.
 
 ## 1. Signed Proof Generation
-1. Trigger export via `finance/acceptance-tests/run_acceptance.sh proof` or CI pipeline.
-2. Monitor `proofService` logs for `manifestHash` and `proofId`.
-3. Validate `signature.json` contains quorum defined in `security/multisig_policy.md`.
-4. Upload package to auditor S3 bucket with Object Lock enabled.
+1. Trigger export via `npm run finance:export -- <from> <to>` (requires `DATABASE_URL`, `KMS_KEY_ID`, `S3_AUDIT_BUCKET`).
+2. Monitor service logs for `exports.duration_ms` metric confirming completion and note the emitted `proofId`.
+3. Download the generated `proof_package.json` from `s3://$S3_AUDIT_BUCKET/proofs/...` and validate signatures with `node finance/exports/audit_verifier_cli.ts <proof_package>`.
+4. Retain the reconciliation report that ships with the proof bundle; Object Lock + SSE-KMS are applied automatically by the exporter.
 
 ## 2. Reconciliation Drill
-1. Pull latest ledger snapshot by running `finance/service/src/services/reconciliationService.ts` CLI entry (`npm run finance:reconcile`).
-2. Compare ledger balances to Stripe and payout provider statements.
-3. Resolve discrepancies by posting adjusting journal entries via `POST /finance/journal`.
-4. Document drill outcome in `acceptance-checklist.md` and archive reconciliation report.
+1. Pull the latest reconciliation report from S3 via `aws s3 cp s3://$S3_AUDIT_BUCKET/proofs/.../reconciliation_report.json -` (reports are stored alongside proofs).
+2. If a fresh report is required, run `npm run finance:export -- <from> <to>` which regenerates both the proof and reconciliation data against live Stripe/local payout sandboxes.
+3. Resolve discrepancies by posting adjusting journal entries via `POST /finance/journal` and rerun the exporter to confirm parity.
+4. Document drill outcomes in `finance/acceptance-checklist.md` and attach the latest reconciliation report URL.
 
 ## 3. Incident Response
 - **Ledger imbalance alert**: verify last batch ID, re-run reconciliation, check for partially applied transactions, roll forward using `ledgerService.repairBatch` helper.

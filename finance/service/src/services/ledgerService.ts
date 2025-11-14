@@ -1,6 +1,7 @@
 import { LedgerRepository } from '../db/repository/ledgerRepository';
 import { JournalEntry, ensureBalanced } from '../models/journalEntry';
 import { AuditService } from '../audit/auditService';
+import { metrics } from '../monitoring/metrics';
 
 export class LedgerService {
   constructor(private repo: LedgerRepository, private audit: AuditService) {}
@@ -18,5 +19,6 @@ export class LedgerService {
         });
       }
     });
+    metrics.observeJournalEntries(entries.length);
   }
 }

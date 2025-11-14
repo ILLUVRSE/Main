@@ -3,8 +3,8 @@ import { ensureBalanced, JournalEntry } from '../../service/src/models/journalEn
 describe('ensureBalanced', () => {
   it('passes when debits equal credits', () => {
     const entry: JournalEntry = {
-      journalId: '1',
-      batchId: 'b',
+      journalId: '11111111-1111-1111-1111-111111111111',
+      batchId: '22222222-2222-2222-2222-222222222222',
       timestamp: new Date().toISOString(),
       currency: 'USD',
       lines: [
@@ -17,8 +17,8 @@ describe('ensureBalanced', () => {
 
   it('throws when unbalanced', () => {
     const entry: JournalEntry = {
-      journalId: '1',
-      batchId: 'b',
+      journalId: '11111111-1111-1111-1111-111111111111',
+      batchId: '22222222-2222-2222-2222-222222222222',
       timestamp: new Date().toISOString(),
       currency: 'USD',
       lines: [

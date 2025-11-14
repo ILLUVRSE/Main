@@ -9,13 +9,44 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:finance@127.0.0.1:5433/finance
+      LEDGER_REPO: postgres
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: localstack
+      AWS_SECRET_ACCESS_KEY: localstack
+      KMS_ENDPOINT: http://127.0.0.1:4566
+      STRIPE_API_KEY: sk_test_123
+      STRIPE_WEBHOOK_SECRET: whsec_test
+      STRIPE_API_BASE: http://127.0.0.1:12111
+      PAYOUT_PROVIDER_ENDPOINT: http://127.0.0.1:4100
+      S3_AUDIT_BUCKET: finance-audit
+      S3_ENDPOINT: http://127.0.0.1:4566
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+      - name: Start test dependencies
+        run: docker compose -f finance/docker-compose.test.yml up -d --build
+      - name: Wait for Postgres
+        run: |
+          for i in {1..20}; do
+            if pg_isready -h 127.0.0.1 -p 5433 -U postgres; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+      - run: npm ci
+      - name: Provision database schema
+        run: psql "$DATABASE_URL" -f finance/service/src/db/schema.sql
+      - name: Provision KMS key
+        run: echo "KMS_KEY_ID=$(node finance/infra/bootstrap_localstack.js)" >> "$GITHUB_ENV"
       - run: npm test -- finance/test/unit/journal.test.ts
       - run: npm test -- finance/test/integration/reconcile.test.ts
       - run: npm test -- finance/test/e2e/payment_payout_flow.test.ts
       - run: bash finance/acceptance-tests/run_acceptance.sh
+      - if: always()
+        name: Shutdown test dependencies
+        run: docker compose -f finance/docker-compose.test.yml down -v

@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import { loadConfig } from './server/config';
 import { InMemoryLedgerRepository } from './db/repository/ledgerRepository';
+import { PostgresLedgerRepository } from './db/postgresLedgerRepository';
 import { AuditService } from './audit/auditService';
 import { LedgerService } from './services/ledgerService';
 import { StripeAdapter } from './integrations/stripeAdapter';
@@ -17,13 +18,24 @@ import proofRouter from './controllers/proofController';
 import payoutApprovalRouter from './controllers/payoutApprovalController';
 
 const config = loadConfig();
-const repo = new InMemoryLedgerRepository();
+const repo =
+  config.ledgerRepo === 'postgres'
+    ? new PostgresLedgerRepository(config.databaseUrl)
+    : new InMemoryLedgerRepository();
 const auditService = new AuditService();
 const ledgerService = new LedgerService(repo, auditService);
-const stripeAdapter = new StripeAdapter(config.stripeKey);
-const payoutAdapter = new PayoutProviderAdapter(config.payoutEndpoint);
+const stripeAdapter = new StripeAdapter({
+  apiKey: config.stripe.apiKey,
+  webhookSecret: config.stripe.webhookSecret,
+  apiBase: config.stripe.apiBase,
+});
+const payoutAdapter = new PayoutProviderAdapter({ endpoint: config.payout.endpoint, authToken: config.payout.authToken });
 new ReconciliationService(repo, stripeAdapter, payoutAdapter); // instantiated for completeness
-const signingProxy = new SigningProxy(config.kmsEndpoint);
+const signingProxy = new SigningProxy({
+  region: config.awsRegion,
+  endpoint: config.kmsEndpoint,
+  keyId: config.kmsKeyId,
+});
 const proofService = new ProofService(repo, signingProxy);
 const payoutService = new PayoutService(repo, auditService, payoutAdapter);
 

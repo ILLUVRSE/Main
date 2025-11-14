@@ -1,10 +1,11 @@
-import { LedgerRepository } from '../service/src/db/repository/ledgerRepository';
+import { LedgerRepository, ProofManifestRecord } from '../service/src/db/repository/ledgerRepository';
 import { JournalEntry } from '../service/src/models/journalEntry';
 import { Payout } from '../service/src/models/payout';
 
 export class LedgerMock implements LedgerRepository {
   entries: JournalEntry[] = [];
   payouts = new Map<string, Payout>();
+  proofs: ProofManifestRecord[] = [];
 
   async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
     return fn();
@@ -30,5 +31,13 @@ export class LedgerMock implements LedgerRepository {
 
   async getPayout(payoutId: string): Promise<Payout | undefined> {
     return this.payouts.get(payoutId);
+  }
+
+  async recordProofManifest(manifest: ProofManifestRecord): Promise<void> {
+    this.proofs.push(manifest);
+  }
+
+  async getProofManifest(proofId: string): Promise<ProofManifestRecord | undefined> {
+    return this.proofs.find((proof) => proof.proofId === proofId);
   }
 }

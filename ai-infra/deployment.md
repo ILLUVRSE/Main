@@ -117,3 +117,25 @@ The runner will pick it up, register an artifact with deterministic checksum/sig
 6. **Validation**: run `go test ./ai-infra/...` in CI, then issue a low-quality promotion in staging to confirm SentinelNet denials flow through before promoting to production.
 
 With these steps in place you have a full train → register → promote workflow, deterministic runner for dev/test, production-callable SentinelNet & KMS adapters, and auditable artifact lineage.
+
+---
+
+## 9. Operational runbook
+- **Training jobs stuck in `queued`**  
+  1. Check runner logs/pod readiness. If runners are disabled intentionally, confirm external orchestrator is writing status updates.  
+  2. Inspect `training_jobs` for rows older than SLA; requeue by setting `status='queued'` and bumping `updated_at`.  
+  3. If checksum mismatch occurs, confirm `codeRef`, `containerDigest`, and `seed` match orchestrator input; fix upstream pipeline before resuming.
+- **Signer/KMS failure**  
+  1. Alert fires from `ai_infra_sign_errors_total`. Temporarily enable local fallback by providing `AI_INFRA_SIGNER_KEY_B64` stored in Vault, but only after Security approval.  
+  2. Failing KMS endpoint? Rotate IAM creds, test with signer diagnostics (`go run ./cmd/signertest`).  
+  3. Re-sign pending promotions by rerunning `promotionService.Finalize` once KMS is back.
+- **SentinelNet unreachable**  
+  1. Service returns HTTP 5xx when hitting SentinelNet. Automatically degrade by switching to static threshold (unset `AI_INFRA_SENTINEL_URL`, set `AI_INFRA_MIN_PROMO_SCORE`).  
+  2. Flag promotion records with `evaluation.fallback=true` for audit. Once SentinelNet recovers, replay pending promotions through `/sentinelnet/check` and update records.
+- **Database failover / corruption**  
+  1. Trigger managed Postgres failover (or promote replica).  
+  2. Run `go run ./cmd/consistency` (future tool) or manual checks to ensure `model_artifacts` rows link to valid `training_jobs`.  
+  3. Rebuild read replicas, re-enable writers, and verify `model_promotions` statuses.
+- **Artifact integrity breach**  
+  1. Compare reported checksum vs stored `model_artifacts.checksum`. If mismatch, revoke artifact, mark promotions `revoked`, and notify downstream deployers.  
+  2. Require retraining; delete affected S3 objects via delete markers while keeping immutable copies in audit bucket for forensics.

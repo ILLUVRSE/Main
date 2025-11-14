@@ -84,7 +84,7 @@ See `sentinelnet/sentinelnet-spec.md` for detailed API expectations.
 * **Kernel mock**: `npm run kernel:mock` or `./run-local.sh` spins up a lightweight mock that implements `/kernel/audit` + `/kernel/upgrade` endpoints so audit emission, simulations, and multisig gating can be tested offline.
 * **Synchronous checks**: `npm test -- check.test.ts` exercises the router. `npm test -- checkLatency.test.ts` runs the lightweight load harness that reports local p95 latency (dev goal `< 200ms`). Production SLO remains `p95 < 50ms` and is tracked via `/metrics`.
 * **Audit consumer**: set `SENTINEL_ENABLE_AUDIT_CONSUMER=true` (and `KERNEL_AUDIT_URL`) to start the polling consumer that evaluates audit events asynchronously and emits `policy.decision` events back to Kernel.
-* **mTLS**: production requires mTLS (`DEV_SKIP_MTLS=false` + client cert/key paths). Local dev can skip via `DEV_SKIP_MTLS=true`; readiness/health will surface whether certs are configured.
+* **mTLS**: production requires mTLS (`DEV_SKIP_MTLS=false` + client cert/key paths). Local dev can skip via `DEV_SKIP_MTLS=true`; readiness/health will surface whether certs are configured. The service now refuses to boot with `DEV_SKIP_MTLS=true` when `NODE_ENV=production`.
 
 ---
 
@@ -100,7 +100,7 @@ See `sentinelnet/sentinelnet-spec.md` for detailed API expectations.
   See `src/services/multisigGating.ts` and the runbook below.
 * **Async detection**: `src/event/consumer.ts` polls `/kernel/audit/search` and hands events to `event/handler.ts`, which re-runs evaluation and appends `policy.decision`. Production deployments can set `SENTINEL_KAFKA_BROKERS` + `SENTINEL_AUDIT_TOPIC` to use the Kafka consumer in `src/event/kafkaConsumer.ts` (install `kafkajs` via `npm install --save kafkajs`).
 * **Transport security & RBAC**: Production requires mTLS between Kernel ↔ SentinelNet (`DEV_SKIP_MTLS=false`) and RBAC fronting this service (CommandPad or API gateway). In dev we default to `DEV_SKIP_MTLS=true` and treat all callers as `principal.id=unknown`.
-* **RBAC middleware**: `src/http/rbac.ts` enforces role headers (`SENTINEL_RBAC_HEADER`, defaults to `x-sentinel-roles`) for `/sentinelnet/check` and `/sentinelnet/policy`. Configure allowed role lists via `SENTINEL_RBAC_CHECK_ROLES` and `SENTINEL_RBAC_POLICY_ROLES`.
+* **RBAC middleware**: `src/http/rbac.ts` enforces role headers (`SENTINEL_RBAC_HEADER`, defaults to `x-sentinel-roles`) for `/sentinelnet/check` and `/sentinelnet/policy`. Configure allowed role lists via `SENTINEL_RBAC_CHECK_ROLES` and `SENTINEL_RBAC_POLICY_ROLES`. Production startup fails if RBAC is disabled or if either role list is empty; see `infra/rbac-config.md` for canonical values and gateway expectations.
 * **Canary auto-rollback**: `src/services/canaryRollback.ts` observes canary decision rates and automatically reverts a canary back to draft when enforced denials exceed `SENTINEL_CANARY_ROLLBACK_THRESHOLD` over `SENTINEL_CANARY_ROLLBACK_WINDOW` samples (with cooldown).
 
 ---

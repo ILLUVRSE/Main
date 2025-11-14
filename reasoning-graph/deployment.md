@@ -37,6 +37,44 @@ Audit events → Kafka → S3 + Postgres
 
 ---
 
+## # 2.5) Environment configuration, secrets & migrations
+
+| Variable | Purpose / Notes |
+| --- | --- |
+| `REASONING_GRAPH_PORT` | Service listen port (default `4310`). |
+| `DATABASE_URL` | Postgres connection string with `sslmode=verify-full`. Must point at the schema created by `sql/migrations/001_create_reasoning_graph_tables.sql`. |
+| `GRAPH_DB_URI` / `GRAPH_DB_USER` / `GRAPH_DB_PASSWORD` | Connection info for Neo4j/JanusGraph/etc. Leave unset when Postgres-only mode. |
+| `S3_BUCKET` / `S3_REGION` / `S3_KMS_KEY_ID` | Snapshot storage; object-lock and versioning must be enabled (same policy as Memory Layer audit buckets). |
+| `KAFKA_BROKERS` / `KAFKA_AUDIT_TOPIC` / `KAFKA_CONSUMER_GROUP` | Audit ingest channel. When unset, service falls back to HTTP pull from Kernel audit API. |
+| `KMS_KEY_ID` or `SIGNING_ENDPOINT` | Either name of the KMS key used for snapshot signatures or HTTPS signer proxy. Never store raw private keys; use Vault to fetch signer session tokens if a proxy is used. |
+| `SERVICE_ENV` | `dev` / `staging` / `prod`; influences namespace names, metrics labels, and snapshot prefixes. |
+| `LEADER_ELECTION_LEASE_NAME` | Optional override for K8s Lease resource used by snapshot coordinator. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry exporter when tracing is enabled. |
+
+Secrets management patterns:
+- Store connection strings and API keys in Vault/Secrets Manager and mount via CSI driver or sealed secrets. Certs for mTLS and Graph DB credentials must rotate quarterly.
+- KMS access: grant the service IAM principal permission to `kms:Sign` on the snapshot key only. Do not allow encrypt/decrypt to limit blast radius.
+- For signing proxies, issue short-lived tokens stored in `SIGNING_ENDPOINT_TOKEN` env var and refresh via init container.
+
+### Migrations
+
+Apply the base migration before any pod starts. Examples:
+
+```bash
+# one-off
+psql "$DATABASE_URL" -f reasoning-graph/sql/migrations/001_create_reasoning_graph_tables.sql
+
+# kubernetes job (Helm hook)
+kubectl run migrate-reasoning --restart=Never \
+  --image=postgres:15 \
+  --env="DATABASE_URL=$DATABASE_URL" \
+  -- bash -c "psql \"$DATABASE_URL\" -f /migrations/001_create_reasoning_graph_tables.sql"
+```
+
+The schema creates `reason_nodes`, `reason_edges`, and `reason_snapshots` with strict `CHECK` constraints to guard node/edge types. Re-run migrations in staging → prod order; they are idempotent.
+
+---
+
 ## # 3) Kubernetes deployment patterns
 - **Helm chart**: include Deployment, Service, ConfigMap, Secret templates, HPA, PodDisruptionBudget, and RBAC.
 - **Replica config**: default replicas 2; use HPA based on CPU and custom metrics (request queue depth).
@@ -115,10 +153,24 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 ---
 
 ## # 12) Runbooks (must exist)
-- Snapshot creation failure: troubleshoot canonicalization errors, KMS signing failures, or S3 upload errors.
-- Graph DB degraded: failover steps, restore from snapshot, validate hash chain, and resume operations.
-- Key compromise: emergency revoke, halt signing, replay verification, and rotate keys (see security-governance).
-- Replay & rebuild: steps to replay audit events to rebuild graph + verification checks.
+- **Snapshot creation failure**
+  1. Check `/metrics` for `snapshot_failures_total` and inspect pod logs for canonicalization vs KMS/signing errors.
+  2. If canonicalization: dump offending node IDs, rerun canonicalizer locally with `REASONING_CANON_DUMP=1` to reproduce, fix data and requeue job.
+  3. If KMS/signing: revoke pod IAM token, fail over to secondary signer, re-run snapshot. Make sure partially uploaded files are deleted from S3 to avoid orphan hashes.
+  4. After recovery, run `reasoningctl snapshots verify --range <ts>` to confirm signatures.
+- **Graph DB degraded / unavailable**
+  1. Flip `GRAPH_DB_MODE=readonly` (or disable Graph DB connection) so service serves cached traces from Postgres while restoration occurs.
+  2. Promote standby/restore backup per provider docs; seed indexes.
+  3. Run `SELECT count(*)` comparisons for `reason_nodes` / `reason_edges` between Postgres and Graph DB, then re-enable writes.
+- **Key compromise**
+  1. Halt snapshot signing (`KMS_KEY_ID` unset) and set service to `maintenance` mode.
+  2. Publish incident to Kernel + auditors; mark last good snapshot id.
+  3. Provision new KMS key, update IAM policies, redeploy.
+  4. Re-sign latest snapshot chain and publish verification notice.
+- **Replay & rebuild**
+  1. Provision clean Postgres + Graph DB.
+  2. Replay audit events (Kafka or S3) into the service using `reasoningctl audit replay`.
+  3. Recreate snapshots, verify hash/signature chain, and run acceptance tests before cutting back traffic.
 
 ---
 
@@ -142,4 +194,3 @@ Ensure signing and storage are atomic: do not accept an applied/complete state u
 ---
 
 End of file.
-

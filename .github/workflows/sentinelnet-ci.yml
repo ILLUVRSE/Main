@@ -1,0 +1,69 @@
+name: SentinelNet CI
+
+on:
+  push:
+    paths:
+      - 'sentinelnet/**'
+      - '.github/workflows/sentinelnet-ci.yml'
+  pull_request:
+    paths:
+      - 'sentinelnet/**'
+      - '.github/workflows/sentinelnet-ci.yml'
+
+jobs:
+  sentinelnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: sentinel_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SENTINEL_DB_URL: postgres://postgres:password@localhost:5432/sentinel_db
+      DEV_SKIP_MTLS: 'true'
+      NODE_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: sentinelnet/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+        working-directory: sentinelnet
+
+      - name: Run Jest suite
+        run: npm test -- --runInBand
+        working-directory: sentinelnet
+
+      - name: Prepare .env for run-local
+        run: |
+          cat > .env <<'EOF'
+          NODE_ENV=development
+          DEV_SKIP_MTLS=true
+          SENTINEL_DB_URL=postgres://postgres:password@postgres:5432/sentinel_db
+          KERNEL_AUDIT_URL=http://127.0.0.1:7802
+          SENTINEL_ENABLE_AUDIT_CONSUMER=false
+          EOF
+        working-directory: sentinelnet
+
+      - name: Run run-local script
+        env:
+          SENTINEL_DB_URL: postgres://postgres:password@postgres:5432/sentinel_db
+          DEV_SKIP_MTLS: 'true'
+        run: ./run-local.sh
+        working-directory: sentinelnet

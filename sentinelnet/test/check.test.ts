@@ -5,11 +5,9 @@
  * These tests mock the decisionService to avoid DB/Kafka dependencies.
  * They exercise the server routing and error handling.
  *
- * Note: these tests use `supertest` and `jest`. Ensure dev deps include supertest.
  */
 
-import request from 'supertest';
-import app from '../src/server';
+import { processCheckRequest } from '../src/routes/check';
 
 // jest will hoist mocks, but we explicitly mock the decisionService module used by the route.
 jest.mock('../src/services/decisionService');
@@ -25,9 +23,9 @@ describe('POST /sentinelnet/check', () => {
   });
 
   test('returns 400 when action is missing', async () => {
-    const res = await request(app).post('/sentinelnet/check').send({});
-    expect(res.status).toBe(400);
-    expect(res.body).toHaveProperty('error');
+    const result = await processCheckRequest({});
+    expect(result.status).toBe(400);
+    expect(result.body).toHaveProperty('error');
   });
 
   test('returns decision envelope when action is provided', async () => {
@@ -38,17 +36,16 @@ describe('POST /sentinelnet/check', () => {
     };
     mockedDecisionService.evaluateAction.mockResolvedValue(envelope);
 
-    const res = await request(app)
-      .post('/sentinelnet/check')
-      .send({ action: 'kernel.agent.spawn', actor: { id: 'user-1' } });
+    const result = await processCheckRequest({ action: 'kernel.agent.spawn', actor: { id: 'user-1' } });
 
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject(envelope);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject(envelope);
     expect(mockedDecisionService.evaluateAction).toHaveBeenCalledWith({
       action: 'kernel.agent.spawn',
       actor: { id: 'user-1' },
       resource: undefined,
       context: undefined,
+      requestId: null,
     });
   });
 
@@ -63,12 +60,11 @@ describe('POST /sentinelnet/check', () => {
     err.decision = decision;
     mockedDecisionService.evaluateAction.mockRejectedValue(err);
 
-    const res = await request(app).post('/sentinelnet/check').send({ action: 'kernel.agent.spawn' });
+    const result = await processCheckRequest({ action: 'kernel.agent.spawn' });
 
-    expect(res.status).toBe(403);
-    expect(res.body).toHaveProperty('error', 'policy.denied');
-    expect(res.body).toHaveProperty('decision');
-    expect(res.body.decision).toEqual(decision);
+    expect(result.status).toBe(403);
+    expect(result.body).toHaveProperty('error', 'policy.denied');
+    expect(result.body).toHaveProperty('decision');
+    expect(result.body.decision).toEqual(decision);
   });
 });
-

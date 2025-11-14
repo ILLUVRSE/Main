@@ -8,6 +8,7 @@
     "build": "tsc -p .",
     "start": "node dist/server.js",
     "migrate": "ts-node src/scripts/migrate.ts",
+    "kernel:mock": "ts-node src/mock/kernelMockServer.ts",
     "test": "jest --runInBand --detectOpenHandles"
   },
   "dependencies": {

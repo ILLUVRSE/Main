@@ -159,5 +159,47 @@ describe('policyStore', () => {
 
     expect(mockedDb.query).toHaveBeenCalled();
   });
-});
 
+  test('createPolicyNewVersion bumps version and records history entries', async () => {
+    const existingRow = {
+      id: 'base-pol',
+      name: 'policy',
+      version: 1,
+      severity: 'HIGH',
+      rule: { '==': [{ var: 'action' }, 'foo'] },
+      metadata: { effect: 'deny' },
+      state: 'active',
+      created_by: 'creator',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const newRow = {
+      ...existingRow,
+      id: 'new-pol',
+      version: 2,
+      rule: { '==': [{ var: 'action' }, 'bar'] },
+    };
+
+    mockedDb.query
+      .mockResolvedValueOnce({ rowCount: 1, rows: [existingRow] }) // getPolicyById
+      .mockResolvedValueOnce({ rows: [newRow] }) // insert new version
+      .mockResolvedValueOnce({}) // history existing
+      .mockResolvedValueOnce({}); // history new
+
+    const updated = await policyStore.createPolicyNewVersion(existingRow.id, { rule: newRow.rule }, 'editor');
+    expect(updated.version).toBe(2);
+    expect(updated.rule).toEqual(newRow.rule);
+    expect(mockedDb.query).toHaveBeenCalledTimes(4);
+  });
+
+  test('listPolicies supports states array filter', async () => {
+    const rows = [
+      { id: 'p1', name: 'one', version: 1, severity: 'LOW', rule: {}, metadata: {}, state: 'active', created_by: null, created_at: new Date(), updated_at: new Date() },
+    ];
+    mockedDb.query.mockResolvedValueOnce({ rows });
+
+    const list = await policyStore.listPolicies({ states: ['active', 'canary'] });
+    expect(list).toHaveLength(1);
+    expect(mockedDb.query).toHaveBeenCalledWith(expect.stringContaining('state = ANY'), expect.arrayContaining([['active', 'canary']]));
+  });
+});

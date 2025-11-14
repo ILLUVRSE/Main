@@ -1,0 +1,37 @@
+name: ArtifactPublisher CI
+
+on:
+  push:
+    paths:
+      - 'artifact-publisher/server/**'
+      - '.github/workflows/artifact-publisher-ci.yml'
+      - 'RepoWriter/server/index.js'
+  pull_request:
+    paths:
+      - 'artifact-publisher/server/**'
+      - '.github/workflows/artifact-publisher-ci.yml'
+      - 'RepoWriter/server/index.js'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: artifact-publisher/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: artifact-publisher/server/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint (tsc)
+        run: npm run lint
+      - name: Run tests
+        run: npm test
+      - name: Run local orchestration (postgres + kernel + e2e)
+        env:
+          RUN_TESTS: '1'
+        run: ./run-local.sh

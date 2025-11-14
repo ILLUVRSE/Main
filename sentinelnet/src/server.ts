@@ -1,10 +1,13 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { collectDefaultMetrics, Registry } from 'prom-client';
 import dotenv from 'dotenv';
 import checkRouter from './routes/check';
 import policyRouter from './routes/policy';
 import { loadConfig } from './config/env';
 import logger from './logger';
+import metrics from './metrics/metrics';
+import healthRouter from './health/health';
+import eventConsumer from './event/consumer';
+import auditEventHandler from './event/handler';
 
 // load .env early
 dotenv.config();
@@ -12,9 +15,8 @@ const config = loadConfig();
 
 const app = express();
 
-// Basic Prometheus registry + default metrics
-const registry = new Registry();
-collectDefaultMetrics({ register: registry });
+// Metrics registry (shared across modules)
+metrics.registerMetrics();
 
 // Middleware
 app.use(express.json({ limit: '1mb' }));
@@ -25,22 +27,15 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   next();
 });
 
-// Health & readiness
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ ok: true, service: 'sentinelnet', env: config.nodeEnv });
-});
-
-app.get('/ready', (_req: Request, res: Response) => {
-  // For now, always ready; later check DB/kafka readiness
-  res.json({ ok: true });
-});
+// Health/readiness router
+app.use(healthRouter);
 
 // Metrics endpoint
 app.get('/metrics', async (_req: Request, res: Response) => {
   try {
-    res.set('Content-Type', registry.contentType);
-    const metrics = await registry.metrics();
-    res.send(metrics);
+    const { contentType, body } = await metrics.metricsAsString();
+    res.set('Content-Type', contentType);
+    res.send(body);
   } catch (err) {
     logger.warn('failed to collect metrics', err);
     res.status(500).send('metrics error');
@@ -59,21 +54,43 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   res.status(status).json({ error: err?.message || 'internal_server_error' });
 });
 
+let stopAuditConsumer: (() => Promise<void>) | null = null;
+
+async function startAuditConsumerIfEnabled() {
+  const flag = String(process.env.SENTINEL_ENABLE_AUDIT_CONSUMER || '').toLowerCase();
+  if (!['1', 'true', 'yes', 'on'].includes(flag)) {
+    return;
+  }
+  try {
+    stopAuditConsumer = eventConsumer.startConsumer(auditEventHandler.handleAuditEvent);
+    logger.info('Audit consumer started (polling kernel audit events)');
+  } catch (err) {
+    logger.warn('Failed to start audit consumer', err);
+  }
+}
+
 if (require.main === module) {
   const port = config.port || 7602;
   app.listen(port, () => {
     logger.info(`SentinelNet service listening on port ${port} (env=${config.nodeEnv})`);
   });
+  startAuditConsumerIfEnabled().catch((err) => logger.warn('audit consumer boot failure', err));
 
   // graceful shutdown
-  const shutdown = () => {
+  const shutdown = async () => {
     logger.info('Shutting down SentinelNet...');
-    // if you hook DB/kafka, close them here
-    process.exit(0);
+    try {
+      if (stopAuditConsumer) {
+        await stopAuditConsumer();
+      }
+    } catch (err) {
+      logger.warn('Error while stopping audit consumer', err);
+    } finally {
+      process.exit(0);
+    }
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
 
 export default app;
-

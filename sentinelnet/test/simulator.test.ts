@@ -6,6 +6,7 @@
  * We create a simple policy whose JSONLogic rule matches events with action === "test.action".
  */
 
+import axios from 'axios';
 import simulator from '../src/services/simulator';
 import policyStore from '../src/services/policyStore';
 
@@ -20,26 +21,38 @@ describe('simulator.runSimulation', () => {
   });
 
   test('returns 0 when no samples available', async () => {
-    const id = 'policy-1';
-    mockedPolicyStore.getPolicyById.mockResolvedValueOnce({
-      id,
-      name: 'no-sample-policy',
-      version: 1,
-      severity: 'LOW',
-      rule: { '==': [{ var: 'action' }, 'nonexistent'] },
-      metadata: {},
-      state: 'active',
-      createdBy: 'tester',
-      createdAt: new Date().toISOString(),
-    });
+    const originalKernelUrl = process.env.KERNEL_AUDIT_URL;
+    delete process.env.KERNEL_AUDIT_URL;
+    const axiosSpy = jest.spyOn(axios, 'post').mockResolvedValue({ data: { events: [] } } as any);
+    try {
+      const id = 'policy-1';
+      mockedPolicyStore.getPolicyById.mockResolvedValueOnce({
+        id,
+        name: 'no-sample-policy',
+        version: 1,
+        severity: 'LOW',
+        rule: { '==': [{ var: 'action' }, 'nonexistent'] },
+        metadata: {},
+        state: 'active',
+        createdBy: 'tester',
+        createdAt: new Date().toISOString(),
+      });
 
-    // run with no samples provided and no Kernel configured
-    const report = await simulator.runSimulation(id, { sampleSize: 10, sampleEvents: [] });
-    expect(report).toBeDefined();
-    expect(report.sampleSize).toBe(0);
-    expect(report.matched).toBe(0);
-    expect(report.matchRate).toBe(0);
-    expect(report.note).toBeDefined();
+      // run with no samples provided and no Kernel configured
+      const report = await simulator.runSimulation(id, { sampleSize: 10, sampleEvents: [] });
+      expect(report).toBeDefined();
+      expect(report.sampleSize).toBe(0);
+      expect(report.matched).toBe(0);
+      expect(report.matchRate).toBe(0);
+      expect(report.note).toBeDefined();
+    } finally {
+      axiosSpy.mockRestore();
+      if (originalKernelUrl !== undefined) {
+        process.env.KERNEL_AUDIT_URL = originalKernelUrl;
+      } else {
+        delete process.env.KERNEL_AUDIT_URL;
+      }
+    }
   });
 
   test('computes match rate and examples correctly with provided sampleEvents', async () => {
@@ -82,4 +95,3 @@ describe('simulator.runSimulation', () => {
     expect(exampleIds).toEqual(expect.arrayContaining(['e1', 'e3', 'e5']));
   });
 });
-

@@ -4,11 +4,11 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ---
 
-## # 1) API & contract
-- **Endpoints implemented:** `POST /reason/node`, `POST /reason/edge`, `GET /reason/node/{id}`, `GET /reason/trace/{id}`, `POST /reason/snapshot`, `GET /reason/snapshot/{id}`, `POST /reason/query`, `POST /reason/annotate/{id}`, `GET /reason/export/{id}` exist and match the spec.
-- **Auth enforced:** All write endpoints accept requests only from Kernel (mTLS + RBAC). Read endpoints enforce RBAC and PII redaction per SentinelNet policy.
+## # 1) Minimal API surface
+- **Endpoints implemented:** `POST /reason/node`, `POST /reason/edge`, `GET /reason/node/{id}`, `GET /reason/trace/{id}`, `POST /reason/snapshot`, `GET /reason/snapshot/{id}`, `GET /health`.
+- **Auth enforced:** All write endpoints require Kernel credentials (mTLS in prod, development token accepted only when `ALLOW_DEBUG_TOKEN=true`). Read endpoints enforce RBAC hooks and redact flagged payloads.
 
-**How to verify:** Run contract tests against the API, and test unauthenticated/unauthorized attempts to write and read.
+**How to verify:** Run contract tests that cover all endpoints, attempt unauthenticated writes (must be rejected), and confirm `GET /health` stays green.
 
 ---
 
@@ -55,10 +55,10 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 ---
 
 ## # 7) Snapshot export & auditor workflows
-- **Human-readable exports:** `GET /reason/export/{id}?format=human` produces a readable trace/snapshot for auditors including signature metadata.
-- **Canonical export for verification:** `format=canonical` returns canonical JSON necessary for cryptographic verification.
+- **Canonical fetch:** `GET /reason/snapshot/{id}` returns canonical JSON plus signer metadata suitable for verification tools.
+- **Human-friendly view:** Passing `format=human` produces a readable trace (uses the same stored snapshot data).
 
-**How to verify:** Export snapshot in both formats and use verification tool to validate canonical export.
+**How to verify:** Create snapshot, call both formats, ensure canonical JSON hashes to stored value and human view renders annotations.
 
 ---
 
@@ -99,9 +99,9 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 ---
 
 ## # 12) Security & governance
-- **mTLS + RBAC:** Kernel-only writes; read access limited per role.
-- **Signer/key handling:** Snapshot signing uses KMS/HSM keys; keys are not stored in cluster secrets.
-- **Audit events:** All important actions (node/edge creation, snapshot, signature) emit AuditEvents and are verifiable.
+- **mTLS + RBAC:** Kernel-only writes; ControlPanel reads require RBAC decisions from Kernel.
+- **Signer/key handling:** Snapshot signing uses configured Ed25519 key material sourced from KMS/HSM; private keys are not persisted to disk (only loaded at boot).
+- **Audit events:** Node/edge creation and snapshot creation emit AuditEvents referencing `manifestSignatureId` or `auditEventId`.
 
 **How to verify:** Attempt unauthorized writes; confirm rejection. Verify signature flow and audit events.
 
@@ -117,4 +117,3 @@ Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure
 
 ## # Final acceptance statement
 The Reasoning Graph is accepted when all above criteria pass in staging (or prod-equivalent) environment, the test suite is green, canonicalization and signature verification succeed, integrations work end-to-end, and formal sign-off by Ryan and the Security Engineer is recorded.
-

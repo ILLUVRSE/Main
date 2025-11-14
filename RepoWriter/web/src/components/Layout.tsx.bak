@@ -1,0 +1,60 @@
+// RepoWriter/web/src/components/Layout.tsx
+import React, { useEffect, useState } from "react";
+import HeaderBar from "./HeaderBar";
+
+type PanelComponent = React.FC | React.ComponentType<any>;
+
+type Props = {
+  LeftPanel: PanelComponent;
+  RightPanel: PanelComponent;
+  validation?: PanelComponent | null;
+};
+
+export default function Layout({ LeftPanel, RightPanel, validation: Validation }: Props) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    function onToggle() {
+      setCollapsed((s) => !s);
+    }
+    window.addEventListener("repowriter:toggleRail", onToggle as EventListener);
+    return () => window.removeEventListener("repowriter:toggleRail", onToggle as EventListener);
+  }, []);
+
+  return (
+    <div data-layout-root>
+      <HeaderBar />
+
+      <div className={`app-frame ${collapsed ? "rail-collapsed" : ""}`} role="application" aria-label="RepoWriter layout" style={{ height: "calc(100vh - var(--topbar-height, 56px))" }}>
+        <aside className="left-rail" role="navigation" aria-expanded={!collapsed} aria-label="Context and tasks">
+          <div className="rail-controls">
+            <button
+              className="btn btn-ghost btn-small"
+              onClick={() => setCollapsed((s) => !s)}
+              aria-pressed={collapsed}
+              aria-label={collapsed ? "Expand left rail" : "Collapse left rail"}
+              style={{ background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px", fontSize: 14, lineHeight: 1 }}
+            >
+              {collapsed ? "►" : "◄"}
+            </button>
+          </div>
+
+          <div className="rail-content" style={{ padding: 8, overflow: "auto" }}>
+            <LeftPanel />
+          </div>
+        </aside>
+
+        <main className="right-workspace" role="main" aria-label="Editor and previews" style={{ padding: 12, overflow: "auto" }}>
+          <RightPanel />
+        </main>
+
+        {Validation ? (
+          <aside className="validation-drawer" role="region" aria-label="Validation and logs" aria-hidden={false} style={{ padding: 12, overflow: "auto" }}>
+            <Validation />
+          </aside>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+

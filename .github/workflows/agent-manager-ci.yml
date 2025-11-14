@@ -31,14 +31,17 @@ jobs:
       # Secrets (set in repository settings)
       TEST_CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
       CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
-      # Default to not requiring KMS in CI unless explicitly configured
-      REQUIRE_KMS: "false"
+      # Enforce REQUIRE_KMS on pushes to main; allow PRs to skip by default
+      REQUIRE_KMS: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') ? 'true' : 'false' }}
       KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT || '' }}
       KMS_BEARER_TOKEN: ${{ secrets.KMS_BEARER_TOKEN || '' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Ensure no private keys are committed
+        run: ./scripts/ci/check-no-private-keys.sh
 
       - name: Setup system deps (psql)
         run: |
@@ -118,4 +121,3 @@ jobs:
             kernel/jest-output.json
             /tmp/mock-reason.log
             /tmp/e2e-debug.log
-

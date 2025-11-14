@@ -1,0 +1,40 @@
+{
+  "id": "a190ee8a-5aff-4190-96db-8fa73c57e27b",
+  "artifact_url": "file:///home/ryanlueckenotte/IDEA/server/data/artifacts/files/d1c82640-a2e6-4a50-b304-e7dfa05e2ae8.tgz",
+  "sha256": "0c7c51c9290532728859e7210d0f1cf6e53ca1bdcd0a17bdbb988e870690243e",
+  "actor_id": "ryan",
+  "metadata": {
+    "agent_name": "TestAgent"
+  },
+  "callback_url": "http://127.0.0.1:5175/api/v1/kernel/callback",
+  "profile": "illuvrse",
+  "status": "validated",
+  "created_at": "2025-11-08T15:22:31.485Z",
+  "kernel_callback": {
+    "validation_id": "a190ee8a-5aff-4190-96db-8fa73c57e27b",
+    "status": "PASS",
+    "signed_manifest": {
+      "manifest": {
+        "agent_id": "e69a2758-d69b-4e60-82b4-75a2c11bfb57",
+        "artifact_url": "file:///home/ryanlueckenotte/IDEA/server/data/artifacts/files/d1c82640-a2e6-4a50-b304-e7dfa05e2ae8.tgz",
+        "sha256": "0c7c51c9290532728859e7210d0f1cf6e53ca1bdcd0a17bdbb988e870690243e",
+        "metadata": {
+          "agent_name": "TestAgent"
+        }
+      },
+      "signature": "simulated",
+      "signer_kid": "kernel-dev-1",
+      "signed_at": "2025-11-08T15:20:00Z"
+    },
+    "diagnostics": {
+      "checks": [
+        {
+          "name": "policy_check",
+          "status": "ok"
+        }
+      ]
+    },
+    "timestamp": "2025-11-08T15:20:00Z"
+  },
+  "updated_at": "2025-11-08T15:58:47.721Z"
+}

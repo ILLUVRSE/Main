@@ -100,6 +100,98 @@ func (s *Service) Approve(ctx context.Context, in ApproveInput) (models.Allocati
 	return record, nil
 }
 
+type RejectInput struct {
+	RequestID  uuid.UUID
+	RejectedBy string
+	Reason     string
+	PolicyID   string
+}
+
+func (s *Service) Reject(ctx context.Context, in RejectInput) (models.AllocationRequest, error) {
+	if in.RequestID == uuid.Nil {
+		return models.AllocationRequest{}, fmt.Errorf("requestId required")
+	}
+	if in.PolicyID == "" {
+		in.PolicyID = "manual-reject"
+	}
+	if in.Reason == "" {
+		in.Reason = "rejected"
+	}
+	decision := SentinelDecision{
+		Allowed:  false,
+		PolicyID: in.PolicyID,
+		Reason:   in.Reason,
+	}
+	now := time.Now().UTC()
+	record, err := s.store.UpdateAllocationStatus(ctx, store.AllocationStatusUpdate{
+		ID:               in.RequestID,
+		Status:           "rejected",
+		SentinelDecision: MarshalDecision(decision),
+		AppliedBy:        &in.RejectedBy,
+		AppliedAt:        &now,
+	})
+	if err != nil {
+		return models.AllocationRequest{}, err
+	}
+	return record, nil
+}
+
+type PreemptInput struct {
+	AgentID     string
+	Pool        string
+	Delta       int
+	Reason      string
+	RequestedBy string
+}
+
+func (s *Service) Preempt(ctx context.Context, in PreemptInput) (models.AllocationRequest, error) {
+	if in.AgentID == "" || in.Pool == "" {
+		return models.AllocationRequest{}, fmt.Errorf("agentId and pool required")
+	}
+	if in.Delta <= 0 {
+		return models.AllocationRequest{}, fmt.Errorf("delta must be positive")
+	}
+	delta := -1 * in.Delta
+	req, err := s.store.CreateAllocationRequest(ctx, store.AllocationInput{
+		AgentID:     in.AgentID,
+		Pool:        in.Pool,
+		Delta:       delta,
+		Reason:      in.Reason,
+		Status:      "pending",
+		RequestedBy: in.RequestedBy,
+	})
+	if err != nil {
+		return models.AllocationRequest{}, err
+	}
+	decision := SentinelDecision{Allowed: true, PolicyID: "sentinel-allow", Reason: "default-allow"}
+	if s.sentinel != nil {
+		decision, err = s.sentinel.Check(ctx, SentinelRequest{
+			AgentID: in.AgentID,
+			Pool:    in.Pool,
+			Delta:   delta,
+		})
+		if err != nil {
+			return models.AllocationRequest{}, err
+		}
+	}
+	status := "applied"
+	if !decision.Allowed {
+		status = "rejected"
+	}
+	now := time.Now().UTC()
+	record, err := s.store.UpdateAllocationStatus(ctx, store.AllocationStatusUpdate{
+		ID:               req.ID,
+		Status:           status,
+		SentinelDecision: MarshalDecision(decision),
+		AppliedBy:        &in.RequestedBy,
+		AppliedAt:        &now,
+	})
+	if err != nil {
+		return models.AllocationRequest{}, err
+	}
+	return record, nil
+}
+
 func (s *Service) GetRequest(ctx context.Context, id uuid.UUID) (models.AllocationRequest, error) {
 	return s.store.GetAllocationRequest(ctx, id)
 }

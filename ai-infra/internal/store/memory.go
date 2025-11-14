@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"sort"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ func (m *MemoryStore) CreateTrainingJob(ctx context.Context, in TrainingJobInput
 	if in.ID == uuid.Nil {
 		in.ID = uuid.New()
 	}
+	now := time.Now().UTC()
 	job := models.TrainingJob{
 		ID:              in.ID,
 		CodeRef:         in.CodeRef,
@@ -46,12 +48,63 @@ func (m *MemoryStore) CreateTrainingJob(ctx context.Context, in TrainingJobInput
 		DatasetRefs:     copyJSON(in.DatasetRefs, "[]"),
 		Seed:            in.Seed,
 		Status:          in.Status,
-		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.jobs[job.ID] = job
+	return job, nil
+}
+
+func (m *MemoryStore) GetTrainingJob(ctx context.Context, id uuid.UUID) (models.TrainingJob, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	job, ok := m.jobs[id]
+	if !ok {
+		return models.TrainingJob{}, ErrNotFound
+	}
+	return job, nil
+}
+
+func (m *MemoryStore) ClaimNextTrainingJob(ctx context.Context) (models.TrainingJob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var (
+		selectedID uuid.UUID
+		selected   models.TrainingJob
+		found      bool
+	)
+	for id, job := range m.jobs {
+		if job.Status != "queued" {
+			continue
+		}
+		if !found || job.CreatedAt.Before(selected.CreatedAt) {
+			selectedID = id
+			selected = job
+			found = true
+		}
+	}
+	if !found {
+		return models.TrainingJob{}, ErrNotFound
+	}
+	now := time.Now().UTC()
+	selected.Status = "running"
+	selected.UpdatedAt = now
+	m.jobs[selectedID] = selected
+	return selected, nil
+}
+
+func (m *MemoryStore) UpdateTrainingJobStatus(ctx context.Context, id uuid.UUID, status string) (models.TrainingJob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, ok := m.jobs[id]
+	if !ok {
+		return models.TrainingJob{}, ErrNotFound
+	}
+	job.Status = status
+	job.UpdatedAt = time.Now().UTC()
+	m.jobs[id] = job
 	return job, nil
 }
 
@@ -77,6 +130,42 @@ func (m *MemoryStore) CreateArtifact(ctx context.Context, in ArtifactInput) (mod
 	defer m.mu.Unlock()
 	m.artifacts[artifact.ID] = artifact
 	return artifact, nil
+}
+
+func (m *MemoryStore) ListArtifacts(ctx context.Context, filter ListArtifactsFilter) ([]models.ModelArtifact, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var artifacts []models.ModelArtifact
+	for _, artifact := range m.artifacts {
+		if filter.TrainingJobID != nil && artifact.TrainingJobID != *filter.TrainingJobID {
+			continue
+		}
+		if filter.Checksum != "" && artifact.Checksum != filter.Checksum {
+			continue
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	sort.Slice(artifacts, func(i, j int) bool {
+		return artifacts[i].CreatedAt.After(artifacts[j].CreatedAt)
+	})
+	start := filter.Offset
+	if start > len(artifacts) {
+		start = len(artifacts)
+	}
+	if start < 0 {
+		start = 0
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	end := start + limit
+	if end > len(artifacts) {
+		end = len(artifacts)
+	}
+	result := make([]models.ModelArtifact, end-start)
+	copy(result, artifacts[start:end])
+	return result, nil
 }
 
 func (m *MemoryStore) GetArtifact(ctx context.Context, id uuid.UUID) (models.ModelArtifact, error) {
@@ -105,6 +194,23 @@ func (m *MemoryStore) CreatePromotion(ctx context.Context, in PromotionInput) (m
 	defer m.mu.Unlock()
 	m.promotions[promo.ID] = promo
 	return promo, nil
+}
+
+func (m *MemoryStore) ListPromotionsByArtifact(ctx context.Context, artifactID uuid.UUID) ([]models.ModelPromotion, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var promotions []models.ModelPromotion
+	for _, promo := range m.promotions {
+		if promo.ArtifactID == artifactID {
+			promotions = append(promotions, promo)
+		}
+	}
+	sort.Slice(promotions, func(i, j int) bool {
+		return promotions[i].CreatedAt.After(promotions[j].CreatedAt)
+	})
+	result := make([]models.ModelPromotion, len(promotions))
+	copy(result, promotions)
+	return result, nil
 }
 
 func (m *MemoryStore) UpdatePromotionStatus(ctx context.Context, in PromotionStatusUpdate) (models.ModelPromotion, error) {

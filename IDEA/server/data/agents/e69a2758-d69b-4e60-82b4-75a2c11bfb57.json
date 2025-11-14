@@ -1,0 +1,19 @@
+{
+  "name": "TestAgent",
+  "profile": "personal",
+  "behavior": {
+    "scripts": [
+      {
+        "path": "run.sh",
+        "content": "echo hi"
+      }
+    ],
+    "entrypoint": "run.sh"
+  },
+  "metadata": {
+    "owner": "ryan",
+    "version": "0.1.0"
+  },
+  "agent_id": "e69a2758-d69b-4e60-82b4-75a2c11bfb57",
+  "saved_at": "2025-11-08T15:16:09.831Z"
+}

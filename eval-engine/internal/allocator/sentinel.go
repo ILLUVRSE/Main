@@ -3,6 +3,7 @@ package allocator
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 )
 
@@ -46,7 +47,8 @@ func (s *StaticSentinel) Check(ctx context.Context, req SentinelRequest) (Sentin
 			Reason:   "pool blocked by policy",
 		}, nil
 	}
-	if s.MaxDelta > 0 && req.Delta > s.MaxDelta {
+	abs := int(math.Abs(float64(req.Delta)))
+	if s.MaxDelta > 0 && abs > s.MaxDelta {
 		return SentinelDecision{
 			Allowed:  false,
 			PolicyID: "sentinel-max-delta",

@@ -18,12 +18,12 @@ type AllocatorClient interface {
 }
 
 type AllocationRequest struct {
-	PromotionID uuid.UUID `json:"promotionId"`
-	AgentID     string    `json:"agentId"`
-	Pool        string    `json:"pool"`
-	Delta       int       `json:"delta"`
-	Reason      string    `json:"reason"`
-	RequestedBy string    `json:"requestedBy"`
+	PromotionID *uuid.UUID `json:"promotionId,omitempty"`
+	AgentID     string     `json:"agentId"`
+	Pool        string     `json:"pool"`
+	Delta       int        `json:"delta"`
+	Reason      string     `json:"reason"`
+	RequestedBy string     `json:"requestedBy"`
 }
 
 type AllocationResponse struct {
@@ -52,11 +52,12 @@ func New(store store.Store, alloc AllocatorClient, cfg ServiceConfig) *Service {
 }
 
 type SubmitReportInput struct {
-	AgentID string
-	Metrics json.RawMessage
-	Source  string
-	Tags    json.RawMessage
-	TS      time.Time
+	AgentID    string
+	DivisionID string
+	Metrics    json.RawMessage
+	Source     string
+	Tags       json.RawMessage
+	TS         time.Time
 }
 
 type SubmitReportResult struct {
@@ -91,6 +92,7 @@ func (s *Service) SubmitReport(ctx context.Context, in SubmitReportInput) (Submi
 	confidence := computeConfidence(components)
 	score, err := s.store.UpsertAgentScore(ctx, store.AgentScoreInput{
 		AgentID:    in.AgentID,
+		DivisionID: in.DivisionID,
 		Score:      scoreValue,
 		Components: components,
 		Confidence: confidence,
@@ -202,7 +204,7 @@ func (s *Service) createPromotion(ctx context.Context, in PromotionInput) (model
 
 	if s.alloc != nil {
 		req := AllocationRequest{
-			PromotionID: event.ID,
+			PromotionID: &event.ID,
 			AgentID:     in.AgentID,
 			Pool:        in.Pool,
 			Delta:       in.Delta,
@@ -220,4 +222,61 @@ func (s *Service) createPromotion(ctx context.Context, in PromotionInput) (model
 
 func (s *Service) GetAgentScore(ctx context.Context, agentID string) (models.AgentScore, error) {
 	return s.store.GetAgentScore(ctx, agentID)
+}
+
+func (s *Service) GetScoreboard(ctx context.Context, divisionID string, limit int) ([]models.AgentScore, error) {
+	return s.store.ListTopAgentScores(ctx, divisionID, limit)
+}
+
+type RetrainJobInput struct {
+	ModelFamily   string
+	DatasetRefs   []string
+	Priority      string
+	RequestedBy   string
+	ResourcePool  string
+	ResourceUnits int
+	ResultMetrics json.RawMessage
+}
+
+func (s *Service) CreateRetrainJob(ctx context.Context, in RetrainJobInput) (models.RetrainJob, error) {
+	if in.ModelFamily == "" {
+		return models.RetrainJob{}, fmt.Errorf("modelFamily required")
+	}
+	if in.Priority == "" {
+		in.Priority = "normal"
+	}
+	job, err := s.store.CreateRetrainJob(ctx, store.RetrainJobInput{
+		ModelFamily: in.ModelFamily,
+		DatasetRefs: in.DatasetRefs,
+		Priority:    in.Priority,
+		Status:      "queued",
+		RequestedBy: in.RequestedBy,
+		Result:      in.ResultMetrics,
+	})
+	if err != nil {
+		return models.RetrainJob{}, err
+	}
+
+	if s.alloc != nil && in.ResourcePool != "" && in.ResourceUnits > 0 {
+		req := AllocationRequest{
+			AgentID:     in.ModelFamily,
+			Pool:        in.ResourcePool,
+			Delta:       in.ResourceUnits,
+			Reason:      fmt.Sprintf("retrain job %s resource request", job.ID),
+			RequestedBy: in.RequestedBy,
+		}
+		resp, err := s.alloc.CreateRequest(ctx, req)
+		if err == nil {
+			updated, attachErr := s.store.AttachRetrainAllocation(ctx, job.ID, resp.RequestID)
+			if attachErr == nil {
+				job = updated
+			}
+		}
+	}
+
+	return job, nil
+}
+
+func (s *Service) GetRetrainJob(ctx context.Context, id uuid.UUID) (models.RetrainJob, error) {
+	return s.store.GetRetrainJob(ctx, id)
 }

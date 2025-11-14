@@ -37,7 +37,7 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
   - Must use **mutual TLS**. Kernel is a trusted client (system) with client certs in a signer registry.  
   - Restrict by network ACLs and authorize by cert identity mapping to a principal.  
 - **Policy edits & admin UI**  
-  - Policy edits only allowed by RBAC-enabled UIs or API clients. Use OIDC for human users; require 2FA and Admin/Multi-Reviewer flows for high-severity changes.
+  - Policy edits only allowed by RBAC-enabled UIs or API clients. Use OIDC for humans; require 2FA and multi-reviewer approvals for `HIGH/CRITICAL`. SentinelNet now ships RBAC middleware (`SENTINEL_RBAC_ENABLED=true`) which enforces role headers (`SENTINEL_RBAC_HEADER`, default `X-Sentinel-Roles`). Configure `SENTINEL_RBAC_CHECK_ROLES` (e.g., `kernel-service`) and `SENTINEL_RBAC_POLICY_ROLES` (e.g., `kernel-admin,kernel-superadmin`) so the API rejects callers lacking proper roles.
 - **Policy activation gate**  
   - For `severity=HIGH|CRITICAL` transitions to `active` require multi-sig approvals via Kernel's multisig flow. SentinelNet should create a `policy_activation` upgrade manifest and require Kernel’s 3-of-5 flow to apply.
 - **KMS/HSM**  
@@ -46,6 +46,9 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
   - Local dev may set `DEV_SKIP_MTLS=true` and run the mock Kernel via `npm run kernel:mock`. Production must set `DEV_SKIP_MTLS=false` and provide client cert/key paths (`KERNEL_MTLS_CERT_PATH`, `KERNEL_MTLS_KEY_PATH`, optionally `KERNEL_MTLS_CA_PATH`).  
   - `SENTINEL_ENABLE_AUDIT_CONSUMER` should be enabled in prod (polls Kernel audit events) and disabled in dev unless the mock Kernel is running.  
   - `run-local.sh` automates Postgres bootstrap, migrations, Kernel mock startup, and the verification suite; run it before submitting PRs.
+- **Audit ingress (Kafka vs HTTP)**  
+  - Preferred: set `SENTINEL_KAFKA_BROKERS`, `SENTINEL_AUDIT_TOPIC`, `SENTINEL_KAFKA_CONSUMER_GROUP`, and `SENTINEL_ENABLE_AUDIT_CONSUMER=true` to stream events via Kafka/Redpanda (see `src/event/kafkaConsumer.ts`).  
+  - Fallback: unset Kafka vars to continue using the HTTP poller (`src/event/consumer.ts`) against `/kernel/audit/search`.
 
 ---
 
@@ -77,7 +80,7 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
 - **Canary rollout**:
   - Use deterministic sampling keyed on `requestId` or event id. Default canaryPercent 5–10%.
   - Monitor canary metrics (match rate, remediation success, false positives). Rolling window (5–15 minutes) and thresholds:
-    - If FP rate exceeds threshold for 3 consecutive windows, auto-roll back or pause canary.
+    - SentinelNet’s `canaryRollback` automation watches enforced denials while in canary state; configure `SENTINEL_CANARY_AUTO_ROLLBACK`, `SENTINEL_CANARY_ROLLBACK_THRESHOLD`, `SENTINEL_CANARY_ROLLBACK_WINDOW`, and cooldown to automatically revert a canary back to `draft` when FP rate spikes.
   - Canary → Active transition:
     - For `LOW/MEDIUM`: automatic after stability period (e.g., 1–24h) if metrics are good.
     - For `HIGH/CRITICAL`: require Kernel multisig `3-of-5` approval. SentinelNet should create a `policy_activation` manifest and Kernel applies multisig gating.
@@ -124,6 +127,7 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
 - [ ] Ingress + mTLS configuration matching Kernel certs
 - [ ] Managed Postgres (HA) and migration automation
 - [ ] Kafka/Redpanda topic `audit-events` and consumer group config
+- [ ] Container image built from Dockerfile + reference K8s manifest (`deploy/k8s/sentinelnet-deployment.yaml`) updated with env + secrets
 - [ ] KMS/HSM keys provisioned and accessible to SentinelNet (or Kernel signs)
 - [ ] Monitoring & alerting (latency SLO, error rates, audit append failures)
 - [ ] Canary automation & runbooks implemented

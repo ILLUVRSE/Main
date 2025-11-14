@@ -33,6 +33,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Ensure no private keys are committed
+        run: ./scripts/ci/check-no-private-keys.sh
+
+      - name: Enforce REQUIRE_KMS guard
+        run: ./kernel/ci/require_kms_check.sh
+        env:
+          REQUIRE_KMS: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') ? 'true' : 'false' }}
+          KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT || '' }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -89,4 +98,3 @@ jobs:
         with:
           name: zap-report
           path: kernel/zap-report.html
-

@@ -27,6 +27,17 @@ DEV_SKIP_MTLS=true
 SENTINEL_DB_URL=postgres://postgres:password@localhost:5432/sentinel_db
 KERNEL_AUDIT_URL=http://127.0.0.1:7802
 SENTINEL_ENABLE_AUDIT_CONSUMER=false
+# RBAC (optional locally, mandatory prod)
+SENTINEL_RBAC_ENABLED=false
+SENTINEL_RBAC_CHECK_ROLES=kernel-service
+SENTINEL_RBAC_POLICY_ROLES=kernel-admin
+# Kafka (optional – falls back to HTTP poller)
+SENTINEL_KAFKA_BROKERS=localhost:9092
+SENTINEL_AUDIT_TOPIC=audit-events
+# Canary rollback tuning (defaults shown)
+SENTINEL_CANARY_AUTO_ROLLBACK=true
+SENTINEL_CANARY_ROLLBACK_THRESHOLD=0.3
+SENTINEL_CANARY_ROLLBACK_WINDOW=40
 ```
 
 3. **Run the full verification suite locally**
@@ -87,8 +98,10 @@ See `sentinelnet/sentinelnet-spec.md` for detailed API expectations.
   3. Collect approvals via `submitUpgradeApproval` (3-of-5) and call `applyUpgrade`.
   4. Once Kernel marks upgrade `applied`, set policy state to `active`.
   See `src/services/multisigGating.ts` and the runbook below.
-* **Async detection**: `src/event/consumer.ts` polls `/kernel/audit/search` and hands events to `event/handler.ts`, which re-runs evaluation and appends `policy.decision`.
+* **Async detection**: `src/event/consumer.ts` polls `/kernel/audit/search` and hands events to `event/handler.ts`, which re-runs evaluation and appends `policy.decision`. Production deployments can set `SENTINEL_KAFKA_BROKERS` + `SENTINEL_AUDIT_TOPIC` to use the Kafka consumer in `src/event/kafkaConsumer.ts` (install `kafkajs` via `npm install --save kafkajs`).
 * **Transport security & RBAC**: Production requires mTLS between Kernel ↔ SentinelNet (`DEV_SKIP_MTLS=false`) and RBAC fronting this service (CommandPad or API gateway). In dev we default to `DEV_SKIP_MTLS=true` and treat all callers as `principal.id=unknown`.
+* **RBAC middleware**: `src/http/rbac.ts` enforces role headers (`SENTINEL_RBAC_HEADER`, defaults to `x-sentinel-roles`) for `/sentinelnet/check` and `/sentinelnet/policy`. Configure allowed role lists via `SENTINEL_RBAC_CHECK_ROLES` and `SENTINEL_RBAC_POLICY_ROLES`.
+* **Canary auto-rollback**: `src/services/canaryRollback.ts` observes canary decision rates and automatically reverts a canary back to draft when enforced denials exceed `SENTINEL_CANARY_ROLLBACK_THRESHOLD` over `SENTINEL_CANARY_ROLLBACK_WINDOW` samples (with cooldown).
 
 ---
 
@@ -115,11 +128,17 @@ See `sentinelnet/sentinelnet-spec.md` for detailed API expectations.
    - Call `multisigGating.applyUpgrade` once quorum is met. Kernel mock (or prod Kernel) will mark it applied.
 5. Move the policy to `active` (`policyStore.setPolicyState`) and continue monitoring.
 
+## Deployment quick reference
+
+* **Docker**: `docker build -t sentinelnet:dev .` (multi-stage Dockerfile included).
+* **Kubernetes**: see `deploy/k8s/sentinelnet-deployment.yaml` for a reference Deployment + Service wiring Kafka, RBAC, and rollback env vars.
+* **RBAC**: ensure API gateway or callers pass `X-Sentinel-Roles` header (comma-separated roles) so SentinelNet can authorize requests.
+* **Kafka**: set `SENTINEL_KAFKA_BROKERS` and `SENTINEL_AUDIT_TOPIC` to stream audit events directly without HTTP polling.
+
 ## Next steps & TODOs
 
-* Wire a production-grade Kafka consumer for `audit-events`.
 * Replace JSONLogic with CEL if advanced expression needs arise.
-* Implement RBAC middleware for policy mutation endpoints.
-* Implement automated canary rollback heuristics and dashboards.
+* Expand auto-rollback to consult live metrics (false positives, severity).
+* Build dashboards for RBAC denials and canary rollback events.
 
 ---

@@ -1,0 +1,268 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.authMiddleware = authMiddleware;
+// kernel/src/auth/middleware.ts
+const crypto_1 = __importDefault(require("crypto"));
+const oidc_1 = require("./oidc");
+/**
+ * Runtime loader for role-mapping utilities to avoid circular imports.
+ */
+function loadRoleMapper() {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        return require('./roleMapping');
+    }
+    catch (e) {
+        return null;
+    }
+}
+/**
+ * Base64url decode utility (returns UTF-8 string)
+ */
+function base64UrlDecode(input) {
+    let s = input.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4 !== 0)
+        s += '=';
+    return Buffer.from(s, 'base64').toString('utf8');
+}
+/**
+ * Parse JWT header without verification
+ */
+function parseJwtHeader(token) {
+    try {
+        const parts = token.split('.');
+        if (parts.length < 2)
+            return null;
+        const headerStr = base64UrlDecode(parts[0]);
+        return JSON.parse(headerStr);
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * verify HS256 JWT compact token using provided secret.
+ * Returns parsed payload (object) on success, throws on failure.
+ */
+function verifyHs256Token(token, secret) {
+    const parts = token.split('.');
+    if (parts.length !== 3)
+        throw new Error('invalid token format');
+    const signingInput = parts[0] + '.' + parts[1];
+    const sig = parts[2];
+    // Compute expected signature in base64url
+    const h = crypto_1.default.createHmac('sha256', secret).update(signingInput).digest();
+    const expected = h.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    // Timing-safe compare: lengths must match
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    const sigBuf = Buffer.from(sig, 'utf8');
+    if (expectedBuf.length !== sigBuf.length)
+        throw new Error('invalid signature');
+    if (!crypto_1.default.timingSafeEqual(expectedBuf, sigBuf)) {
+        throw new Error('invalid signature');
+    }
+    const payloadJson = base64UrlDecode(parts[1]);
+    return JSON.parse(payloadJson);
+}
+/**
+ * Extract commonName from Node's getPeerCertificate() output.
+ */
+function extractCNFromCert(cert) {
+    if (!cert)
+        return undefined;
+    // Node's getPeerCertificate returns either an object with subject or a string or nested structures.
+    const subj = cert.subject || cert.subjectCertificate || cert.issuerCertificate;
+    if (subj) {
+        if (typeof subj === 'object') {
+            return (subj.CN || subj.commonName);
+        }
+        if (typeof subj === 'string') {
+            const m = subj.match(/\/CN=([^\/,;+]+)/);
+            if (m)
+                return m[1];
+        }
+    }
+    if (cert.CN)
+        return cert.CN;
+    return undefined;
+}
+/**
+ * Extract SAN if present
+ */
+function extractSAN(cert) {
+    if (!cert)
+        return undefined;
+    if (cert.subjectaltname)
+        return cert.subjectaltname;
+    if (cert.altNames)
+        return cert.altNames;
+    return undefined;
+}
+/**
+ * Middleware: try bearer JWT verification (HS256 fast path), then mTLS client cert.
+ * We DO NOT call oidcClient.init() from the middleware to avoid performing network
+ * discovery during request-handling. OIDC verification only runs when `oidcClient.jwks`
+ * is already present (i.e., server startup called initOidc()).
+ */
+async function authMiddleware(req, _res, next) {
+    try {
+        const mapper = loadRoleMapper();
+        // 1) Bearer token (preferred)
+        const authHeader = (req.headers.authorization || '');
+        const m = authHeader.match(/^\s*Bearer\s+(.+)\s*$/i);
+        if (m) {
+            const token = m[1];
+            // Fast-path: if token header indicates HS256, try test/secret-based verification
+            try {
+                const header = parseJwtHeader(token);
+                if (header && typeof header.alg === 'string' && header.alg.toUpperCase() === 'HS256') {
+                    const secret = (process.env.TEST_CLIENT_SECRET && process.env.TEST_CLIENT_SECRET.length > 0
+                        ? process.env.TEST_CLIENT_SECRET
+                        : undefined) ||
+                        (process.env.CLIENT_SECRET && process.env.CLIENT_SECRET.length > 0 ? process.env.CLIENT_SECRET : undefined);
+                    if (secret) {
+                        try {
+                            const payload = verifyHs256Token(token, secret);
+                            let roles = [];
+                            if (Array.isArray(payload?.roles))
+                                roles = payload.roles;
+                            else if (payload?.scope && typeof payload.scope === 'string') {
+                                roles = payload.scope.split(/\s+/).filter(Boolean);
+                            }
+                            if (mapper && typeof mapper.mapOidcRolesToCanonical === 'function') {
+                                try {
+                                    roles = mapper.mapOidcRolesToCanonical(roles || []);
+                                }
+                                catch {
+                                    // ignore mapper errors
+                                }
+                            }
+                            const principal = {
+                                type: 'human',
+                                id: String(payload?.sub ?? payload?.sid ?? payload?.subject ?? 'unknown'),
+                                roles: roles || [],
+                            };
+                            req.principal = principal;
+                            return next();
+                        }
+                        catch (e) {
+                            // HS256 verification failed — continue to other auth paths
+                            console.warn('authMiddleware: HS256 token verification failed — continuing unauthenticated:', e.message || e);
+                        }
+                    }
+                    else {
+                        console.warn('authMiddleware: HS256 token presented but no TEST_CLIENT_SECRET/CLIENT_SECRET configured — skipping HS256 verification.');
+                    }
+                }
+            }
+            catch (e) {
+                // Parsing header failed — continue to other paths
+            }
+            // OIDC verification: ONLY attempt if jwks already present (initialized at server start).
+            try {
+                if (oidc_1.oidcClient.jwks) {
+                    try {
+                        const payload = await oidc_1.oidcClient.verify(token);
+                        if (mapper && typeof mapper.principalFromOidcClaims === 'function') {
+                            try {
+                                const p = mapper.principalFromOidcClaims(payload);
+                                p.id = String(p.id || payload.sub || payload.sid || 'unknown');
+                                p.roles = p.roles || [];
+                                req.principal = p;
+                                return next();
+                            }
+                            catch (e) {
+                                console.warn('authMiddleware: roleMapper.principalFromOidcClaims failed, falling back:', e.message || e);
+                            }
+                        }
+                        let roles = [];
+                        if (payload?.realm_access && Array.isArray(payload.realm_access.roles)) {
+                            roles = payload.realm_access.roles;
+                        }
+                        else if (payload?.resource_access && typeof payload.resource_access === 'object') {
+                            const ra = payload.resource_access;
+                            const all = [];
+                            for (const k of Object.keys(ra || {})) {
+                                const r = ra[k]?.roles;
+                                if (Array.isArray(r))
+                                    all.push(...r);
+                            }
+                            if (all.length)
+                                roles = all;
+                        }
+                        else if (Array.isArray(payload?.roles)) {
+                            roles = payload.roles;
+                        }
+                        else if (payload?.scope && typeof payload.scope === 'string') {
+                            roles = payload.scope.split(/\s+/).filter(Boolean);
+                        }
+                        if (mapper && typeof mapper.mapOidcRolesToCanonical === 'function') {
+                            try {
+                                roles = mapper.mapOidcRolesToCanonical(roles || []);
+                            }
+                            catch {
+                                // ignore mapping errors
+                            }
+                        }
+                        const principal = {
+                            type: 'human',
+                            id: String(payload?.sub ?? payload?.sid ?? payload?.subject ?? 'unknown'),
+                            roles: roles || [],
+                        };
+                        req.principal = principal;
+                        return next();
+                    }
+                    catch (err) {
+                        console.warn('authMiddleware: oidc token verify failed — continuing unauthenticated:', err.message || err);
+                    }
+                }
+            }
+            catch (err) {
+                console.warn('authMiddleware: oidc processing error — continuing unauthenticated:', err.message || err);
+            }
+        }
+        // 2) mTLS client cert extraction (Node http/https)
+        try {
+            // @ts-ignore
+            const sock = req.socket || req.connection;
+            if (sock && typeof sock.getPeerCertificate === 'function') {
+                const cert = sock.getPeerCertificate(true);
+                const hasCert = cert && Object.keys(cert).length > 0;
+                if (hasCert) {
+                    if (mapper && typeof mapper.principalFromCert === 'function') {
+                        try {
+                            const p = mapper.principalFromCert(cert);
+                            p.roles = p.roles || [];
+                            req.principal = p;
+                            return next();
+                        }
+                        catch (e) {
+                            console.warn('authMiddleware: roleMapper.principalFromCert failed, falling back:', e.message || e);
+                        }
+                    }
+                    const cn = extractCNFromCert(cert);
+                    const san = extractSAN(cert);
+                    const id = cn || (cert?.subject ? JSON.stringify(cert.subject) : (san || 'service-unknown'));
+                    const principal = {
+                        type: 'service',
+                        id,
+                        roles: [],
+                    };
+                    req.principal = principal;
+                    return next();
+                }
+            }
+        }
+        catch (err) {
+            console.warn('authMiddleware: cert parse error — continuing unauthenticated:', err.message || err);
+        }
+        // 3) No principal found — continue unauthenticated (rbac.getPrincipalFromRequest will still work for dev headers)
+        return next();
+    }
+    catch (err) {
+        return next(err);
+    }
+}

@@ -44,7 +44,8 @@ This file converts the high-level acceptance paragraphs into concrete, testable 
   - Unit tests validate match rate and example selection from provided `sampleEvents`. (`test/simulator.test.ts`)
 - Canary:
   - Policy may be placed into `canary` state and configured with `canaryPercent` (policy.metadata.canaryPercent). Deterministic sampling based on `requestId` is used. (`canary.shouldApplyCanary`)  
-  - Tests: unit tests for `shouldApplyCanary()` determinism and boundaries.
+  - Auto rollback monitors enforced canary decisions; exceeding `SENTINEL_CANARY_ROLLBACK_THRESHOLD` over `SENTINEL_CANARY_ROLLBACK_WINDOW` samples reverts the policy to `draft` and resets canary percent. (`services/canaryRollback.ts`)
+- Tests: unit tests for `shouldApplyCanary()` determinism, boundaries, and auto rollback triggering.
 
 ---
 
@@ -61,15 +62,16 @@ This file converts the high-level acceptance paragraphs into concrete, testable 
 ## 6) Security & transport
 **Acceptance**
 - mTLS is required for Kernel ↔ SentinelNet in production. For development `DEV_SKIP_MTLS=true` may be used. (`deployment.md` & `config/env.ts`)  
-- Policy edits require RBAC in production; first cut assumes an authenticated principal (placeholder). Add RBAC gating before production rollout.
+- RBAC middleware must enforce role-based access for `/sentinelnet/check` and `/sentinelnet/policy`, using the configurable header (`SENTINEL_RBAC_HEADER`) and role lists (`SENTINEL_RBAC_CHECK_ROLES`, `SENTINEL_RBAC_POLICY_ROLES`). Requests without an allowed role must receive `403`.
 - Tests:
   - Health/readiness should indicate whether mTLS or Kernel endpoint is configured; no automated test required in dev.
+  - Unit/integration test covering RBAC allow/deny paths.
 
 ---
 
 ## 7) Async detection & event subscription
 **Acceptance**
-- A working prototype consumer that reads Kernel audit events and invokes policy evaluation exists (`event/consumer.ts` + `event/handler.ts`). For dev this can be polling `/kernel/audit/search`.  
+- SentinelNet must ingest audit events either via the HTTP poller (`event/consumer.ts`) or via the Kafka consumer (`event/kafkaConsumer.ts`). Production deployments should configure Kafka brokers/topic/group; dev may continue to poll `/kernel/audit/search`.  
 - Tests:
   - A smoke test that uses the Kernel mock to return a set of audit events and verifies `handleAuditEvent()` emits `policy.decision` events.
 

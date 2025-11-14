@@ -14,6 +14,37 @@ export interface ArtifactInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface ArtifactRecord {
+  id: string;
+  memory_node_id: string | null;
+  artifact_url: string;
+  sha256: string;
+  manifest_signature_id: string | null;
+  size_bytes: number | null;
+  created_by: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArtifactView extends ArtifactRecord {
+  latestAudit?: {
+    auditEventId: string;
+    hash: string;
+    createdAt: string;
+  };
+}
+
+export interface AuditEventRecord {
+  id: string;
+  hash: string;
+  prev_hash: string | null;
+  signature: string | null;
+  manifest_signature_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface MemoryNodeInput {
   owner: string;
   embeddingId?: string | null;
@@ -39,6 +70,29 @@ export interface MemoryNodeRecord {
   deleted_at: string | null;
 }
 
+export interface MemoryNodeView {
+  memoryNodeId: string;
+  owner: string;
+  embeddingId: string | null;
+  metadata: Record<string, unknown>;
+  piiFlags: Record<string, unknown>;
+  legalHold: boolean;
+  ttlSeconds: number | null;
+  expiresAt: string | null;
+  artifacts: Array<{
+    artifactId: string;
+    artifactUrl: string;
+    sha256: string;
+    manifestSignatureId: string | null;
+    sizeBytes: number | null;
+  }>;
+  latestAudit?: {
+    auditEventId: string;
+    hash: string;
+    createdAt: string;
+  };
+}
+
 export interface SearchRequest {
   queryEmbedding: number[];
   topK?: number;
@@ -50,7 +104,9 @@ export interface SearchRequest {
 export interface SearchResult {
   memoryNodeId: string;
   score: number;
-  metadata?: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  artifactIds: string[];
+  vectorRef?: string | null;
 }
 
 export interface AuditContext {
@@ -62,12 +118,13 @@ export interface AuditContext {
 export interface MemoryService {
   createMemoryNode(input: MemoryNodeInput, ctx: AuditContext): Promise<{
     memoryNodeId: string;
-    embeddingJobId?: string | null;
+    embeddingVectorId?: string | null;
     auditEventId: string;
   }>;
-  getMemoryNode(id: string): Promise<MemoryNodeRecord | null>;
+  getMemoryNode(id: string): Promise<MemoryNodeView | null>;
+  getArtifact(id: string): Promise<ArtifactView | null>;
   createArtifact(nodeId: string | null, artifact: ArtifactInput, ctx: AuditContext): Promise<{ artifactId: string; auditEventId: string }>;
   searchMemoryNodes(request: SearchRequest): Promise<SearchResult[]>;
-  setLegalHold(id: string, legalHold: boolean, reason?: string): Promise<void>;
-  deleteMemoryNode(id: string, requestedBy?: string): Promise<void>;
+  setLegalHold(id: string, legalHold: boolean, reason: string | undefined, ctx: AuditContext): Promise<void>;
+  deleteMemoryNode(id: string, requestedBy: string | undefined, ctx: AuditContext): Promise<void>;
 }

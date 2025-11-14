@@ -34,6 +34,21 @@ Purpose: operational guidance for deploying the Eval Engine (scoring, recommenda
 
 ---
 
+## # 3.1) Local bootstrap & smoke tests
+These steps wire up the scaffolded services for local verification:
+
+1. **Apply schema:** `psql $DATABASE_URL -f eval-engine/sql/migrations/001_init.sql`.
+2. **Start Resource Allocator:**  
+   `RESOURCE_ALLOCATOR_ADDR=:8052 RESOURCE_ALLOCATOR_POOLS=gpus-us-east:10,blocked-pool:2 go run ./eval-engine/cmd/resource-allocator-service`.
+3. **Start Eval ingestion:**  
+   `RESOURCE_ALLOCATOR_URL=http://localhost:8052 EVAL_ENGINE_ADDR=:8051 go run ./eval-engine/cmd/eval-ingestion-service`.
+4. **Run acceptance test:** `go test ./eval-engine/internal/acceptance -run PromotionAllocation`.  
+   This test submits a promotion, triggers an allocation request, and exercises SentinelNet allow/deny paths.
+
+Expose these commands (or wrap them) in your developer tooling so contributors can reproduce the canonical promotion → allocation → SentinelNet check locally.
+
+---
+
 ## # 4) Eventing & ingestion
 - **High-throughput ingestion**: clients (Kernel, Agent Manager) write EvalReports to Kafka; Eval Engine consumers read, process, and persist.
 - **Exactly-once / idempotency**: use idempotency keys and consumer offsets + transactional writes into Postgres where feasible.
@@ -125,4 +140,3 @@ Purpose: operational guidance for deploying the Eval Engine (scoring, recommenda
 ---
 
 End of file.
-

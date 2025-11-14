@@ -11,7 +11,9 @@ type Config struct {
 	DatabaseURL      string
 	SignerKeyB64     string
 	SignerID         string
+	KMSEndpoint      string
 	SentinelMinScore float64
+	SentinelURL      string
 	AllowDebugToken  bool
 	DebugToken       string
 }
@@ -28,15 +30,17 @@ func Load() (Config, error) {
 		DatabaseURL:      firstNonEmpty(os.Getenv("AI_INFRA_DATABASE_URL"), os.Getenv("DATABASE_URL")),
 		SignerKeyB64:     os.Getenv("AI_INFRA_SIGNER_KEY_B64"),
 		SignerID:         getEnv("AI_INFRA_SIGNER_ID", defaultSignerID),
+		KMSEndpoint:      os.Getenv("AI_INFRA_KMS_ENDPOINT"),
 		SentinelMinScore: getFloat("AI_INFRA_MIN_PROMO_SCORE", defaultSentinelMinScore),
+		SentinelURL:      os.Getenv("AI_INFRA_SENTINEL_URL"),
 		AllowDebugToken:  getBool("AI_INFRA_ALLOW_DEBUG_TOKEN", false),
 		DebugToken:       os.Getenv("AI_INFRA_DEBUG_TOKEN"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL or AI_INFRA_DATABASE_URL required")
 	}
-	if cfg.SignerKeyB64 == "" {
-		return Config{}, fmt.Errorf("AI_INFRA_SIGNER_KEY_B64 required")
+	if cfg.KMSEndpoint == "" && cfg.SignerKeyB64 == "" {
+		return Config{}, fmt.Errorf("AI_INFRA_SIGNER_KEY_B64 required when AI_INFRA_KMS_ENDPOINT unset")
 	}
 	return cfg, nil
 }

@@ -29,8 +29,10 @@ func (s *Server) Router() http.Handler {
 
 	r.Post("/alloc/request", s.handleRequest)
 	r.Post("/alloc/approve", s.handleApprove)
+	r.Post("/alloc/reject", s.handleReject)
 	r.Get("/alloc/{id}", s.handleGet)
 	r.Get("/alloc/pools", s.handlePools)
+	r.Post("/alloc/preempt", s.handlePreempt)
 
 	return r
 }
@@ -90,6 +92,32 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, record)
 }
 
+type rejectBody struct {
+	RequestID  uuid.UUID `json:"requestId"`
+	RejectedBy string    `json:"rejectedBy"`
+	Reason     string    `json:"reason"`
+	PolicyID   string    `json:"policyId"`
+}
+
+func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
+	var body rejectBody
+	if err := decodeJSON(w, r, &body); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	record, err := s.service.Reject(r.Context(), allocator.RejectInput{
+		RequestID:  body.RequestID,
+		RejectedBy: body.RejectedBy,
+		Reason:     body.Reason,
+		PolicyID:   body.PolicyID,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, record)
+}
+
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
@@ -110,6 +138,34 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"pools": pools,
 	})
+}
+
+type preemptBody struct {
+	AgentID     string `json:"agentId"`
+	Pool        string `json:"pool"`
+	Delta       int    `json:"delta"`
+	Reason      string `json:"reason"`
+	RequestedBy string `json:"requestedBy"`
+}
+
+func (s *Server) handlePreempt(w http.ResponseWriter, r *http.Request) {
+	var body preemptBody
+	if err := decodeJSON(w, r, &body); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	record, err := s.service.Preempt(r.Context(), allocator.PreemptInput{
+		AgentID:     body.AgentID,
+		Pool:        body.Pool,
+		Delta:       body.Delta,
+		Reason:      body.Reason,
+		RequestedBy: body.RequestedBy,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, record)
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v interface{}) error {

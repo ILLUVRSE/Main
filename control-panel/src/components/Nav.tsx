@@ -1,17 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import Cookies from "js-cookie";
-import { useRouter } from "next/navigation";
+import { logout, useSession } from "../lib/auth/client";
 
 export default function Nav(): JSX.Element {
-  const router = useRouter();
-
-  function logout() {
-    Cookies.remove("controlpanel_token");
-    Cookies.remove("controlpanel_role");
-    router.push("/login");
-  }
+  const { session } = useSession();
 
   return (
     <nav className="bg-white border-b">
@@ -28,6 +21,13 @@ export default function Nav(): JSX.Element {
               className="text-sm text-gray-600 hover:text-gray-800"
             >
               Agents
+            </Link>
+
+            <Link
+              href="/upgrades"
+              className="text-sm text-gray-600 hover:text-gray-800"
+            >
+              Upgrades
             </Link>
 
             <Link
@@ -52,7 +52,13 @@ export default function Nav(): JSX.Element {
             </Link>
           </div>
 
-          <div>
+          <div className="flex items-center space-x-4">
+            {session && (
+              <div className="text-xs text-gray-500">
+                <div className="font-semibold text-gray-700">{session.name || session.sub}</div>
+                <div>{session.roles.join(", ")}</div>
+              </div>
+            )}
             <button
               onClick={logout}
               className="text-sm text-red-600 hover:text-red-800 bg-white border border-transparent px-3 py-1 rounded"

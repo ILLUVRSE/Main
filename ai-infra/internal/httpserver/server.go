@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ILLUVRSE/Main/ai-infra/internal/config"
+	"github.com/ILLUVRSE/Main/ai-infra/internal/models"
 	"github.com/ILLUVRSE/Main/ai-infra/internal/service"
 	"github.com/ILLUVRSE/Main/ai-infra/internal/store"
 )
@@ -41,6 +43,8 @@ func (s *Server) Router() http.Handler {
 			r.Post("/register", s.handleRegister)
 			r.Post("/promote", s.handlePromote)
 		})
+		r.Get("/models", s.handleListModels)
+		r.Get("/models/{id}", s.handleGetModel)
 	})
 
 	return r
@@ -152,6 +156,72 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, promo)
+}
+
+func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	filter := store.ListArtifactsFilter{}
+	if trainingJobID := query.Get("trainingJobId"); trainingJobID != "" {
+		id, err := uuid.Parse(trainingJobID)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid trainingJobId")
+			return
+		}
+		filter.TrainingJobID = &id
+	}
+	if checksum := query.Get("checksum"); checksum != "" {
+		filter.Checksum = checksum
+	}
+	if limitStr := query.Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil {
+			filter.Limit = limit
+		}
+	}
+	if offsetStr := query.Get("offset"); offsetStr != "" {
+		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			filter.Offset = offset
+		}
+	}
+	artifacts, err := s.store.ListArtifacts(r.Context(), filter)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if artifacts == nil {
+		artifacts = []models.ModelArtifact{}
+	}
+	respondJSON(w, http.StatusOK, artifacts)
+}
+
+func (s *Server) handleGetModel(w http.ResponseWriter, r *http.Request) {
+	idParam := chi.URLParam(r, "id")
+	artifactID, err := uuid.Parse(idParam)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	ctx := r.Context()
+	artifact, err := s.store.GetArtifact(ctx, artifactID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			respondError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	promotions, err := s.store.ListPromotionsByArtifact(ctx, artifactID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if promotions == nil {
+		promotions = []models.ModelPromotion{}
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"artifact":   artifact,
+		"promotions": promotions,
+	})
 }
 
 func (s *Server) writeAuth(next http.Handler) http.Handler {

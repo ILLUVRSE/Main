@@ -12,7 +12,8 @@ const vectorAdapter = new VectorDbAdapter({
   provider: process.env.VECTOR_DB_PROVIDER,
   endpoint: process.env.VECTOR_DB_ENDPOINT,
   apiKey: process.env.VECTOR_DB_API_KEY,
-  namespace: process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory'
+  namespace: process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory',
+  pool: getPool()
 });
 
 const memoryService = createMemoryService({ vectorAdapter });

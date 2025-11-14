@@ -8,6 +8,8 @@ import metrics from './metrics/metrics';
 import healthRouter from './health/health';
 import eventConsumer from './event/consumer';
 import auditEventHandler from './event/handler';
+import rbac from './http/rbac';
+import kafkaConsumer from './event/kafkaConsumer';
 
 // load .env early
 dotenv.config();
@@ -43,8 +45,8 @@ app.get('/metrics', async (_req: Request, res: Response) => {
 });
 
 // API routes
-app.use('/sentinelnet/check', checkRouter);
-app.use('/sentinelnet/policy', policyRouter);
+app.use('/sentinelnet/check', rbac.requireRole('check'), checkRouter);
+app.use('/sentinelnet/policy', rbac.requireRole('policy'), policyRouter);
 
 // Generic error handler
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -56,14 +58,23 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 let stopAuditConsumer: (() => Promise<void>) | null = null;
 
-async function startAuditConsumerIfEnabled() {
+function auditConsumerEnabled(): boolean {
   const flag = String(process.env.SENTINEL_ENABLE_AUDIT_CONSUMER || '').toLowerCase();
-  if (!['1', 'true', 'yes', 'on'].includes(flag)) {
+  return ['1', 'true', 'yes', 'on'].includes(flag);
+}
+
+async function startAuditConsumerIfEnabled() {
+  if (!auditConsumerEnabled()) {
     return;
   }
   try {
-    stopAuditConsumer = eventConsumer.startConsumer(auditEventHandler.handleAuditEvent);
-    logger.info('Audit consumer started (polling kernel audit events)');
+    if (kafkaConsumer.isKafkaEnabled()) {
+      stopAuditConsumer = await kafkaConsumer.startKafkaConsumer(auditEventHandler.handleAuditEvent);
+      logger.info('Audit consumer started (Kafka mode)');
+    } else {
+      stopAuditConsumer = eventConsumer.startConsumer(auditEventHandler.handleAuditEvent);
+      logger.info('Audit consumer started (polling kernel audit events)');
+    }
   } catch (err) {
     logger.warn('Failed to start audit consumer', err);
   }

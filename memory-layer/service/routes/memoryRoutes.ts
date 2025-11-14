@@ -63,7 +63,7 @@ export const memoryRoutes = (memoryService: MemoryService): Router => {
         res.status(400).json({ error: { message: 'legalHold boolean is required' } });
         return;
       }
-      await memoryService.setLegalHold(req.params.id, legalHold, reason);
+      await memoryService.setLegalHold(req.params.id, legalHold, reason, buildAuditContext(req));
       res.status(204).send();
     })
   );
@@ -71,8 +71,21 @@ export const memoryRoutes = (memoryService: MemoryService): Router => {
   router.delete(
     '/memory/nodes/:id',
     asyncHandler(async (req, res) => {
-      await memoryService.deleteMemoryNode(req.params.id, req.header('x-service-id') ?? 'unknown');
+      const ctx = buildAuditContext(req);
+      await memoryService.deleteMemoryNode(req.params.id, ctx.caller ?? 'unknown', ctx);
       res.status(204).send();
+    })
+  );
+
+  router.get(
+    '/memory/artifacts/:id',
+    asyncHandler(async (req, res) => {
+      const artifact = await memoryService.getArtifact(req.params.id);
+      if (!artifact) {
+        res.status(404).json({ error: { message: 'artifact not found' } });
+        return;
+      }
+      res.json(artifact);
     })
   );
 

@@ -17,7 +17,8 @@
   },
   "include": [
     "kernel/**/*.ts",
-    "kernel/**/*.tsx"
+    "kernel/**/*.tsx",
+    "memory-layer/**/*.ts"
   ],
   "exclude": ["node_modules", "dist", "control-panel", "RepoWriter", "IDEA"]
 }

@@ -19,6 +19,7 @@ type EvalReport struct {
 
 type AgentScore struct {
 	AgentID    string          `json:"agentId"`
+	DivisionID string          `json:"divisionId,omitempty"`
 	Score      float64         `json:"score"`
 	Components json.RawMessage `json:"components"`
 	Confidence float64         `json:"confidence"`
@@ -52,4 +53,17 @@ type AllocationRequest struct {
 	AppliedAt        *time.Time      `json:"appliedAt,omitempty"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
+}
+
+type RetrainJob struct {
+	ID                  uuid.UUID       `json:"id"`
+	ModelFamily         string          `json:"modelFamily"`
+	DatasetRefs         []string        `json:"datasetRefs"`
+	Priority            string          `json:"priority"`
+	Status              string          `json:"status"`
+	RequestedBy         string          `json:"requestedBy"`
+	AllocationRequestID *uuid.UUID      `json:"allocationRequestId,omitempty"`
+	ResultMetrics       json.RawMessage `json:"resultMetrics,omitempty"`
+	CreatedAt           time.Time       `json:"createdAt"`
+	UpdatedAt           time.Time       `json:"updatedAt"`
 }

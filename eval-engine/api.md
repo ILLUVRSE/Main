@@ -79,6 +79,24 @@ Returns the latest computed score for an agent.
 }
 ```
 
+### `GET /eval/scoreboard`
+Returns a leaderboard for a division (or the entire fleet when `divisionId` is omitted). Supports `topK` (default `10`).
+
+**Example `GET /eval/scoreboard?divisionId=ops-eu&topK=5`**
+```json
+{
+  "scores": [
+    {
+      "agentId": "agent-1",
+      "divisionId": "ops-eu",
+      "score": 0.91,
+      "confidence": 0.8,
+      "computedAt": "2025-01-17T18:05:00Z"
+    }
+  ]
+}
+```
+
 ### `POST /eval/promote`
 Creates a manual PromotionEvent and (optionally) triggers an allocation request.
 
@@ -105,6 +123,55 @@ Creates a manual PromotionEvent and (optionally) triggers an allocation request.
   "confidence": 0.9,
   "requestedBy": "ops",
   "createdAt": "2025-01-17T18:10:00Z"
+}
+```
+
+---
+
+### `POST /eval/retrain`
+Creates a retrain job (optionally booking resources through the Resource Allocator).
+
+**Request**
+```json
+{
+  "modelFamily": "alloc-llm",
+  "datasetRefs": ["dataset://gpu-logs-7d"],
+  "priority": "high",
+  "requestedBy": "mlops",
+  "resourcePool": "gpus-us-east",
+  "resourceUnits": 2
+}
+```
+
+**Response `201`**
+```json
+{
+  "id": "7d1d...",
+  "modelFamily": "alloc-llm",
+  "datasetRefs": ["dataset://gpu-logs-7d"],
+  "priority": "high",
+  "status": "queued",
+  "requestedBy": "mlops",
+  "allocationRequestId": "1c2e...",
+  "createdAt": "2025-01-17T18:20:00Z",
+  "updatedAt": "2025-01-17T18:20:00Z"
+}
+```
+
+### `GET /eval/jobs/{id}`
+Fetches a retrain job and its allocation linkage/result metrics.
+
+**Response `200`**
+```json
+{
+  "id": "7d1d...",
+  "modelFamily": "alloc-llm",
+  "datasetRefs": ["dataset://gpu-logs-7d"],
+  "priority": "high",
+  "status": "queued",
+  "allocationRequestId": "1c2e...",
+  "createdAt": "2025-01-17T18:20:00Z",
+  "updatedAt": "2025-01-17T18:20:10Z"
 }
 ```
 
@@ -159,6 +226,21 @@ Runs SentinelNet policy checks and transitions a request to `applied` or `reject
 
 If SentinelNet blocks, status becomes `rejected` and `sentinelDecision` includes the policy/reason.
 
+### `POST /alloc/reject`
+Allows humans/Finance to reject a pending allocation.
+
+**Request**
+```json
+{
+  "requestId": "a8c7...",
+  "rejectedBy": "finance-bot",
+  "reason": "budget exceeded",
+  "policyId": "finance-budget"
+}
+```
+
+**Response `200`** returns the updated allocation record with status `rejected`.
+
 ### `GET /alloc/{id}`
 Fetches an allocation request with timestamps and SentinelNet decision payload.
 
@@ -168,6 +250,32 @@ Lists configured pools and capacities.
 **Response `200`**
 ```json
 { "pools": [ { "name": "gpus-us-east", "capacity": 10 } ] }
+```
+
+### `POST /alloc/preempt`
+Creates a preemption record (negative delta) to reclaim resources. SentinelNet policy runs immediately and the record is transitioned to `applied`/`rejected`.
+
+**Request**
+```json
+{
+  "agentId": "agent-123",
+  "pool": "gpus-us-east",
+  "delta": 1,
+  "reason": "canary rollback",
+  "requestedBy": "allocator-bot"
+}
+```
+
+**Response `200`**
+```json
+{
+  "id": "preempt-id",
+  "agentId": "agent-123",
+  "pool": "gpus-us-east",
+  "delta": -1,
+  "status": "applied",
+  "sentinelDecision": { "allowed": true, "policyId": "sentinel-allow", "reason": "approved" }
+}
 ```
 
 ---

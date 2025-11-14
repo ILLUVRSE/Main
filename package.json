@@ -1,17 +1,25 @@
 {
+  "scripts": {
+    "memory-layer:build": "tsc -p tsconfig.json",
+    "memory-layer:start": "node dist/memory-layer/service/server.js"
+  },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.927.0",
     "dotenv": "^17.2.3",
+    "express": "^5.0.0",
     "express-openapi-validator": "^5.6.0",
     "node-fetch": "^3.3.2",
     "pg": "^8.16.3",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.10.0",
+    "@types/pg": "^8.11.10",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "pg-mem": "^3.0.5"
   }
 }

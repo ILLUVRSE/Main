@@ -13,7 +13,21 @@ const MOCK_SETTINGS = {
   advancedNotes: '',
 };
 
-export async function fetchAgents() {
+export type AgentSummary = {
+  id: string;
+  state: string;
+  templateId?: string;
+  createdAt: string;
+};
+
+export type AuditSummary = {
+  id: string;
+  type: string;
+  ts: string;
+  payload?: Record<string, unknown>;
+};
+
+export async function fetchAgents(): Promise<AgentSummary[]> {
   if (!kernelUrl) {
     return [
       { id: 'agent-1', state: 'running', templateId: 'tpl-1', createdAt: new Date().toISOString() },
@@ -25,7 +39,7 @@ export async function fetchAgents() {
   return r.json();
 }
 
-export async function fetchAudit() {
+export async function fetchAudit(): Promise<AuditSummary[]> {
   if (!kernelUrl) {
     return [
       { id: 'aud-1', type: 'agent.instantiated', ts: new Date().toISOString(), payload: { agentId: 'agent-1' } },
@@ -37,15 +51,15 @@ export async function fetchAudit() {
   return r.json();
 }
 
-async function callControlPanel(path: string, init?: any) {
+async function callControlPanel<T>(path: string, init?: RequestInit): Promise<T> {
   if (!kernelUrl) {
-    return null;
+    return null as T;
   }
-  const payloadInit: any = {
+  const payloadInit = {
     ...init,
     headers: {
       ...CONTROL_HEADERS,
-      ...(init?.headers as Record<string, string> | undefined),
+      ...(init?.headers || {}),
     },
   };
   const response = await fetch(`${kernelUrl}${path}`, payloadInit);
@@ -63,7 +77,7 @@ export async function fetchControlPanelSettings() {
   return callControlPanel('/control-panel/settings');
 }
 
-export async function updateControlPanelSettings(payload: Record<string, any>) {
+export async function updateControlPanelSettings(payload: Record<string, unknown>) {
   if (!kernelUrl) {
     return { settings: { ...MOCK_SETTINGS, ...payload, updatedAt: new Date().toISOString() } };
   }
@@ -73,7 +87,15 @@ export async function updateControlPanelSettings(payload: Record<string, any>) {
   });
 }
 
-export async function triggerKernelAction(payload: Record<string, any>) {
+type ActionResponse = {
+  target: string;
+  mode?: string;
+  message: string;
+  timestamp: string;
+  echoedPayload?: Record<string, unknown>;
+};
+
+export async function triggerKernelAction(payload: Record<string, unknown>): Promise<ActionResponse> {
   if (!kernelUrl) {
     return {
       target: 'kernel',
@@ -89,7 +111,7 @@ export async function triggerKernelAction(payload: Record<string, any>) {
   });
 }
 
-export async function triggerAgentManagerAction(payload: Record<string, any>) {
+export async function triggerAgentManagerAction(payload: Record<string, unknown>): Promise<ActionResponse> {
   if (!kernelUrl) {
     return {
       target: 'agent-manager',

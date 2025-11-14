@@ -68,6 +68,16 @@ export function loadConfig(): Config {
   // Basic validations
   if (nodeEnv === 'production') {
     assert(dbUrl, 'SENTINEL_DB_URL is required in production');
+    assert(!devSkipMtls, 'DEV_SKIP_MTLS must be false in production (mTLS is mandatory)');
+    assert(rbacEnabled, 'SENTINEL_RBAC_ENABLED must be true in production (RBAC required)');
+    assert(
+      rbacCheckRoles.length > 0,
+      'SENTINEL_RBAC_CHECK_ROLES cannot be empty in production (define allowed service roles)',
+    );
+    assert(
+      rbacPolicyRoles.length > 0,
+      'SENTINEL_RBAC_POLICY_ROLES cannot be empty in production (define allowed admin roles)',
+    );
     // Kernel audit url ideally required in prod if SentinelNet calls kernel directly.
     // If your deployment relies on Kernel to sign events, you may skip this.
     if (!kernelAuditUrl) {

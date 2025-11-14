@@ -24,25 +24,38 @@ To make parity tests reproducible, the Node parity test and other test
 harnesses share canonical vectors at:
 
 ```
-kernel/test/vectors/canonical_vectors.json
+test/vectors/canonical_vectors.json
 ```
 
-This file contains an array of named test vectors (`vectors`) that the Node test
-loads and feeds to the Go helper; the Go helper calls `MarshalCanonical()` and
-returns the canonical bytes for comparison.
+This file contains an array of named test vectors (`vectors`) with:
+
+* `value` — the JSON payload to canonicalize.
+* `canonical` — the expected canonical JSON string (byte-for-byte).
+* `sha256` — the SHA-256 hash (hex) of the canonical bytes.
+
+The Node parity test loads this file, compares its own canonical output against
+`canonical`, and then feeds each value to a small Go helper (which calls
+`MarshalCanonical`) to verify parity. The hash is also verified.
 
 ### How to add a vector
 
-1. Edit `kernel/test/vectors/canonical_vectors.json`.
-2. Add an object with shape `{ "name": "<short name>", "value": <json value> }`.
+1. Edit `test/vectors/canonical_vectors.json`.
+2. Add an object with shape `{ "name": "<short name>", "value": <json value>, "canonical": "<string>", "sha256": "<hex>" }`.
    Example:
 
    ```json
    {
      "name": "new-case",
-     "value": { "z": [2, 1], "a": 1 }
+     "value": { "z": [2, 1], "a": 1 },
+     "canonical": "{\"a\":1,\"z\":[2,1]}",
+     "sha256": "<sha hex>"
    }
    ```
+
+   You can generate `canonical`/`sha256` using the Node helper (see
+   `kernel/test/node_canonical_parity.test.js`) or any runtime that already
+   passes the tests.
+
 3. Run the Node ↔ Go parity test locally:
 
    ```bash
@@ -80,4 +93,3 @@ values.
 
 If you discover a parity bug, add a unit test and a small code fix; don't
 assume the vector is wrong.
-

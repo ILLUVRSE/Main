@@ -33,6 +33,7 @@ const KMS_ENDPOINT = (process.env.KMS_ENDPOINT || '').replace(/\/$/, '');
 const OPENAPI_PATH = process.env.OPENAPI_PATH
   ? path.resolve(process.cwd(), process.env.OPENAPI_PATH)
   : path.resolve(__dirname, '../openapi.yaml');
+const IS_PRODUCTION = NODE_ENV === 'production';
 
 const LOG_PREFIX = '[kernel:' + NODE_ENV + ']';
 
@@ -82,8 +83,17 @@ async function readinessCheck(): Promise<{ ok: boolean; details?: string }> {
   return { ok: true };
 }
 
+export const __testables = {
+  readinessCheck,
+  checkKmsReachable,
+  OPENAPI_PATH,
+  NODE_ENV,
+  REQUIRE_KMS,
+  KMS_ENDPOINT,
+};
+
 /** Try to install OpenAPI validator if available (best-effort) */
-async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
+async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any): Promise<boolean> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const OpenApiValidatorModule: any = require('express-openapi-validator');
@@ -101,7 +111,7 @@ async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
     if (typeof middlewareFactory === 'function') {
       app.use(middlewareFactory(validatorOptions));
       info('OpenAPI validation enabled using ' + OPENAPI_PATH);
-      return;
+      return true;
     }
 
     const ValidatorCtor: any =
@@ -115,13 +125,14 @@ async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any) {
       if (typeof instance.install === 'function') {
         await instance.install(app);
         info('OpenAPI validation enabled using ' + OPENAPI_PATH);
-        return;
+        return true;
       }
     }
 
     throw new Error('express-openapi-validator export shape not recognized');
   } catch (err) {
     warn('Failed to load/install OpenAPI validator:', (err as Error).message || err);
+    return false;
   }
 }
 
@@ -165,12 +176,28 @@ export async function createApp() {
     try {
       const raw = fs.readFileSync(OPENAPI_PATH, 'utf8');
       const apiSpec = yaml.load(raw) as object;
-      await tryInstallOpenApiValidator(app, apiSpec);
+      if (!apiSpec) {
+        throw new Error('OpenAPI spec parsed to empty result');
+      }
+      const installed = await tryInstallOpenApiValidator(app, apiSpec);
+      if (!installed && IS_PRODUCTION) {
+        throw new Error('OpenAPI validator failed to initialize in production. Ensure express-openapi-validator is installed.');
+      }
     } catch (err) {
-      warn('OpenAPI load failed:', (err as Error).message || err);
+      const message = 'OpenAPI load failed: ' + ((err as Error).message || err);
+      if (IS_PRODUCTION) {
+        error(message);
+        throw new Error(message);
+      }
+      warn(message);
     }
   } else {
-    warn('OpenAPI not found at ' + OPENAPI_PATH + ' - request validation disabled.');
+    const message = 'OpenAPI not found at ' + OPENAPI_PATH + ' - request validation disabled.';
+    if (IS_PRODUCTION) {
+      error(message);
+      throw new Error(message);
+    }
+    warn(message);
   }
 
   // Mount kernel router

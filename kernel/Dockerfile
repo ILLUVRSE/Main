@@ -49,7 +49,8 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 
 ENV NODE_ENV=production \
-    PORT=3000
+    PORT=3000 \
+    OPENAPI_PATH=/app/openapi.yaml
 
 # Copy package files and install only production deps to keep image small
 COPY package.json package-lock.json ./
@@ -58,9 +59,10 @@ RUN npm ci --omit=dev
 # Copy built artifacts from builder
 COPY --from=builder /app/dist ./dist
 
-# Copy migrations and supporting files needed at runtime
+# Copy migrations, OpenAPI spec, and supporting files needed at runtime
 # (Assumes Docker build context is the kernel/ directory)
 COPY sql/migrations ./sql/migrations
+COPY openapi.yaml ./openapi.yaml
 COPY entrypoint.sh ./entrypoint.sh
 
 # Ensure entrypoint is executable
@@ -95,4 +97,3 @@ CMD ["./entrypoint.sh"]
 #
 # Operational note:
 # - Create `kernel/entrypoint.sh` next (it will run migrations and start node). DO NOT commit secrets in the entrypoint.
-

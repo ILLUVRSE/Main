@@ -9,6 +9,14 @@ echo "NODE_ENV=${NODE_ENV:-}"
 echo "PORT=${PORT:-}"
 echo "POSTGRES_URL=${POSTGRES_URL:-<not-set>}"
 echo "MIGRATE_CMD=${MIGRATE_CMD:-<not-set>}"
+OPENAPI_PATH="${OPENAPI_PATH:-/app/openapi.yaml}"
+export OPENAPI_PATH
+echo "OPENAPI_PATH=${OPENAPI_PATH}"
+
+if [ "${NODE_ENV:-development}" = "production" ] && [ ! -f "$OPENAPI_PATH" ]; then
+  echo "ERROR: OpenAPI spec not found at ${OPENAPI_PATH}. Production deployments must mount/copy the spec."
+  exit 10
+fi
 
 # Run migrations if MIGRATE_CMD provided, else run built migrate script if present.
 if [ -n "${MIGRATE_CMD:-}" ]; then

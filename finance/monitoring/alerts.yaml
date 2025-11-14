@@ -1,0 +1,16 @@
+alerts:
+  - name: LedgerImbalance
+    expr: sum(rate(finance_ledger_unbalanced_total[5m])) > 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      description: "Ledger imbalance detected"
+  - name: ProofSigningFailed
+    expr: increase(finance_proof_sign_errors_total[15m]) > 0
+    labels:
+      severity: high
+  - name: PayoutAnomaly
+    expr: rate(finance_payout_amount_cents_sum[5m]) > 50000000
+    labels:
+      severity: medium

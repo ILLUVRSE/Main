@@ -1,0 +1,206 @@
+openapi: 3.0.3
+info:
+  title: Finance Service API
+  version: 1.0.0
+  description: |
+    Double-entry ledger, payout, and proof retrieval API. All endpoints require mTLS plus bearer auth.
+servers:
+  - url: https://finance.internal.illuvrse.com
+    description: Production
+  - url: https://finance.staging.illuvrse.com
+    description: Staging
+components:
+  securitySchemes:
+    mtls:
+      type: mutualTLS
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    JournalLine:
+      type: object
+      required: [accountId, direction, amount]
+      properties:
+        accountId:
+          type: string
+        direction:
+          type: string
+          enum: [debit, credit]
+        amount:
+          type: string
+          pattern: "^[0-9]+\\.[0-9]{2}$"
+        memo:
+          type: string
+    JournalEntry:
+      type: object
+      required: [journalId, timestamp, currency, lines]
+      properties:
+        journalId:
+          type: string
+          format: uuid
+        batchId:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        currency:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        lines:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/JournalLine'
+    PayoutRequest:
+      type: object
+      required: [payoutId, amount, currency, destination, requestedBy]
+      properties:
+        payoutId:
+          type: string
+          format: uuid
+        invoiceId:
+          type: string
+        amount:
+          type: string
+        currency:
+          type: string
+        destination:
+          type: object
+          required: [provider, accountReference]
+          properties:
+            provider:
+              type: string
+            accountReference:
+              type: string
+        memo:
+          type: string
+        requestedBy:
+          type: string
+    ProofResponse:
+      type: object
+      properties:
+        package:
+          type: string
+          description: base64 encoded proof package
+        manifestHash:
+          type: string
+paths:
+  /finance/journal:
+    post:
+      security:
+        - mtls: []
+        - bearer: []
+      operationId: postJournal
+      summary: Post journal entries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entries:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/JournalEntry'
+      responses:
+        '201':
+          description: Entries committed
+        '400':
+          description: Validation error
+        '409':
+          description: Idempotency conflict
+  /finance/payout:
+    post:
+      security:
+        - mtls: []
+        - bearer: []
+      operationId: createPayout
+      summary: Initiate payout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutRequest'
+      responses:
+        '202':
+          description: Payout accepted for approval
+        '403':
+          description: Not authorized
+  /finance/payout/{payoutId}/approvals:
+    post:
+      parameters:
+        - in: path
+          name: payoutId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - mtls: []
+        - bearer: []
+      operationId: approvePayout
+      summary: Submit payout approval signature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver, role, signature]
+              properties:
+                approver:
+                  type: string
+                role:
+                  type: string
+                signature:
+                  type: string
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Payout approved and released
+        '202':
+          description: Approval recorded but quorum incomplete
+        '409':
+          description: Conflicting approval
+  /finance/proof:
+    get:
+      security:
+        - mtls: []
+        - bearer: []
+      operationId: getProof
+      summary: Retrieve signed proof package
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum: [json, tar]
+      responses:
+        '200':
+          description: Proof package
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofResponse'
+        '404':
+          description: Range not materialized

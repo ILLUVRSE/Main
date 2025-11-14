@@ -1,0 +1,13 @@
+name: finance-cd
+env:
+  REQUIRE_MULTISIG: true
+steps:
+  - checkout
+  - run: npm run build --workspaces finance
+  - run: terraform -chdir=finance/infra/terraform apply -auto-approve=false
+  - run: ansible-playbook finance/infra/ansible/signing-proxy.yml --limit signing_proxy
+  - approval:
+      required_roles:
+        - FinanceLead
+        - SecurityEngineer
+  - run: npm run deploy:finance

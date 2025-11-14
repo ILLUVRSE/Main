@@ -1,0 +1,21 @@
+name: finance-ci
+on:
+  push:
+    paths:
+      - 'finance/**'
+  pull_request:
+    paths:
+      - 'finance/**'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm test -- finance/test/unit/journal.test.ts
+      - run: npm test -- finance/test/integration/reconcile.test.ts
+      - run: npm test -- finance/test/e2e/payment_payout_flow.test.ts
+      - run: bash finance/acceptance-tests/run_acceptance.sh

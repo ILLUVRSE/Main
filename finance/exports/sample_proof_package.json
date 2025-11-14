@@ -1,0 +1,17 @@
+{
+  "manifest": {
+    "range": { "from": "2024-01-01T00:00:00Z", "to": "2024-01-02T00:00:00Z" },
+    "entries": 2,
+    "rootHash": "abc123"
+  },
+  "ledgerLines": [
+    "{\"journalId\":\"1\",\"lines\":[],\"timestamp\":\"2024-01-01T00:00:00Z\"}",
+    "{\"journalId\":\"2\",\"lines\":[],\"timestamp\":\"2024-01-01T01:00:00Z\"}"
+  ],
+  "hashChain": [
+    { "chunk": 0, "range": { "start": 0, "end": 1 }, "hash": "abc123" }
+  ],
+  "signatures": [
+    { "role": "FinanceLead", "keyId": "kms/finance", "signature": "base64", "signedAt": "2024-01-02T00:00:00Z" }
+  ]
+}

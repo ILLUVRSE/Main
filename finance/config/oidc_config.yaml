@@ -1,0 +1,12 @@
+issuer: https://auth.illuvrse.com
+clientId: finance-service
+scopes:
+  - openid
+  - profile
+  - email
+  - ledger.write
+  - ledger.read
+rolesClaim: roles
+requiredMfa: webauthn
+callbackUrls:
+  - https://finance.internal.illuvrse.com/callback

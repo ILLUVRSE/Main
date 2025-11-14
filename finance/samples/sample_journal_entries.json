@@ -1,0 +1,12 @@
+[
+  {
+    "journalId": "sample-1",
+    "batchId": "batch-1",
+    "timestamp": "2024-01-01T00:00:00Z",
+    "currency": "USD",
+    "lines": [
+      { "accountId": "cash", "direction": "debit", "amount": 10000 },
+      { "accountId": "revenue", "direction": "credit", "amount": 10000 }
+    ]
+  }
+]

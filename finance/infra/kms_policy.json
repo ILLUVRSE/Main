@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowFinanceSign",
+      "Effect": "Allow",
+      "Principal": { "AWS": ["arn:aws:iam::123456789012:role/FinanceLead", "arn:aws:iam::123456789012:role/SecurityEngineer"] },
+      "Action": ["kms:Sign", "kms:GetPublicKey"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:RequestAlias": "alias/finance-ledger-proof"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+kmsEndpoint: https://kms.internal
+keyAlias: alias/finance-ledger-proof
+mTLS:
+  cert: /etc/finance/signing-proxy.crt
+  key: /etc/finance/signing-proxy.key
+requiredRoles:
+  - FinanceLead
+  - SecurityEngineer
+hashAlgorithm: SHA-256

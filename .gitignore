@@ -51,3 +51,4 @@ RepoWriter/test/openaiMock.log
 RepoWriter/web/preview.log
 RepoWriter/web/dist/
 sentinelnet/.env
+control-panel/node_modules/

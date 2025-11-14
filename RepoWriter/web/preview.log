@@ -1,0 +1,6 @@
+nohup: ignoring input
+
+> preview
+> vite preview --port 4173 --strictPort --host 127.0.0.1
+
+  ➜  Local:   http://127.0.0.1:4173/

@@ -1,0 +1,16 @@
+{
+  "name": "vitest",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "bin": {
+    "vitest": "bin/vitest.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "types": "./index.d.ts"
+    }
+  }
+}

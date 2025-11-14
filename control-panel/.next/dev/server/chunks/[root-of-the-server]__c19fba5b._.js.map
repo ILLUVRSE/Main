@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 46, "column": 0}, "map": {"version":3,"sources":["file:///home/ryanlueckenotte/ILLUVRSE/commandpad/src/app/api/login/route.ts"],"sourcesContent":["import { NextResponse } from \"next/server\";\n\nexport async function POST(req: Request) {\n  try {\n    const body = await req.json();\n    const password = body?.password;\n    const ADMIN = process.env.ADMIN_PASSWORD || \"changeme\";\n    if (password && password === ADMIN) {\n      return NextResponse.json({ ok: true }, { status: 200 });\n    } else {\n      return NextResponse.json({ error: \"invalid password\" }, { status: 401 });\n    }\n  } catch (e) {\n    return NextResponse.json({ error: \"invalid request\" }, { status: 400 });\n  }\n}\n\n"],"names":[],"mappings":";;;;AAAA;;AAEO,eAAe,KAAK,GAAY;IACrC,IAAI;QACF,MAAM,OAAO,MAAM,IAAI,IAAI;QAC3B,MAAM,WAAW,MAAM;QACvB,MAAM,QAAQ,QAAQ,GAAG,CAAC,cAAc,IAAI;QAC5C,IAAI,YAAY,aAAa,OAAO;YAClC,OAAO,gJAAY,CAAC,IAAI,CAAC;gBAAE,IAAI;YAAK,GAAG;gBAAE,QAAQ;YAAI;QACvD,OAAO;YACL,OAAO,gJAAY,CAAC,IAAI,CAAC;gBAAE,OAAO;YAAmB,GAAG;gBAAE,QAAQ;YAAI;QACxE;IACF,EAAE,OAAO,GAAG;QACV,OAAO,gJAAY,CAAC,IAAI,CAAC;YAAE,OAAO;QAAkB,GAAG;YAAE,QAAQ;QAAI;IACvE;AACF","debugId":null}}]
+}

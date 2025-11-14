@@ -1,0 +1,11 @@
+{
+  "a190ee8a-5aff-4190-96db-8fa73c57e27b": {
+    "status": 202,
+    "body": {
+      "ok": true,
+      "status": "accepted",
+      "validation_id": "a190ee8a-5aff-4190-96db-8fa73c57e27b",
+      "message": "Kernel flow not configured; simulated accept"
+    }
+  }
+}

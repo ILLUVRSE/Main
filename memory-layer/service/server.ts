@@ -4,6 +4,7 @@ import memoryRoutes from './routes/memoryRoutes';
 import { VectorDbAdapter } from './vector/vectorDbAdapter';
 import { createMemoryService } from './services/memoryService';
 import { getPool } from './db';
+import { authMiddleware } from './middleware/auth';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -44,7 +45,7 @@ app.get('/readyz', async (_req: Request, res: Response) => {
   }
 });
 
-app.use('/v1', memoryRoutes(memoryService));
+app.use('/v1', authMiddleware, memoryRoutes(memoryService));
 
 // Simple error handler so the scaffold surfaces JSON errors.
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {

@@ -23,4 +23,5 @@ export interface Payout {
   requestedBy: string;
   status: PayoutStatus;
   approvals: PayoutApproval[];
+  providerReference?: string;
 }

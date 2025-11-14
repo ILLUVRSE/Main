@@ -1,0 +1,45 @@
+version: '3.9'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: finance
+      POSTGRES_DB: finance
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U finance']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  localstack:
+    image: localstack/localstack:3.6
+    environment:
+      SERVICES: s3,kms
+      LOCALSTACK_API_KEY: ${LOCALSTACK_API_KEY-}
+      AWS_ACCESS_KEY_ID: localstack
+      AWS_SECRET_ACCESS_KEY: localstack
+    ports:
+      - '4566:4566'
+    volumes:
+      - localstack-data:/var/lib/localstack
+
+  stripe-mock:
+    image: stripe/stripe-mock:latest
+    command: ['stripe-mock', '-http-port', '12111', '-https-port', '12112']
+    ports:
+      - '12111:12111'
+      - '12112:12112'
+
+  payout-provider:
+    build: ./mocks/payout-provider-mock
+    ports:
+      - '4100:4100'
+
+volumes:
+  pg-data:
+  localstack-data:

@@ -1,26 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: run_restore_drill.sh <snapshot-id>" >&2
+if [[ $# -lt 2 ]]; then
+  echo "Usage: run_restore_drill.sh <backup-archive> <proof-package>" >&2
   exit 1
 fi
 
-SNAPSHOT_ID="$1"
-WORKDIR=${WORKDIR:-/tmp/finance-restore}
-mkdir -p "$WORKDIR"
+BACKUP_ARCHIVE="$1"
+PROOF_PACKAGE="$2"
+CONTAINER="finance-restore-$$"
+PG_PORT=${PG_PORT:-55432}
+PG_USER=${PG_USER:-postgres}
+PG_DB=${PG_DB:-finance}
 
-echo "[+] Restoring snapshot $SNAPSHOT_ID into temporary Postgres container"
-docker run --rm -d --name finance-restore -e POSTGRES_PASSWORD=finance -p 55432:5432 postgres:15 >/dev/null
-trap 'docker rm -f finance-restore >/dev/null 2>&1' EXIT
-sleep 5
+echo "[+] Starting temporary Postgres container ($CONTAINER)"
+docker run --rm -d --name "$CONTAINER" -e POSTGRES_PASSWORD=finance -e POSTGRES_DB="$PG_DB" -p "$PG_PORT":5432 postgres:15 >/dev/null
+trap 'docker rm -f "$CONTAINER" >/dev/null 2>&1' EXIT
 
-# Placeholder for actual restore logic
-cat <<LOG
-Restored snapshot $SNAPSHOT_ID into container finance-restore.
-Run psql commands to verify schema and balances.
-LOG
+echo "[+] Waiting for Postgres"
+for _ in {1..10}; do
+  if docker exec "$CONTAINER" pg_isready >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
 
-node finance/exports/audit_verifier_cli.ts finance/exports/sample_proof_package.json
+echo "[+] Restoring backup from $BACKUP_ARCHIVE"
+if [[ "$BACKUP_ARCHIVE" == *.sql ]]; then
+  cat "$BACKUP_ARCHIVE" | docker exec -i "$CONTAINER" psql -U "$PG_USER" "$PG_DB"
+else
+  cat "$BACKUP_ARCHIVE" | docker exec -i "$CONTAINER" pg_restore -U "$PG_USER" -d "$PG_DB"
+fi
+
+echo "[+] Validating restored balances"
+docker exec "$CONTAINER" psql -U "$PG_USER" "$PG_DB" -c "SELECT COUNT(*) AS journal_entries FROM journal_entries;"
+
+echo "[+] Running audit verifier"
+npx ts-node finance/exports/audit_verifier_cli.ts "$PROOF_PACKAGE"
 
 echo "[+] Restore drill complete"

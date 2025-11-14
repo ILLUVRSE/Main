@@ -1,6 +1,7 @@
 import { LedgerRepository } from '../db/repository/ledgerRepository';
 import { StripeAdapter } from '../integrations/stripeAdapter';
 import { PayoutProviderAdapter } from '../integrations/payoutProviderAdapter';
+import { metrics } from '../monitoring/metrics';
 
 export interface ReconciliationReport {
   from: string;
@@ -24,12 +25,14 @@ export class ReconciliationService {
 
     const payoutMismatches = payoutReport.filter((settlement) => !ledgerEntries.find((entry) => entry.metadata?.payoutId === settlement.payoutId)).map((s) => s.payoutId);
 
-    return {
+    const report = {
       from,
       to,
       ledgerEntries: ledgerEntries.length,
       stripeBalanceDelta: stripeBalance.delta,
       payoutMismatches,
     };
+    metrics.observeReconciliation({ mismatches: payoutMismatches.length, windowSeconds: (Date.parse(to) - Date.parse(from)) / 1000 });
+    return report;
   }
 }

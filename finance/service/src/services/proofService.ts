@@ -1,20 +1,33 @@
 import crypto from 'crypto';
-import { LedgerRepository } from '../db/repository/ledgerRepository';
+import crypto from 'crypto';
+import { LedgerRepository, ProofManifestRecord } from '../db/repository/ledgerRepository';
 import { canonicalJson } from '../utils/canonicalize';
 import { buildHashChain } from '../utils/hashchain';
-import { SigningProxy, SignatureRecord } from './signingProxy';
+import { ApprovalInput, SigningProxy, SignatureRecord } from './signingProxy';
 
 export interface ProofPackage {
+  proofId: string;
   manifest: Record<string, unknown>;
   ledgerLines: string[];
   hashChain: ReturnType<typeof buildHashChain>;
   signatures: SignatureRecord[];
 }
 
+export interface ProofBuildOptions {
+  proofId?: string;
+  s3ObjectKey?: string;
+}
+
 export class ProofService {
   constructor(private repo: LedgerRepository, private signingProxy: SigningProxy) {}
 
-  async buildProof(from: string, to: string, approvals: SignatureRecord[]): Promise<ProofPackage> {
+  async buildProof(
+    from: string,
+    to: string,
+    approvals: ApprovalInput[],
+    requiredRoles?: string[],
+    options: ProofBuildOptions = {}
+  ): Promise<ProofPackage> {
     const entries = await this.repo.fetchLedgerRange(from, to);
     const ledgerLines = entries.map((entry) => canonicalJson(entry));
     const hashChain = buildHashChain(ledgerLines);
@@ -25,12 +38,30 @@ export class ProofService {
     };
     const manifestHash = crypto.createHash('sha256').update(canonicalJson(manifest)).digest('hex');
 
-    const signatures = await this.signingProxy.sign({
+    const roles = requiredRoles ?? [...new Set(approvals.map((a) => a.role))];
+    const signatures = await this.signingProxy.sign(
+      {
+        manifestHash,
+        payloadHash: hashChain.at(-1)?.hash || '',
+        requiredRoles: roles,
+      },
+      approvals
+    );
+    const proofId = options.proofId ?? crypto.randomUUID();
+    await this.repo.recordProofManifest({
+      proofId,
+      rangeFrom: from,
+      rangeTo: to,
+      manifest,
       manifestHash,
-      payloadHash: hashChain.at(-1)?.hash || '',
-      requiredRoles: approvals.map((a) => a.role),
-    }, approvals);
+      rootHash: hashChain.at(-1)?.hash || '',
+      s3ObjectKey: options.s3ObjectKey,
+    });
 
-    return { manifest, ledgerLines, hashChain, signatures };
+    return { proofId, manifest, ledgerLines, hashChain, signatures };
+  }
+
+  async getProofManifest(proofId: string): Promise<ProofManifestRecord | undefined> {
+    return this.repo.getProofManifest(proofId);
   }
 }

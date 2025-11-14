@@ -1,0 +1,8 @@
+{
+  "invoiceId": "inv-sample",
+  "accountId": "creator-1",
+  "amount": 250000,
+  "currency": "USD",
+  "status": "issued",
+  "dueDate": "2024-02-01"
+}

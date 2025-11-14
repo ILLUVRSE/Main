@@ -1,0 +1,20 @@
+{
+  "title": "Finance Service",
+  "widgets": [
+    {
+      "type": "timeseries",
+      "title": "Ledger Entries",
+      "query": "sum(rate(finance_journal_entries_total[5m]))"
+    },
+    {
+      "type": "timeseries",
+      "title": "Outstanding Approvals",
+      "query": "finance_payout_pending"
+    },
+    {
+      "type": "table",
+      "title": "Reconciliation Status",
+      "query": "finance_reconciliation_last_run"
+    }
+  ]
+}

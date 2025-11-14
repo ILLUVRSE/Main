@@ -1,0 +1,9 @@
+caBundle: /etc/ssl/certs/finance-ca.pem
+server:
+  cert: /etc/finance/server.crt
+  key: /etc/finance/server.key
+clients:
+  marketplace:
+    cert: /etc/finance/marketplace.crt
+    allowedRoles:
+      - service

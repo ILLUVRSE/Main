@@ -1,0 +1,18 @@
+---
+- hosts: signing_proxy
+  become: yes
+  tasks:
+    - name: Install HSM client
+      apt:
+        name: cloudhsm-client
+        state: present
+    - name: Deploy signing proxy service
+      copy:
+        src: ../../config/signing_proxy_config.yaml
+        dest: /etc/finance/signing_proxy_config.yaml
+        mode: '0600'
+    - name: Enable service
+      systemd:
+        name: signing-proxy
+        enabled: yes
+        state: started

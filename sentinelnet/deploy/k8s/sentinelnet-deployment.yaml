@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinelnet
+  labels:
+    app: sentinelnet
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sentinelnet
+  template:
+    metadata:
+      labels:
+        app: sentinelnet
+    spec:
+      containers:
+        - name: sentinelnet
+          image: ghcr.io/illuvrse/sentinelnet:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7602
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: SENTINEL_PORT
+              value: "7602"
+            - name: SENTINEL_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sentinelnet-secrets
+                  key: db_url
+            - name: KERNEL_AUDIT_URL
+              value: https://kernel.example.com/audit
+            - name: SENTINEL_ENABLE_AUDIT_CONSUMER
+              value: "true"
+            - name: SENTINEL_KAFKA_BROKERS
+              value: kafka-0.kafka:9092,kafka-1.kafka:9092
+            - name: SENTINEL_AUDIT_TOPIC
+              value: audit-events
+            - name: SENTINEL_KAFKA_CONSUMER_GROUP
+              value: sentinelnet-prod
+            - name: SENTINEL_RBAC_ENABLED
+              value: "true"
+            - name: SENTINEL_RBAC_CHECK_ROLES
+              value: kernel-service,kernel-admin
+            - name: SENTINEL_RBAC_POLICY_ROLES
+              value: kernel-admin,kernel-superadmin
+            - name: SENTINEL_CANARY_AUTO_ROLLBACK
+              value: "true"
+            - name: SENTINEL_CANARY_ROLLBACK_THRESHOLD
+              value: "0.3"
+            - name: SENTINEL_CANARY_ROLLBACK_WINDOW
+              value: "40"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7602
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 7602
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinelnet
+  labels:
+    app: sentinelnet
+spec:
+  selector:
+    app: sentinelnet
+  ports:
+    - name: http
+      port: 80
+      targetPort: 7602

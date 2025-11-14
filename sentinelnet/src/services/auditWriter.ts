@@ -19,53 +19,68 @@ import { loadConfig } from '../config/env';
 
 const config = loadConfig();
 
-function makeAxios(): AxiosInstance {
-  const baseURL = config.kernelAuditUrl || process.env.KERNEL_AUDIT_URL || '';
-  const skipMtls = config.devSkipMtls || process.env.DEV_SKIP_MTLS === 'true';
+function resolveKernelAuditBase(): string {
+  return (config.kernelAuditUrl || process.env.KERNEL_AUDIT_URL || '').replace(/\/$/, '');
+}
 
-  let httpsAgent: https.Agent | undefined;
+function buildHttpsAgent(skipMtls: boolean): https.Agent | undefined {
   const certPath = process.env.KERNEL_MTLS_CERT_PATH;
   const keyPath = process.env.KERNEL_MTLS_KEY_PATH;
   const caPath = process.env.KERNEL_MTLS_CA_PATH;
-
-  if (!skipMtls && certPath && keyPath) {
-    try {
-      const cert = fs.readFileSync(certPath);
-      const key = fs.readFileSync(keyPath);
-      const ca = caPath ? fs.readFileSync(caPath) : undefined;
-      httpsAgent = new https.Agent({
-        cert,
-        key,
-        ca,
-        keepAlive: true,
-        rejectUnauthorized: Boolean(caPath),
-      });
-      logger.info('auditWriter: configured mTLS for kernel audit calls');
-    } catch (err) {
-      logger.warn('auditWriter: failed to read mTLS cert/key/ca; falling back to non-mTLS', {
-        err: (err as Error).message || err,
-      });
-    }
-  } else {
-    if (!baseURL) {
-      logger.warn('auditWriter: no KERNEL_AUDIT_URL configured; audit posts will be skipped');
-    }
+  if (skipMtls || !certPath || !keyPath) {
     if (skipMtls) {
-      logger.info('auditWriter: DEV_SKIP_MTLS enabled; skipping mTLS');
+      logger.debug('auditWriter: DEV_SKIP_MTLS enabled; not configuring mTLS agent');
     }
+    return undefined;
   }
-
-  const instance = axios.create({
-    baseURL: baseURL || undefined,
-    httpsAgent,
-    timeout: 5000,
-    validateStatus: (s) => s >= 200 && s < 300, // accept 2xx incl. 202
-  });
-
-  return instance;
+  try {
+    const cert = fs.readFileSync(certPath);
+    const key = fs.readFileSync(keyPath);
+    const ca = caPath ? fs.readFileSync(caPath) : undefined;
+    return new https.Agent({
+      cert,
+      key,
+      ca,
+      keepAlive: true,
+      rejectUnauthorized: Boolean(caPath),
+    });
+  } catch (err) {
+    logger.warn('auditWriter: failed to read mTLS cert/key/ca; falling back to non-mTLS', {
+      err: (err as Error).message || err,
+    });
+    return undefined;
+  }
 }
 
-const http = makeAxios();
+let cachedHttp: AxiosInstance | null = null;
+let cachedBase = '';
+
+function getHttp(): AxiosInstance | null {
+  const baseURL = resolveKernelAuditBase();
+  if (!baseURL) {
+    return null;
+  }
+  if (cachedHttp && cachedBase === baseURL) {
+    return cachedHttp;
+  }
+
+  const skipMtls = config.devSkipMtls || process.env.DEV_SKIP_MTLS === 'true';
+  const httpsAgent = buildHttpsAgent(skipMtls);
+  cachedHttp = axios.create({
+    baseURL,
+    httpsAgent,
+    timeout: 5000,
+    validateStatus: (s) => s >= 200 && s < 300,
+  });
+  cachedBase = baseURL;
+  return cachedHttp;
+}
+
+// test helper
+export function __resetHttpClientForTest() {
+  cachedHttp = null;
+  cachedBase = '';
+}
 
 /**
  * Shape of the metadata passed from decisionService
@@ -90,12 +105,16 @@ export async function appendPolicyDecision(
   ctxData: any,
   meta: PolicyDecisionMeta,
 ): Promise<string | null> {
-  const kernelUrl = config.kernelAuditUrl || process.env.KERNEL_AUDIT_URL || '';
+  const kernelUrl = resolveKernelAuditBase();
   if (!kernelUrl) {
     logger.warn('appendPolicyDecision: kernel audit URL not configured; skipping audit append', {
       policyId,
       decision: meta?.decision,
     });
+    return null;
+  }
+  const http = getHttp();
+  if (!http) {
     return null;
   }
 
@@ -153,5 +172,5 @@ export async function appendPolicyDecision(
 
 export default {
   appendPolicyDecision,
+  __resetHttpClientForTest,
 };
-

@@ -13,11 +13,13 @@ const router = Router();
  * Returns basic info about the service.
  */
 router.get('/health', (_req: Request, res: Response) => {
+  const transport = buildTransportStatus();
   res.json({
     ok: true,
     service: 'sentinelnet',
     env: config.nodeEnv,
     timestamp: new Date().toISOString(),
+    transport,
   });
 });
 
@@ -65,11 +67,27 @@ router.get('/ready', async (_req: Request, res: Response) => {
     checks.kernel = { ok: false, note: 'KERNEL_AUDIT_URL not configured (optional)' };
   }
 
-  if (checks.ok) {
+  checks.transport = buildTransportStatus();
+
+  if (checks.ok && checks.transport?.ok !== false) {
     return res.json({ ok: true, checks });
   }
   return res.status(503).json({ ok: false, checks });
 });
 
-export default router;
+function buildTransportStatus() {
+  const kernelBase = config.kernelAuditUrl || process.env.KERNEL_AUDIT_URL || '';
+  const mtlsRequired = config.nodeEnv === 'production' && !config.devSkipMtls;
+  const certConfigured = Boolean(process.env.KERNEL_MTLS_CERT_PATH && process.env.KERNEL_MTLS_KEY_PATH);
+  const kernelConfigured = Boolean(kernelBase);
+  const ok = kernelConfigured ? (!mtlsRequired || certConfigured || config.devSkipMtls) : true;
+  return {
+    ok,
+    kernelConfigured,
+    mtlsRequired,
+    mtlsConfigured: certConfigured,
+    devSkipMtls: config.devSkipMtls,
+  };
+}
 
+export default router;

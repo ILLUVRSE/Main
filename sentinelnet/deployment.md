@@ -42,6 +42,10 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
   - For `severity=HIGH|CRITICAL` transitions to `active` require multi-sig approvals via Kernel's multisig flow. SentinelNet should create a `policy_activation` upgrade manifest and require Kernel’s 3-of-5 flow to apply.
 - **KMS/HSM**  
   - For any signing SentinelNet performs, use KMS/HSM with a named key per signer. Enforce key policies and audit key usage.
+- **Dev vs prod configuration**  
+  - Local dev may set `DEV_SKIP_MTLS=true` and run the mock Kernel via `npm run kernel:mock`. Production must set `DEV_SKIP_MTLS=false` and provide client cert/key paths (`KERNEL_MTLS_CERT_PATH`, `KERNEL_MTLS_KEY_PATH`, optionally `KERNEL_MTLS_CA_PATH`).  
+  - `SENTINEL_ENABLE_AUDIT_CONSUMER` should be enabled in prod (polls Kernel audit events) and disabled in dev unless the mock Kernel is running.  
+  - `run-local.sh` automates Postgres bootstrap, migrations, Kernel mock startup, and the verification suite; run it before submitting PRs.
 
 ---
 
@@ -59,6 +63,9 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
   - canary false-positive rate (simulation)
 - **Capacity**:
   - Size replicas based on expected check TPS. Use connection pools for DB and keep evaluator CPU-bound work fast; JSONLogic is cheap, complex evaluation may need CPU scaling.
+- **Local verification**:
+  - `npm test -- checkLatency.test.ts` executes ~100 synchronous checks against the service and prints p95 latency; the dev gate is `< 200ms`.  
+  - `/metrics` exposes `sentinel_check_latency_seconds`, so production dashboards can alert if `p95 > 50ms` for more than 5 minutes (primary SLO breach).
 
 ---
 
@@ -107,6 +114,9 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
 4. **Key rotation**:
    - Add new key to Key Registry, begin signing with new key, keep old key public available for verification for overlap window, rotate out old key after verification.
 
+- **RBAC enforcement**:
+  - In production SentinelNet should only be reachable through CommandPad or the Kernel API gateway. Those layers attach authenticated principals so SentinelNet can record `createdBy` / `editedBy` on policy mutations. Local dev defaults to `principal.id=unknown`; do not ship that configuration to prod.
+
 ---
 
 ## Deployment checklist
@@ -132,5 +142,3 @@ high-availability topology, mTLS requirements, KMS/keys, SLOs, canary strategy, 
 - Deliver K8s manifests and Helm chart for SentinelNet.
 - Implement canary automation and CI tests for multisig gating.
 - Security Engineer to review KMS/mTLS choices and sign-off.
-
-

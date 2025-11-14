@@ -46,7 +46,7 @@ let timer: NodeJS.Timeout | null = null;
  *
  * Returns a function to stop the consumer.
  */
-export function startConsumer(handler: (ev: any) => Promise<void>, opts?: { since?: string }) {
+export function startConsumer(handler: (ev: any) => Promise<void>, opts?: { since?: string; intervalMs?: number; limit?: number }) {
   const axiosInstance = makeAxios();
   if (!axiosInstance) {
     throw new Error('KERNEL_AUDIT_URL not configured');
@@ -55,6 +55,8 @@ export function startConsumer(handler: (ev: any) => Promise<void>, opts?: { sinc
     throw new Error('consumer already running');
   }
   running = true;
+  const intervalMs = opts?.intervalMs ?? POLL_INTERVAL_MS;
+  const pollLimit = opts?.limit ?? POLL_LIMIT;
   let lastSeen = opts?.since ?? new Date().toISOString();
 
   async function pollOnce() {
@@ -62,7 +64,7 @@ export function startConsumer(handler: (ev: any) => Promise<void>, opts?: { sinc
       // Query the kernel audit search for events since lastSeen
       const body = {
         time_min: lastSeen,
-        limit: POLL_LIMIT,
+        limit: pollLimit,
         // optionally we can filter event types if desired; keep generic
       };
 
@@ -116,7 +118,7 @@ export function startConsumer(handler: (ev: any) => Promise<void>, opts?: { sinc
       await pollOnce();
     } finally {
       if (running) {
-        timer = setTimeout(loop, POLL_INTERVAL_MS);
+        timer = setTimeout(loop, intervalMs);
       }
     }
   }
@@ -138,4 +140,3 @@ export function startConsumer(handler: (ev: any) => Promise<void>, opts?: { sinc
 export default {
   startConsumer,
 };
-

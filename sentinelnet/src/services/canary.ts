@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import logger from '../logger';
 import policyStore from './policyStore';
 import { Policy } from '../models/policy';
+import metrics from '../metrics/metrics';
 
 function hashToPercent(value: string): number {
   const h = crypto.createHash('sha256').update(value).digest();
@@ -34,7 +35,9 @@ function hashToPercent(value: string): number {
 export function shouldApplyCanary(policy: Policy, ctx?: any): boolean {
   const meta = policy.metadata ?? {};
   const percentRaw = meta?.canaryPercent ?? meta?.canary_percent ?? 0;
-  const percent = Number(percentRaw) || 0;
+  let percent = Number(percentRaw) || 0;
+  if (percent < 0) percent = 0;
+  if (percent > 100) percent = 100;
   if (!percent || percent <= 0) return false;
   if (percent >= 100) return true;
 
@@ -73,6 +76,7 @@ export async function startCanary(policyId: string, percent: number, editedBy?: 
   // set metadata and state -> canary
   const updated = await policyStore.updatePolicyInPlace(policyId, { metadata: updatedMeta, state: 'canary' }, editedBy);
   logger.info('Canary started for policy', { policyId, percent });
+  metrics.setCanaryPercent(policyId, percent);
   return updated;
 }
 
@@ -87,11 +91,13 @@ export async function stopCanary(policyId: string, activate: boolean, editedBy?:
     // Move to active state
     const updated = await policyStore.updatePolicyInPlace(policyId, { state: 'active' }, editedBy);
     logger.info('Canary activated into active for policy', { policyId });
+    metrics.setCanaryPercent(policyId, 0);
     return updated;
   } else {
     // Revert to draft or previous state; keep metadata but mark deprecated/cancelled
     const updated = await policyStore.updatePolicyInPlace(policyId, { state: 'draft' }, editedBy);
     logger.info('Canary stopped and policy reverted to draft', { policyId });
+    metrics.setCanaryPercent(policyId, 0);
     return updated;
   }
 }
@@ -101,4 +107,3 @@ export default {
   startCanary,
   stopCanary,
 };
-

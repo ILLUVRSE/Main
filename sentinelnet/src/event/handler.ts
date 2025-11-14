@@ -46,10 +46,7 @@ export async function handleAuditEvent(ev: any): Promise<void> {
     const data = buildEvalDataFromEvent(ev);
 
     // Fetch active and canary policies
-    const activePolicies: Policy[] = await policyStore.listPolicies({ state: 'active' });
-    const canaryPolicies: Policy[] = await policyStore.listPolicies({ state: 'canary' });
-
-    const policies = [...activePolicies, ...canaryPolicies];
+    const policies: Policy[] = await policyStore.listPolicies({ states: ['active', 'canary'] });
 
     if (!policies.length) {
       logger.debug('handleAuditEvent: no policies configured (active/canary)', { eventId: ev?.id });
@@ -137,4 +134,3 @@ export async function handleAuditEvent(ev: any): Promise<void> {
 export default {
   handleAuditEvent,
 };
-

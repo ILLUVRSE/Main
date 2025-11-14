@@ -103,3 +103,17 @@ This file converts the high-level acceptance paragraphs into concrete, testable 
 
 End of acceptance criteria.
 
+---
+
+## Final acceptance checklist
+- [x] `POST /sentinelnet/check` validates `action`, enforces policies, records metrics, and tests cover 400/error + deny flows.
+- [x] Policy registry supports create, read, explain, history, simulation, and versioning semantics with tests.
+- [x] Audit writer appends `policy.decision` envelopes (unit + integration coverage).
+- [x] Simulation API and deterministic canary sampling implemented with unit tests.
+- [x] Multisig gating helper produces/approves/applies `policy_activation` manifests (mocked Kernel flow covered).
+- [x] mTLS/transport readiness surfaced in `/health`/`/ready`, dev/prod guidance updated in docs.
+- [x] Async event consumer + handler exercise evaluation path and emit audit decisions (smoke tests).
+- [x] `/metrics` exposes required histogram/counter/gauge (unit smoke check).
+- [x] Integration suite spans synchronous check+audit, policy simulate, event consumption, canary semantics, and multisig gating; CI + `run-local.sh` wire these commands.
+
+**Sign-off (first tranche):** Tests executed via `npm test --runInBand` (covers unit + integration suites listed above). Local verification of policy simulation, decision service, audit writer, canary logic, event consumer, and multisig gating completed on 2025-11-13 by Codex agent. Use `./run-local.sh` to reproduce with Kernel mock + migrations + Jest.

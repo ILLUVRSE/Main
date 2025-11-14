@@ -184,7 +184,7 @@ export default function createControlPanelRouter(): Router {
       }
       const payload = (req.body && typeof req.body === 'object') ? req.body : {};
       const result = await proxyControlAction(targetParam, payload);
-      res.json(result);
+      return res.json(result);
     },
   );
 

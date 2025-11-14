@@ -34,6 +34,7 @@ Diagram:
 - Minimum replicas: 3 API replicas in prod behind LB for availability.
 - Use leader election for single-writer tasks (head-hash append helper, upgrade apply coordinator).
 - Liveness/readiness probes: check Postgres, signing proxy, and Kafka connectivity.
+- `deploy/k8s/kernel-deployment.yaml` provides the baseline Deployment/Service manifest with `/ready` and `/health` HTTP probes wired to the new readiness logic (DB + KMS checks).
 
 4) Signing & KMS integration
 ----------------------------
@@ -59,6 +60,7 @@ Diagram:
 -------------------
 - Use Vault or cloud secret manager via CSI driver for cluster secrets.
 - No private keys or plaintext secrets in repo or images. Audit CI/CD secrets usage and enforce secrets scanning.
+- Mount or bake the OpenAPI spec and set `OPENAPI_PATH` (image defaults to `/app/openapi.yaml`); the entrypoint and server fail fast in production if the spec or validator is missing.
 
 8) Backups, DR & replay
 -----------------------
@@ -103,4 +105,3 @@ Diagram:
 - Runbooks and operational checks documented and accessible.
 
 End of file.
-

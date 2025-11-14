@@ -3,12 +3,13 @@
 // Parity tests: assert byte-for-byte equality between Node canonicalize()
 // (agent-manager/server/audit_signer.js) and Go canonical.MarshalCanonical.
 //
-// This test reads canonicalization vectors from kernel/test/vectors/canonical_vectors.json,
+// This test reads canonicalization vectors from test/vectors/canonical_vectors.json,
 // writes a small Go helper into kernel/test/node_canonical_parity_helper.go, runs it with `go run`,
 // and compares results. Tests are skipped automatically if `go` is not present on PATH.
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync, spawn } = require('child_process');
 const { canonicalize } = require('../../agent-manager/server/audit_signer');
 
@@ -16,7 +17,7 @@ jest.setTimeout(20000);
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const helperFilename = path.join(__dirname, 'node_canonical_parity_helper.go');
-const vectorsPath = path.join(__dirname, 'vectors', 'canonical_vectors.json');
+const vectorsPath = path.join(repoRoot, 'test', 'vectors', 'canonical_vectors.json');
 
 const helperGo = `package main
 
@@ -104,43 +105,35 @@ describe('Node <-> Go canonicalization parity (vectors from file)', () => {
   });
 
   // load vectors from canonical_vectors.json
-  let vectors;
-  try {
-    const raw = fs.readFileSync(vectorsPath, 'utf8');
-    const parsed = JSON.parse(raw);
-    vectors = parsed.vectors || [];
-  } catch (e) {
-    // If vectors file missing, fall back to the inline small set to avoid test failure.
-    vectors = [
-      { name: 'object key ordering (simple)', value: { b: 1, a: 2 } },
-      { name: 'nested objects and arrays', value: { z: ["z", "a"], obj: { c: 3, b: 2, a: [2, 1] } } },
-      { name: 'null, booleans and numbers', value: { flag: true, nothing: null, neg: -5, float: 1.2345 } },
-      { name: 'strings needing escaping', value: { s: 'quote " and backslash \\\\ and unicode \\u2603', arr: ["a", "b", { x: 1 }] } },
-      { name: 'array ordering preserved', value: [3, 1, 2, { b: 'B', a: 'A' }, [2,1]] },
-    ];
+  const raw = fs.readFileSync(vectorsPath, 'utf8');
+  const parsed = JSON.parse(raw);
+  const vectors = Array.isArray(parsed?.vectors) ? parsed.vectors : [];
+  if (!vectors.length) {
+    throw new Error(`No canonical vectors found in ${vectorsPath}`);
   }
 
-  (goAvailable ? it : it.skip)('parity for canonicalization vectors (node vs go)', async () => {
+  it('node canonical outputs match canonical vectors', () => {
     for (const vec of vectors) {
+      if (typeof vec.canonical !== 'string' || typeof vec.sha256 !== 'string') {
+        throw new Error(`Vector "${vec.name}" missing canonical or sha256 fields`);
+      }
       const jsCanonical = canonicalize(vec.value);
+      expect(jsCanonical).toBe(vec.canonical);
+      const jsHash = crypto.createHash('sha256').update(jsCanonical).digest('hex');
+      expect(jsHash).toBe(vec.sha256);
+    }
+  });
 
-      // Use JSON.stringify to produce input; Go helper uses Decoder.UseNumber() so numeric fidelity preserved.
+  (goAvailable ? it : it.skip)('Go canonicalization matches canonical vectors', async () => {
+    for (const vec of vectors) {
       const input = JSON.stringify(vec.value);
-
       let goCanonical;
       try {
         goCanonical = await runGoHelper(input);
       } catch (e) {
         throw new Error(`Go helper failed for vector "${vec.name}": ${e.message}`);
       }
-
-      // Compare byte-for-byte equality
-      expect(jsCanonical).toBe(goCanonical);
+      expect(goCanonical).toBe(vec.canonical);
     }
   });
-
-  if (!goAvailable) {
-    it.skip('go not installed - parity tests skipped', () => {});
-  }
 });
-

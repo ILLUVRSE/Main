@@ -3,12 +3,16 @@ import logger from '../logger';
 import policyStore from './policyStore';
 import evaluator from '../evaluator';
 import auditWriter from './auditWriter';
+import canary from './canary';
+import metrics from '../metrics/metrics';
+import { Policy } from '../models/policy';
 
 type ActionCtx = {
   action: string;
   actor?: any;
   resource?: any;
   context?: any;
+  requestId?: string | null;
 };
 
 export type DecisionKind = 'allow' | 'deny' | 'quarantine' | 'remediate';
@@ -42,17 +46,19 @@ function pickFinalDecision(effects: string[]): DecisionKind {
  * do not stop the response.
  */
 export async function evaluateAction(ctx: ActionCtx): Promise<DecisionEnvelope> {
+  const start = process.hrtime.bigint();
   const ts = new Date().toISOString();
   const data = {
     action: ctx.action,
     actor: ctx.actor,
     resource: ctx.resource,
     context: ctx.context,
+    requestId: ctx.requestId ?? ctx.context?.requestId ?? ctx.context?.request_id ?? null,
   };
 
   try {
     // Fetch active policies (simple model: evaluate all active policies)
-    const activePolicies = await policyStore.listPolicies({ state: 'active' });
+    const candidatePolicies: Policy[] = await policyStore.listPolicies({ states: ['active', 'canary'] });
 
     const matches: {
       policy: any;
@@ -60,10 +66,23 @@ export async function evaluateAction(ctx: ActionCtx): Promise<DecisionEnvelope> 
       effect: string; // 'allow'|'deny'|'quarantine'|'remediate' (from metadata or default)
     }[] = [];
 
-    for (const p of activePolicies) {
+    for (const p of candidatePolicies) {
       try {
         const res = await evaluator.evaluate(p.rule, data);
         if (res && res.match) {
+          if (p.state === 'canary') {
+            const shouldApply = canary.shouldApplyCanary(p, {
+              requestId: data.requestId,
+              context: data.context,
+            });
+            if (!shouldApply) {
+              logger.debug('decisionService: canary match skipped due to sampling', {
+                policyId: p.id,
+                requestId: data.requestId,
+              });
+              continue;
+            }
+          }
           // Determine effect: policy metadata.effect preferred; default to 'deny' when matched.
           const metaEffect =
             p.metadata && typeof p.metadata.effect === 'string' ? String(p.metadata.effect) : null;
@@ -99,6 +118,7 @@ export async function evaluateAction(ctx: ActionCtx): Promise<DecisionEnvelope> 
         logger.warn('audit append failed for no-match decision', err);
       }
 
+      metrics.incrementDecision(decision.decision);
       return decision;
     }
 
@@ -156,20 +176,25 @@ export async function evaluateAction(ctx: ActionCtx): Promise<DecisionEnvelope> 
       // don't fail the API response if audit fails
     }
 
+    metrics.incrementDecision(envelope.decision);
     return envelope;
   } catch (err) {
     logger.error('decisionService.evaluateAction fatal error', err);
     // On unexpected errors, be conservative: allow with note
-    return {
+    const fallback = {
       decision: 'allow',
       allowed: true,
       rationale: `evaluator_error: ${(err as Error).message || err}`,
       ts,
     };
+    metrics.incrementDecision(fallback.decision);
+    return fallback;
+  } finally {
+    const durationNs = Number(process.hrtime.bigint() - start);
+    metrics.observeCheckLatency(durationNs / 1_000_000_000);
   }
 }
 
 export default {
   evaluateAction,
 };
-

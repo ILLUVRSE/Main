@@ -1,7 +1,7 @@
 // sentinelnet/src/services/policyStore.ts
 import { query } from '../db';
 import logger from '../logger';
-import { Policy, NewPolicyInput, createPolicyFromInput, bumpPolicyVersion } from '../models/policy';
+import { Policy, NewPolicyInput } from '../models/policy';
 
 /**
  * Map a DB row into Policy shape expected by the application.
@@ -47,7 +47,19 @@ export async function createPolicy(input: NewPolicyInput): Promise<Policy> {
 
   try {
     const res = await query(sql, params);
-    return mapRowToPolicy(res.rows[0]);
+    const created = mapRowToPolicy(res.rows[0]);
+    await recordPolicyHistory(created.id, {
+      version: created.version,
+      changes: {
+        action: 'created',
+        severity: created.severity,
+        metadata: created.metadata,
+        rule: created.rule,
+        state: created.state,
+      },
+      editedBy: created.createdBy,
+    });
+    return created;
   } catch (err) {
     logger.error('createPolicy failed', err);
     throw err;
@@ -128,9 +140,18 @@ export async function createPolicyNewVersion(existingPolicyId: string, updates: 
 
   try {
     const res = await query(sql, params);
-    // record history
-    await recordPolicyHistory(existing.id, { version: existing.version, changes: updates, editedBy: editedBy ?? existing.createdBy ?? null });
-    return mapRowToPolicy(res.rows[0]);
+    const newPolicy = mapRowToPolicy(res.rows[0]);
+    await recordPolicyHistory(existing.id, {
+      version: existing.version,
+      changes: { action: 'superseded_by', newPolicyId: newPolicy.id, updates },
+      editedBy: editedBy ?? existing.createdBy ?? null,
+    });
+    await recordPolicyHistory(newPolicy.id, {
+      version: newPolicy.version,
+      changes: { action: 'created_version', parentPolicyId: existing.id, updates },
+      editedBy: editedBy ?? existing.createdBy ?? null,
+    });
+    return newPolicy;
   } catch (err) {
     logger.error('createPolicyNewVersion failed', err);
     throw err;
@@ -190,13 +211,17 @@ export async function updatePolicyInPlace(policyId: string, updates: Partial<Pol
 /**
  * List policies (simple listing with optional filters).
  */
-export async function listPolicies(filter?: { state?: string; severity?: string }): Promise<Policy[]> {
+export async function listPolicies(filter?: { state?: Policy['state']; states?: Policy['state'][]; severity?: string }): Promise<Policy[]> {
   const clauses: string[] = [];
   const params: any[] = [];
   let i = 1;
   if (filter?.state) {
     clauses.push(`state = $${i++}`);
     params.push(filter.state);
+  }
+  if (filter?.states && filter.states.length) {
+    clauses.push(`state = ANY($${i++}::text[])`);
+    params.push(filter.states);
   }
   if (filter?.severity) {
     clauses.push(`severity = $${i++}`);
@@ -267,4 +292,3 @@ export default {
   setPolicyState,
   recordPolicyHistory,
 };
-

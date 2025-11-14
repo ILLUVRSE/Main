@@ -61,7 +61,28 @@ fi
 echo "Running DB migrations..."
 npm run migrate
 
-# 5) Start service in dev mode (ts-node-dev)
-echo "Starting SentinelNet in dev mode..."
-npm run dev
+# 5) Start Kernel mock (background) for audit/multisig endpoints
+KERNEL_MOCK_PORT="${KERNEL_MOCK_PORT:-7802}"
+export KERNEL_AUDIT_URL="http://127.0.0.1:${KERNEL_MOCK_PORT}"
+echo "Starting Kernel mock on ${KERNEL_AUDIT_URL}..."
+KERNEL_MOCK_LOG="${ROOT_DIR}/kernel-mock.log"
+npm run kernel:mock >"${KERNEL_MOCK_LOG}" 2>&1 &
+KERNEL_MOCK_PID=$!
+trap 'kill ${KERNEL_MOCK_PID} >/dev/null 2>&1 || true' EXIT
 
+# Wait for mock to become healthy
+echo "Waiting for Kernel mock to become healthy..."
+for i in {1..30}; do
+  if curl -fsS "${KERNEL_AUDIT_URL}/health" >/dev/null 2>&1; then
+    echo "Kernel mock is up."
+    break
+  fi
+  sleep 1
+done
+
+# 6) Run SentinelNet test suite (unit + integration)
+echo "Running SentinelNet test suite..."
+npm test
+
+echo "All tests passed. Kernel mock logs located at ${KERNEL_MOCK_LOG}."
+echo "To run the dev server afterwards: npm run dev"

@@ -28,63 +28,73 @@ import { loadConfig } from '../config/env';
 
 const config = loadConfig();
 
-/**
- * Create axios instance with optional mTLS.
- * Looks for KERNEL_URL or KERNEL_API_URL env. Falls back to config.kernelAuditUrl if present.
- */
-function makeAxios(): AxiosInstance {
-  const base =
+function resolveKernelBase(): string {
+  return (
     process.env.KERNEL_URL ||
     process.env.KERNEL_API_URL ||
     config.kernelAuditUrl ||
     process.env.KERNEL_AUDIT_URL ||
-    '';
+    ''
+  ).replace(/\/$/, '');
+}
 
-  if (!base) {
-    logger.warn('multisigGating: no kernel base URL configured (KERNEL_URL/KERNEL_API_URL/KERNEL_AUDIT_URL)');
-  }
-
-  const skipMtls = config.devSkipMtls || process.env.DEV_SKIP_MTLS === 'true';
-  let httpsAgent: https.Agent | undefined = undefined;
+function buildHttpsAgent(skipMtls: boolean): https.Agent | undefined {
   const certPath = process.env.KERNEL_MTLS_CERT_PATH;
   const keyPath = process.env.KERNEL_MTLS_KEY_PATH;
   const caPath = process.env.KERNEL_MTLS_CA_PATH;
-
-  if (!skipMtls && certPath && keyPath) {
-    try {
-      const cert = fs.readFileSync(certPath);
-      const key = fs.readFileSync(keyPath);
-      const ca = caPath ? fs.readFileSync(caPath) : undefined;
-      httpsAgent = new https.Agent({
-        cert,
-        key,
-        ca,
-        keepAlive: true,
-        rejectUnauthorized: Boolean(caPath),
-      });
-      logger.info('multisigGating: configured mTLS for Kernel comms');
-    } catch (err) {
-      logger.warn('multisigGating: failed to read mTLS cert/key/ca; falling back to non-mTLS', {
-        err: (err as Error).message || err,
-      });
-    }
-  } else {
+  if (skipMtls || !certPath || !keyPath) {
     if (skipMtls) {
-      logger.info('multisigGating: DEV_SKIP_MTLS enabled; not using mTLS');
+      logger.debug('multisigGating: DEV_SKIP_MTLS enabled; not using mTLS agent');
     }
+    return undefined;
   }
-
-  const instance = axios.create({
-    baseURL: base || undefined,
-    httpsAgent,
-    timeout: 10000,
-    validateStatus: (s) => s >= 200 && s < 500, // let caller inspect non-2xx responses
-  });
-
-  return instance;
+  try {
+    const cert = fs.readFileSync(certPath);
+    const key = fs.readFileSync(keyPath);
+    const ca = caPath ? fs.readFileSync(caPath) : undefined;
+    return new https.Agent({
+      cert,
+      key,
+      ca,
+      keepAlive: true,
+      rejectUnauthorized: Boolean(caPath),
+    });
+  } catch (err) {
+    logger.warn('multisigGating: failed to read mTLS cert/key/ca; falling back to non-mTLS', {
+      err: (err as Error).message || err,
+    });
+    return undefined;
+  }
 }
 
-const http = makeAxios();
+let cachedHttp: AxiosInstance | null = null;
+let cachedBase = '';
+
+function getHttp(): AxiosInstance | null {
+  const base = resolveKernelBase();
+  if (!base) {
+    logger.warn('multisigGating: no kernel base URL configured (KERNEL_URL/KERNEL_API_URL/KERNEL_AUDIT_URL)');
+    return null;
+  }
+  if (cachedHttp && cachedBase === base) {
+    return cachedHttp;
+  }
+  const skipMtls = config.devSkipMtls || process.env.DEV_SKIP_MTLS === 'true';
+  const httpsAgent = buildHttpsAgent(skipMtls);
+  cachedHttp = axios.create({
+    baseURL: base,
+    httpsAgent,
+    timeout: 10000,
+    validateStatus: (s) => s >= 200 && s < 500,
+  });
+  cachedBase = base;
+  return cachedHttp;
+}
+
+export function __resetHttpClientForTest() {
+  cachedHttp = null;
+  cachedBase = '';
+}
 
 export interface UpgradeCreateResult {
   upgrade: {
@@ -111,6 +121,10 @@ export interface UpgradeCreateResult {
  *  - proposedBy: string
  */
 export async function createPolicyActivationUpgrade(manifest: any, submittedBy?: string | null): Promise<UpgradeCreateResult> {
+  const http = getHttp();
+  if (!http) {
+    throw new Error('kernel_url_not_configured');
+  }
   const bodyManifest = Object.assign({}, manifest);
   if (!bodyManifest.upgradeId) {
     bodyManifest.upgradeId = `upgrade-${crypto.randomUUID()}`;
@@ -149,6 +163,10 @@ export async function submitUpgradeApproval(upgradeId: string, approverId: strin
     throw new Error('upgradeId, approverId, and signature required');
   }
 
+  const http = getHttp();
+  if (!http) {
+    throw new Error('kernel_url_not_configured');
+  }
   try {
     const endpoint = `/kernel/upgrade/${encodeURIComponent(upgradeId)}/approve`;
     const res = await http.post(endpoint, { approverId, signature, notes: notes ?? null });
@@ -171,6 +189,10 @@ export async function submitUpgradeApproval(upgradeId: string, approverId: strin
  */
 export async function applyUpgrade(upgradeId: string, appliedBy?: string) {
   if (!upgradeId) throw new Error('upgradeId required');
+  const http = getHttp();
+  if (!http) {
+    throw new Error('kernel_url_not_configured');
+  }
   try {
     const endpoint = `/kernel/upgrade/${encodeURIComponent(upgradeId)}/apply`;
     const res = await http.post(endpoint, { appliedBy: appliedBy ?? null });
@@ -196,6 +218,8 @@ export async function applyUpgrade(upgradeId: string, appliedBy?: string) {
  */
 export async function getUpgradeStatus(upgradeId: string) {
   try {
+    const http = getHttp();
+    if (!http) return null;
     // Try probing a GET-like endpoint (not guaranteed)
     const endpoint = `/kernel/upgrade/${encodeURIComponent(upgradeId)}`;
     const res = await http.get(endpoint).catch(() => null);
@@ -218,5 +242,5 @@ export default {
   submitUpgradeApproval,
   applyUpgrade,
   getUpgradeStatus,
+  __resetHttpClientForTest,
 };
-

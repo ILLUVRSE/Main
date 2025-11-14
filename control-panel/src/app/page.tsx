@@ -1,19 +1,20 @@
 "use client";
 import { useEffect, useState } from "react";
-import { fetchAgents, fetchAudit } from "../lib/fetcher";
+import { fetchAgents, fetchAudit, AgentSummary, AuditSummary } from "../lib/fetcher";
 import { useRouter } from "next/navigation";
-import { ensureAdminSession } from "../lib/auth";
+import { useSession } from "../lib/auth/client";
 
 export default function Home() {
   const router = useRouter();
-  const [agents, setAgents] = useState<any[]>([]);
-  const [audit, setAudit] = useState<any[]>([]);
+  const { session } = useSession({ redirectTo: "/login" });
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [audit, setAudit] = useState<AuditSummary[]>([]);
 
   useEffect(() => {
-    ensureAdminSession(router);
-    fetchAgents().then(setAgents).catch(()=>setAgents([]));
-    fetchAudit().then(setAudit).catch(()=>setAudit([]));
-  }, [router]);
+    if (!session) return;
+    fetchAgents().then(setAgents).catch(() => setAgents([]));
+    fetchAudit().then(setAudit).catch(() => setAudit([]));
+  }, [router, session]);
 
   return (
     <main className="max-w-5xl mx-auto p-6">

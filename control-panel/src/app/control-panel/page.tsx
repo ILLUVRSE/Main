@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ensureAdminSession } from "../../lib/auth";
+import { useSession } from "../../lib/auth/client";
 import {
   fetchControlPanelSettings,
   triggerAgentManagerAction,
@@ -22,6 +22,7 @@ type MessageMap = Record<string, string>;
 
 export default function ControlPanelPage() {
   const router = useRouter();
+  const { session } = useSession({ redirectTo: "/login", requiredRoles: ["SuperAdmin", "Operator"] });
   const [settings, setSettings] = useState<Settings | null>(null);
   const [notes, setNotes] = useState("");
   const [maintenanceMode, setMaintenanceMode] = useState(false);
@@ -30,9 +31,9 @@ export default function ControlPanelPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    ensureAdminSession(router);
+    if (!session) return;
     refreshSettings();
-  }, [router]);
+  }, [router, session]);
 
   async function refreshSettings() {
     try {
@@ -42,8 +43,9 @@ export default function ControlPanelPage() {
       setMaintenanceMode(Boolean(response.settings.maintenanceMode));
       setError(null);
       setMessages((prev) => ({ ...prev, settings: "Settings loaded" }));
-    } catch (err: any) {
-      setError(err?.message || "Failed to load settings");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load settings";
+      setError(message);
     }
   }
 
@@ -53,8 +55,9 @@ export default function ControlPanelPage() {
       const result = await triggerKernelAction({ action: "ping" });
       const msg = result?.message || "Kernel action completed";
       setMessages((prev) => ({ ...prev, kernel: msg }));
-    } catch (err: any) {
-      setMessages((prev) => ({ ...prev, kernel: err?.message || "Kernel action failed" }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Kernel action failed";
+      setMessages((prev) => ({ ...prev, kernel: message }));
     }
   }
 
@@ -64,8 +67,9 @@ export default function ControlPanelPage() {
       const result = await triggerAgentManagerAction({ action: "refresh" });
       const msg = result?.message || "Agent Manager action completed";
       setMessages((prev) => ({ ...prev, agent: msg }));
-    } catch (err: any) {
-      setMessages((prev) => ({ ...prev, agent: err?.message || "Agent Manager action failed" }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Agent Manager action failed";
+      setMessages((prev) => ({ ...prev, agent: message }));
     }
   }
 
@@ -80,8 +84,9 @@ export default function ControlPanelPage() {
       const response = await updateControlPanelSettings(payload);
       setSettings(response.settings);
       setMessages((prev) => ({ ...prev, settings: "Advanced settings saved" }));
-    } catch (err: any) {
-      setMessages((prev) => ({ ...prev, settings: err?.message || "Failed to save settings" }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save settings";
+      setMessages((prev) => ({ ...prev, settings: message }));
     } finally {
       setSaving(false);
     }

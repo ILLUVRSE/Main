@@ -119,4 +119,3 @@ func dirOf(p string) string {
 	}
 	return "."
 }
-

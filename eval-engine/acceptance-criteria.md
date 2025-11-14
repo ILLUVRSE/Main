@@ -43,6 +43,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 - **Request → approval → apply:** Allocations follow `requested → pending → approved/applied` lifecycle.
 - **Transactional apply:** Allocation apply is transactional: reservation → infra request → confirm → audit. Rollbacks restore accounting on failure.
 - **Status reporting:** `GET /alloc/{id}` returns accurate status and timestamps.
+- **Automated test:** `go test ./eval-engine/internal/acceptance -run PromotionAllocation` covers promotion-triggered allocation creation and approval.
 
 **How to verify:** Simulate end-to-end allocation request, approve it, and confirm resources are reserved/applied with audit event. Force a failure during apply and confirm rollback of reservation.
 
@@ -51,6 +52,7 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 ## # 6) SentinelNet policy enforcement
 - **Policy checks required:** All allocation applies and critical promotions run SentinelNet checks.
 - **Policy outcomes audited:** SentinelNet decisions (allow/deny/quarantine) are logged as AuditEvents with `policyId` and rationale.
+- **Local policy harness:** Configure env vars (`RESOURCE_ALLOCATOR_DENY_POOLS`, `RESOURCE_ALLOCATOR_MAX_DELTA`) to simulate SentinelNet allow/deny cases and run the acceptance test noted above.
 
 **How to verify:** Deploy a test policy blocking an allocation; attempt allocation and confirm `403`/rejection and an audit event with policy details.
 
@@ -136,4 +138,3 @@ Purpose: concise, testable checks proving the Eval Engine and Resource Allocator
 
 ## # Final acceptance statement
 The Eval Engine & Resource Allocator module is accepted when all above criteria pass in a staging environment, automated tests are green, audit integrity is verified, SentinelNet policy checks function, Finance gates work for capital allocations, and formal sign-off by Ryan and the Security Engineer is recorded.
-

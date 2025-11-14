@@ -17,6 +17,7 @@ import policyStore from '../services/policyStore';
 import evaluator from '../evaluator';
 import auditWriter from '../services/auditWriter';
 import canary from '../services/canary';
+import canaryRollback from '../services/canaryRollback';
 import { Policy } from '../models/policy';
 
 function buildEvalDataFromEvent(ev: any) {
@@ -114,6 +115,17 @@ export async function handleAuditEvent(ev: any): Promise<void> {
             error: (err as Error).message || err,
             eventId: ev?.id,
           });
+        }
+
+        if (p.state === 'canary') {
+          canaryRollback
+            .recordDecision(p, { enforced, allowed, effect })
+            .catch((err) =>
+              logger.warn('canaryRollback: failed to record decision', {
+                policyId: p.id,
+                err: (err as Error).message || err,
+              }),
+            );
         }
 
         // Optionally: take enforcement action (remediation) here if enforced and effect != allow.

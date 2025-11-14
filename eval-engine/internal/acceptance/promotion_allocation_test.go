@@ -33,10 +33,11 @@ func TestPromotionAllocationSentinelFlow(t *testing.T) {
 		"latency":     0.95,
 	})
 	result, err := ingService.SubmitReport(ctx, ingestion.SubmitReportInput{
-		AgentID: "agent-123",
-		Metrics: metrics,
-		Source:  "test",
-		TS:      time.Now().UTC(),
+		AgentID:    "agent-123",
+		DivisionID: "division-a",
+		Metrics:    metrics,
+		Source:     "test",
+		TS:         time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("submit report: %v", err)
@@ -88,6 +89,73 @@ func TestPromotionAllocationSentinelFlow(t *testing.T) {
 	if string(record.SentinelDecision) == "" {
 		t.Fatalf("expected sentinel decision stored")
 	}
+
+	board, err := ingService.GetScoreboard(ctx, "division-a", 5)
+	if err != nil {
+		t.Fatalf("scoreboard: %v", err)
+	}
+	if len(board) != 1 || board[0].AgentID != "agent-123" {
+		t.Fatalf("unexpected scoreboard response: %+v", board)
+	}
+
+	job, err := ingService.CreateRetrainJob(ctx, ingestion.RetrainJobInput{
+		ModelFamily:   "model-family-x",
+		DatasetRefs:   []string{"dataset-a"},
+		Priority:      "high",
+		RequestedBy:   "mlops",
+		ResourcePool:  "gpus-us-east",
+		ResourceUnits: 1,
+	})
+	if err != nil {
+		t.Fatalf("create retrain job: %v", err)
+	}
+	if job.AllocationRequestID == nil {
+		t.Fatalf("expected retrain allocation to be requested")
+	}
+	jobFetched, err := ingService.GetRetrainJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get retrain job: %v", err)
+	}
+	if jobFetched.ID != job.ID {
+		t.Fatalf("job fetch mismatch")
+	}
+
+	preemptRecord, err := allocService.Preempt(ctx, allocator.PreemptInput{
+		AgentID:     "agent-123",
+		Pool:        "gpus-us-east",
+		Delta:       1,
+		Reason:      "canary rollback",
+		RequestedBy: "allocator-bot",
+	})
+	if err != nil {
+		t.Fatalf("preempt: %v", err)
+	}
+	if preemptRecord.Status != "applied" || preemptRecord.Delta != -1 {
+		t.Fatalf("unexpected preempt result: %+v", preemptRecord)
+	}
+
+	pending, err := allocService.RequestAllocation(ctx, allocator.RequestInput{
+		AgentID:     "agent-456",
+		Pool:        "gpus-us-east",
+		Delta:       1,
+		Reason:      "manual test",
+		RequestedBy: "ops",
+	})
+	if err != nil {
+		t.Fatalf("request allocation: %v", err)
+	}
+	rejected, err := allocService.Reject(ctx, allocator.RejectInput{
+		RequestID:  pending.ID,
+		RejectedBy: "ops",
+		Reason:     "budget exceeded",
+		PolicyID:   "finance-budget",
+	})
+	if err != nil {
+		t.Fatalf("reject allocation: %v", err)
+	}
+	if rejected.Status != "rejected" || string(rejected.SentinelDecision) == "" {
+		t.Fatalf("expected rejection payload: %+v", rejected)
+	}
 }
 
 type fakeAllocatorClient struct {
@@ -97,7 +165,7 @@ type fakeAllocatorClient struct {
 
 func (f *fakeAllocatorClient) CreateRequest(ctx context.Context, req ingestion.AllocationRequest) (ingestion.AllocationResponse, error) {
 	record, err := f.svc.RequestAllocation(ctx, allocator.RequestInput{
-		PromotionID: &req.PromotionID,
+		PromotionID: req.PromotionID,
 		AgentID:     req.AgentID,
 		Pool:        req.Pool,
 		Delta:       req.Delta,

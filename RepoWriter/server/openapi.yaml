@@ -1,0 +1,55 @@
+openapi: 3.0.0
+info:
+  title: Kernel API
+  version: 1.0.0
+paths:
+  /kernel/sign:
+    post:
+      summary: Sign a request
+      responses:
+        '200':
+          description: Successful sign
+  /kernel/agent:
+    post:
+      summary: Create an agent
+      responses:
+        '200':
+          description: Agent created
+  /kernel/allocate:
+    post:
+      summary: Allocate resources
+      responses:
+        '200':
+          description: Resources allocated
+  /kernel/division:
+    post:
+      summary: Create a division
+      responses:
+        '200':
+          description: Division created
+  /kernel/audit/{id}:
+    get:
+      summary: Get audit details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Audit ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audit details retrieved
+  /kernel/reason/{node}:
+    get:
+      summary: Get reason for a node
+      parameters:
+        - name: node
+          in: path
+          required: true
+          description: Node identifier
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Reason retrieved

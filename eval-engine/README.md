@@ -8,12 +8,12 @@ All files for this module live under:
 ~/ILLUVRSE/Main/eval-engine/
 
 ## # Files in this module
-- `eval-engine-spec.md` — core specification: responsibilities, APIs, models, flows, safety, and integration (this file is already added).
+- `eval-engine-spec.md` — core specification: responsibilities, APIs, models, flows, safety, and integration.
 - `README.md` — this file.
-- `deployment.md` — deployment and infra guidance (to be created).
-- `api.md` — API surface and examples (to be created).
-- `acceptance-criteria.md` — testable checks for the module (to be created).
-- `.gitignore` — local ignores for runtime files (to be created).
+- `deployment.md` — deployment and infra guidance covering Eval ingestion + Resource Allocator services.
+- `api.md` — API surface and examples for Eval ingestion, promotion, and allocator endpoints.
+- `acceptance-criteria.md` — testable checks for the module.
+- `.gitignore` — local ignores for runtime files.
 
 ## # How to use this module
 1. Read `eval-engine-spec.md` to understand scoring principles, promotion/ demotion logic, retrain flow, and Resource Allocator responsibilities.
@@ -37,10 +37,14 @@ All files for this module live under:
 ## # Acceptance & sign-off
 The module is accepted when the acceptance criteria described in `eval-engine-spec.md` are implemented and verified: scoring correctness, promotion + allocation flows, policy enforcement, auditability, retrain lifecycle, and operational SLOs. Final approver: **Ryan (SuperAdmin)**. Security Engineer must review policy enforcement and finance integration.
 
-## # Next single step
-Create `deployment.md` for the Eval Engine & Resource Allocator (one file). When you’re ready, reply **“next”** and I’ll give the exact content for that single file.
+## # Quick start
+1. Apply migrations: `psql $DATABASE_URL -f eval-engine/sql/migrations/001_init.sql`.
+2. Start Resource Allocator: `go run ./eval-engine/cmd/resource-allocator-service`.
+3. Start Eval ingestion service: `RESOURCE_ALLOCATOR_URL=http://localhost:8052 go run ./eval-engine/cmd/eval-ingestion-service`.
+4. Run acceptance test: `go test ./eval-engine/internal/acceptance -run PromotionAllocation`.
+
+These steps exercise the promotion → allocation → SentinelNet policy flow end to end.
 
 ---
 
 End of README.
-

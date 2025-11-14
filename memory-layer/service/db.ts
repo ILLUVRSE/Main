@@ -1,18 +1,74 @@
-import { Pool } from 'pg';
-import crypto from 'node:crypto';
-import { ArtifactInput, MemoryNodeInput, MemoryNodeRecord } from './types';
+import { Pool, PoolClient } from 'pg';
+import {
+  canonicalizePayload,
+  computeAuditDigest,
+  signAuditDigest
+} from './audit/auditChain';
+import type { ArtifactInput, ArtifactRecord, AuditEventRecord, MemoryNodeInput, MemoryNodeRecord } from './types';
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: Number(process.env.PG_POOL_MAX ?? 10),
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined
+let pool: Pool | null = null;
+
+const buildPool = (): Pool => {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is not configured for Memory Layer');
+  }
+  return new Pool({
+    connectionString,
+    max: Number(process.env.PG_POOL_MAX ?? 10),
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined
+  });
+};
+
+export const setPool = (customPool: Pool | null) => {
+  pool = customPool;
+};
+
+export const getPool = (): Pool => {
+  if (!pool) {
+    pool = buildPool();
+  }
+  return pool;
+};
+
+const withClient = async <T>(handler: (client: PoolClient) => Promise<T>): Promise<T> => {
+  const client = await getPool().connect();
+  try {
+    return await handler(client);
+  } finally {
+    client.release();
+  }
+};
+
+const parseJson = <T>(value: unknown, fallback: T): T => {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+  if (typeof value === 'object') {
+    return value as T;
+  }
+  return fallback;
+};
+
+const hydrateMemoryNode = (row: MemoryNodeRecord): MemoryNodeRecord => ({
+  ...row,
+  metadata: parseJson(row.metadata, {}),
+  pii_flags: parseJson(row.pii_flags, {})
 });
 
-export const getPool = () => pool;
+const hydrateArtifact = (row: ArtifactRecord): ArtifactRecord => ({
+  ...row,
+  metadata: parseJson(row.metadata, {})
+});
 
 export async function insertMemoryNode(input: MemoryNodeInput): Promise<MemoryNodeRecord> {
   const ttl = input.ttlSeconds ?? null;
-  const { rows } = await pool.query<MemoryNodeRecord>(
+  const { rows } = await getPool().query<MemoryNodeRecord>(
     `
       INSERT INTO memory_nodes (
         owner,
@@ -47,19 +103,31 @@ export async function insertMemoryNode(input: MemoryNodeInput): Promise<MemoryNo
     ]
   );
 
-  return rows[0];
+  return hydrateMemoryNode(rows[0]);
+}
+
+export async function updateMemoryNodeEmbedding(nodeId: string, embeddingId: string): Promise<void> {
+  await getPool().query(
+    `
+      UPDATE memory_nodes
+      SET embedding_id = $2,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [nodeId, embeddingId]
+  );
 }
 
 export async function getMemoryNodeById(id: string): Promise<MemoryNodeRecord | null> {
-  const { rows } = await pool.query<MemoryNodeRecord>(
+  const { rows } = await getPool().query<MemoryNodeRecord>(
     `SELECT * FROM memory_nodes WHERE id = $1 AND deleted_at IS NULL`,
     [id]
   );
-  return rows[0] ?? null;
+  return rows[0] ? hydrateMemoryNode(rows[0]) : null;
 }
 
 export async function setLegalHold(id: string, legalHold: boolean, reason?: string): Promise<void> {
-  await pool.query(
+  await getPool().query(
     `
       UPDATE memory_nodes
       SET legal_hold = $2,
@@ -72,7 +140,7 @@ export async function setLegalHold(id: string, legalHold: boolean, reason?: stri
 }
 
 export async function softDeleteMemoryNode(id: string, deletedBy?: string): Promise<void> {
-  await pool.query(
+  await getPool().query(
     `
       UPDATE memory_nodes
       SET deleted_at = now(),
@@ -84,7 +152,7 @@ export async function softDeleteMemoryNode(id: string, deletedBy?: string): Prom
 }
 
 export async function insertArtifact(nodeId: string | null, artifact: ArtifactInput): Promise<string> {
-  const { rows } = await pool.query(
+  const { rows } = await getPool().query<{ id: string }>(
     `
       INSERT INTO artifacts (
         memory_node_id,
@@ -114,54 +182,139 @@ export async function insertArtifact(nodeId: string | null, artifact: ArtifactIn
   return rows[0]?.id;
 }
 
+export async function getArtifactById(id: string): Promise<ArtifactRecord | null> {
+  const { rows } = await getPool().query<ArtifactRecord>(`SELECT * FROM artifacts WHERE id = $1`, [id]);
+  return rows[0] ? hydrateArtifact(rows[0]) : null;
+}
+
+export async function getArtifactsByNodeId(nodeId: string): Promise<ArtifactRecord[]> {
+  const { rows } = await getPool().query<ArtifactRecord>(
+    `
+      SELECT *
+      FROM artifacts
+      WHERE memory_node_id = $1
+      ORDER BY created_at DESC
+    `,
+    [nodeId]
+  );
+  return rows.map(hydrateArtifact);
+}
+
+export async function getArtifactsForNodes(nodeIds: string[]): Promise<Map<string, ArtifactRecord[]>> {
+  const result = new Map<string, ArtifactRecord[]>();
+  if (!nodeIds.length) return result;
+  const placeholders = nodeIds.map((_, idx) => `$${idx + 1}`).join(', ');
+  const { rows } = await getPool().query<ArtifactRecord>(
+    `
+      SELECT *
+      FROM artifacts
+      WHERE memory_node_id IN (${placeholders})
+    `,
+    nodeIds
+  );
+  for (const raw of rows) {
+    if (!raw.memory_node_id) continue;
+    const row = hydrateArtifact(raw);
+    const existing = result.get(row.memory_node_id) ?? [];
+    existing.push(row);
+    result.set(row.memory_node_id, existing);
+  }
+  return result;
+}
+
 interface AuditEventInput {
   eventType: string;
   memoryNodeId?: string | null;
   artifactId?: string | null;
   payload: Record<string, unknown>;
-  manifestSignatureId?: string;
-  prevHash?: string;
-  signature?: string;
+  manifestSignatureId?: string | null;
+  callerPrevHash?: string | null;
 }
 
-export async function insertAuditEvent(input: AuditEventInput): Promise<string> {
-  const payloadStr = JSON.stringify(input.payload ?? {});
-  const hash = crypto.createHash('sha256').update(payloadStr).digest('hex');
-  const { rows } = await pool.query<{ id: string }>(
-    `
-      INSERT INTO audit_events (
-        event_type,
-        memory_node_id,
-        artifact_id,
-        payload,
-        hash,
-        prev_hash,
-        signature,
-        manifest_signature_id
-      )
-      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)
-      RETURNING id
-    `,
-    [
-      input.eventType,
-      input.memoryNodeId ?? null,
-      input.artifactId ?? null,
-      payloadStr,
-      hash,
-      input.prevHash ?? null,
-      input.signature ?? null,
-      input.manifestSignatureId ?? null
-    ]
-  );
+export async function insertAuditEvent(input: AuditEventInput): Promise<AuditEventRecord> {
+  return withClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const prevRes = await client.query<{ hash: string }>(
+        `SELECT hash FROM audit_events ORDER BY created_at DESC LIMIT 1 FOR UPDATE`
+      );
+      const prevHash = prevRes.rows[0]?.hash ?? null;
+      const payload = {
+        ...input.payload,
+        callerPrevHash: input.callerPrevHash ?? null
+      };
+      const canonical = canonicalizePayload(payload);
+      const digest = computeAuditDigest(canonical, prevHash);
+      const signature = signAuditDigest(digest);
+      const insertRes = await client.query<AuditEventRecord>(
+        `
+          INSERT INTO audit_events (
+            event_type,
+            memory_node_id,
+            artifact_id,
+            payload,
+            hash,
+            prev_hash,
+            signature,
+            manifest_signature_id
+          )
+          VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)
+          RETURNING id, hash, prev_hash, signature, manifest_signature_id, payload, created_at
+        `,
+        [
+          input.eventType,
+          input.memoryNodeId ?? null,
+          input.artifactId ?? null,
+          payload,
+          digest,
+          prevHash,
+          signature,
+          input.manifestSignatureId ?? null
+        ]
+      );
+      await client.query('COMMIT');
+      return insertRes.rows[0];
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    }
+  });
+}
 
-  return rows[0]?.id;
+export async function getLatestAuditForMemoryNode(nodeId: string): Promise<AuditEventRecord | null> {
+  const { rows } = await getPool().query<AuditEventRecord>(
+    `
+      SELECT id, hash, prev_hash, signature, manifest_signature_id, payload, created_at
+      FROM audit_events
+      WHERE memory_node_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [nodeId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function getLatestAuditForArtifact(artifactId: string): Promise<AuditEventRecord | null> {
+  const { rows } = await getPool().query<AuditEventRecord>(
+    `
+      SELECT id, hash, prev_hash, signature, manifest_signature_id, payload, created_at
+      FROM audit_events
+      WHERE artifact_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [artifactId]
+  );
+  return rows[0] ?? null;
 }
 
 export async function findMemoryNodesByIds(ids: string[]): Promise<MemoryNodeRecord[]> {
   if (!ids.length) return [];
-  const { rows } = await pool.query<MemoryNodeRecord>(
-    `SELECT * FROM memory_nodes WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
-    [ids]
+  const placeholders = ids.map((_, idx) => `$${idx + 1}`).join(', ');
+  const { rows } = await getPool().query<MemoryNodeRecord>(
+    `SELECT * FROM memory_nodes WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+    ids
   );
-  return rows;
+  return rows.map(hydrateMemoryNode);
 }

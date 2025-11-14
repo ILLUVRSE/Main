@@ -26,12 +26,12 @@ func New(baseURL string) *Client {
 }
 
 type requestPayload struct {
-	PromotionID uuid.UUID `json:"promotionId"`
-	AgentID     string    `json:"agentId"`
-	Pool        string    `json:"pool"`
-	Delta       int       `json:"delta"`
-	Reason      string    `json:"reason"`
-	RequestedBy string    `json:"requestedBy"`
+	PromotionID *uuid.UUID `json:"promotionId,omitempty"`
+	AgentID     string     `json:"agentId"`
+	Pool        string     `json:"pool"`
+	Delta       int        `json:"delta"`
+	Reason      string     `json:"reason"`
+	RequestedBy string     `json:"requestedBy"`
 }
 
 type responsePayload struct {

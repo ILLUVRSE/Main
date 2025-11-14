@@ -151,7 +151,7 @@ func (s *Server) handleCreateEdge(w http.ResponseWriter, r *http.Request) {
 		Metadata: req.Metadata,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "foreign key constraint") {
+		if errors.Is(err, store.ErrNotFound) || strings.Contains(err.Error(), "foreign key constraint") {
 			respondError(w, http.StatusNotFound, "REASONING_GRAPH_NOT_FOUND", "from or to node does not exist")
 			return
 		}

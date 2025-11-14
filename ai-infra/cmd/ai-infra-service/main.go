@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/ILLUVRSE/Main/ai-infra/internal/config"
 	"github.com/ILLUVRSE/Main/ai-infra/internal/httpserver"
+	"github.com/ILLUVRSE/Main/ai-infra/internal/runner"
 	"github.com/ILLUVRSE/Main/ai-infra/internal/sentinel"
 	"github.com/ILLUVRSE/Main/ai-infra/internal/service"
 	"github.com/ILLUVRSE/Main/ai-infra/internal/signing"
@@ -21,6 +24,9 @@ import (
 )
 
 func main() {
+	runRunner := flag.Bool("run-runner", false, "start the local training runner")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config load: %v", err)
@@ -37,19 +43,37 @@ func main() {
 		log.Fatalf("db ping: %v", err)
 	}
 
-	store := store.NewPGStore(db)
-	signer, err := signing.NewEd25519SignerFromB64(cfg.SignerKeyB64, cfg.SignerID)
+	st := store.NewPGStore(db)
+	signer, err := signing.NewSignerFromConfig(cfg)
 	if err != nil {
 		log.Fatalf("signer init: %v", err)
 	}
-	sentinelClient := sentinel.NewStaticClient(cfg.SentinelMinScore)
+	var sentinelClient sentinel.Client = sentinel.NewStaticClient(cfg.SentinelMinScore)
+	if cfg.SentinelURL != "" {
+		httpClient, err := sentinel.NewHTTPClient(sentinel.HTTPClientConfig{
+			BaseURL: cfg.SentinelURL,
+			Timeout: 5 * time.Second,
+			Retries: 2,
+		})
+		if err != nil {
+			log.Fatalf("sentinel client init: %v", err)
+		}
+		sentinelClient = httpClient
+	}
 
-	svc := service.New(store, sentinelClient, signer)
-	server := httpserver.New(cfg, svc, store)
+	svc := service.New(st, sentinelClient, signer)
+	server := httpserver.New(cfg, svc, st)
 
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
 		Handler: server.Router(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if shouldRunRunner(*runRunner) {
+		log.Printf("starting training runner")
+		go runner.RunWorker(ctx, svc, st, runner.Config{})
 	}
 
 	go func() {
@@ -59,17 +83,29 @@ func main() {
 		}
 	}()
 
-	waitForShutdown(httpServer)
+	waitForShutdown(cancel, httpServer)
 }
 
-func waitForShutdown(srv *http.Server) {
+func waitForShutdown(cancel context.CancelFunc, srv *http.Server) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	cancel()
+	ctx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("graceful shutdown failed: %v", err)
 	}
+}
+
+func shouldRunRunner(flagValue bool) bool {
+	if flagValue {
+		return true
+	}
+	if v := os.Getenv("AI_INFRA_RUNNER"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		return err == nil && enabled
+	}
+	return false
 }

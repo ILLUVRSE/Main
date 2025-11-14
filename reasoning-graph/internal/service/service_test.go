@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -8,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	mathrand "math/rand"
 	"testing"
 	"time"
 
@@ -15,21 +17,21 @@ import (
 
 	"github.com/ILLUVRSE/Main/reasoning-graph/internal/models"
 	"github.com/ILLUVRSE/Main/reasoning-graph/internal/signing"
-	"github.com/ILLUVRSE/Main/reasoning-graph/internal/store"
+	"github.com/ILLUVRSE/Main/reasoning-graph/internal/testutil"
 )
 
 func TestComputeTraceAncestors(t *testing.T) {
-	mem := newMemoryStore()
+	mem := testutil.NewMemoryStore()
 	a := fakeNode("observation")
 	b := fakeNode("recommendation")
 	c := fakeNode("decision")
 
-	mem.nodes[a.ID] = a
-	mem.nodes[b.ID] = b
-	mem.nodes[c.ID] = c
+	mem.AddNode(a)
+	mem.AddNode(b)
+	mem.AddNode(c)
 
-	mem.link(a.ID, b.ID)
-	mem.link(b.ID, c.ID)
+	mem.Link(a.ID, b.ID, "causal")
+	mem.Link(b.ID, c.ID, "causal")
 
 	svc := New(mem, noopSigner{}, Config{MaxTraceDepth: 5, SnapshotDepth: 2, MaxSnapshotRoots: 4})
 
@@ -54,13 +56,45 @@ func TestComputeTraceAncestors(t *testing.T) {
 	}
 }
 
+func TestComputeTraceDetectsCycle(t *testing.T) {
+	mem := testutil.NewMemoryStore()
+	a := fakeNode("score")
+	b := fakeNode("recommendation")
+	c := fakeNode("decision")
+
+	mem.AddNode(a)
+	mem.AddNode(b)
+	mem.AddNode(c)
+
+	mem.Link(a.ID, b.ID, "supports")
+	mem.Link(b.ID, c.ID, "causal")
+	mem.Link(c.ID, a.ID, "influencedBy") // creates cycle
+
+	svc := New(mem, noopSigner{}, Config{MaxTraceDepth: 5, SnapshotDepth: 2, MaxSnapshotRoots: 4})
+	trace, err := svc.ComputeTrace(context.Background(), c.ID, models.TraceDirectionAncestors, 5)
+	if err != nil {
+		t.Fatalf("ComputeTrace returned error: %v", err)
+	}
+
+	foundCycle := false
+	for _, step := range trace.Steps {
+		if step.Node.ID == a.ID && step.CycleDetected {
+			foundCycle = true
+			break
+		}
+	}
+	if !foundCycle {
+		t.Fatalf("expected cycle detection flag for node %s", a.ID)
+	}
+}
+
 func TestCreateSnapshotHashesAndSigns(t *testing.T) {
-	mem := newMemoryStore()
+	mem := testutil.NewMemoryStore()
 	root := fakeNode("decision")
 	child := fakeNode("action")
-	mem.nodes[root.ID] = root
-	mem.nodes[child.ID] = child
-	mem.link(root.ID, child.ID)
+	mem.AddNode(root)
+	mem.AddNode(child)
+	mem.Link(root.ID, child.ID, "causal")
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -111,79 +145,47 @@ func TestCreateSnapshotHashesAndSigns(t *testing.T) {
 	}
 }
 
-// --- test helpers ---
-
-type memoryStore struct {
-	nodes     map[uuid.UUID]models.ReasonNode
-	incoming  map[uuid.UUID][]models.ReasonEdge
-	outgoing  map[uuid.UUID][]models.ReasonEdge
-	snapshots []models.ReasonSnapshot
-}
-
-func newMemoryStore() *memoryStore {
-	return &memoryStore{
-		nodes:    map[uuid.UUID]models.ReasonNode{},
-		incoming: map[uuid.UUID][]models.ReasonEdge{},
-		outgoing: map[uuid.UUID][]models.ReasonEdge{},
+func TestCanonicalizeSnapshotDeterministic(t *testing.T) {
+	nodes := []models.ReasonNode{
+		fakeNodeWithID("observation", uuid.MustParse("11111111-1111-1111-1111-111111111111")),
+		fakeNodeWithID("recommendation", uuid.MustParse("22222222-2222-2222-2222-222222222222")),
+		fakeNodeWithID("decision", uuid.MustParse("33333333-3333-3333-3333-333333333333")),
 	}
-}
-
-func (m *memoryStore) CreateNode(ctx context.Context, in store.NodeInput) (models.ReasonNode, error) {
-	return models.ReasonNode{}, nil
-}
-
-func (m *memoryStore) GetNode(ctx context.Context, id uuid.UUID) (models.ReasonNode, error) {
-	node, ok := m.nodes[id]
-	if !ok {
-		return models.ReasonNode{}, store.ErrNotFound
+	edges := []models.ReasonEdge{
+		fakeEdge(nodes[0].ID, nodes[1].ID, uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
+		fakeEdge(nodes[1].ID, nodes[2].ID, uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")),
 	}
-	return node, nil
-}
 
-func (m *memoryStore) CreateEdge(ctx context.Context, in store.EdgeInput) (models.ReasonEdge, error) {
-	return models.ReasonEdge{}, nil
-}
+	var baseline []byte
+	rng := mathrand.New(mathrand.NewSource(42))
+	for i := 0; i < 5; i++ {
+		rng.Shuffle(len(nodes), func(i, j int) {
+			nodes[i], nodes[j] = nodes[j], nodes[i]
+		})
+		rng.Shuffle(len(edges), func(i, j int) {
+			edges[i], edges[j] = edges[j], edges[i]
+		})
+		nodeMap := make(map[uuid.UUID]models.ReasonNode, len(nodes))
+		for _, n := range nodes {
+			nodeMap[n.ID] = n
+		}
+		edgeMap := make(map[uuid.UUID]models.ReasonEdge, len(edges))
+		for _, e := range edges {
+			edgeMap[e.ID] = e
+		}
 
-func (m *memoryStore) ListEdgesFrom(ctx context.Context, nodeID uuid.UUID) ([]models.ReasonEdge, error) {
-	return append([]models.ReasonEdge(nil), m.outgoing[nodeID]...), nil
-}
-
-func (m *memoryStore) ListEdgesTo(ctx context.Context, nodeID uuid.UUID) ([]models.ReasonEdge, error) {
-	return append([]models.ReasonEdge(nil), m.incoming[nodeID]...), nil
-}
-
-func (m *memoryStore) CreateSnapshot(ctx context.Context, in store.SnapshotInput) (models.ReasonSnapshot, error) {
-	snap := models.ReasonSnapshot{
-		ID:          uuid.New(),
-		RootNodeIDs: in.RootNodeIDs,
-		Description: in.Description,
-		Hash:        in.Hash,
-		Signature:   in.Signature,
-		SignerID:    in.SignerID,
-		Snapshot:    in.Snapshot,
-		CreatedAt:   time.Now().UTC(),
+		data, err := canonicalizeSnapshot(nodeMap, edgeMap)
+		if err != nil {
+			t.Fatalf("canonicalize snapshot: %v", err)
+		}
+		if i == 0 {
+			baseline = data
+			continue
+		}
+		if !bytes.Equal(baseline, data) {
+			t.Fatalf("canonicalization is not deterministic")
+		}
 	}
-	m.snapshots = append(m.snapshots, snap)
-	return snap, nil
-}
-
-func (m *memoryStore) GetSnapshot(ctx context.Context, id uuid.UUID) (models.ReasonSnapshot, error) {
-	return models.ReasonSnapshot{}, store.ErrNotFound
-}
-
-func (m *memoryStore) Ping(ctx context.Context) error { return nil }
-
-func (m *memoryStore) link(from, to uuid.UUID) {
-	edge := models.ReasonEdge{
-		ID:        uuid.New(),
-		From:      from,
-		To:        to,
-		Type:      "causal",
-		CreatedAt: time.Now().UTC(),
-		Metadata:  json.RawMessage(`{}`),
-	}
-	m.outgoing[from] = append(m.outgoing[from], edge)
-	m.incoming[to] = append(m.incoming[to], edge)
 }
 
 type noopSigner struct{}
@@ -202,6 +204,28 @@ func fakeNode(nodeType string) models.ReasonNode {
 		Type:      nodeType,
 		Payload:   json.RawMessage(`{}`),
 		Author:    "tester",
+		Metadata:  json.RawMessage(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+}
+
+func fakeNodeWithID(nodeType string, id uuid.UUID) models.ReasonNode {
+	return models.ReasonNode{
+		ID:        id,
+		Type:      nodeType,
+		Payload:   json.RawMessage(`{}`),
+		Author:    "tester",
+		Metadata:  json.RawMessage(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+}
+
+func fakeEdge(from, to uuid.UUID, id uuid.UUID) models.ReasonEdge {
+	return models.ReasonEdge{
+		ID:        id,
+		From:      from,
+		To:        to,
+		Type:      "causal",
 		Metadata:  json.RawMessage(`{}`),
 		CreatedAt: time.Now().UTC(),
 	}

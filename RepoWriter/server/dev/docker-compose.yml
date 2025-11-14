@@ -1,0 +1,20 @@
+version: '3.8'
+services:
+  agent-manager:
+    image: agent-manager:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '3000:3000'
+    depends_on:
+      - db
+      - redis
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: agent_db
+  redis:
+    image: redis:latest

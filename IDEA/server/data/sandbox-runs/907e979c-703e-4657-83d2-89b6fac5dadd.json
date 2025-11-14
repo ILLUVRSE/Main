@@ -1,0 +1,19 @@
+{
+  "run_id": "907e979c-703e-4657-83d2-89b6fac5dadd",
+  "agent_id": "e69a2758-d69b-4e60-82b4-75a2c11bfb57",
+  "bundle": {
+    "artifact_id": "d1c82640-a2e6-4a50-b304-e7dfa05e2ae8",
+    "artifact_url": "file:///home/ryanlueckenotte/IDEA/server/data/artifacts/files/d1c82640-a2e6-4a50-b304-e7dfa05e2ae8.tgz",
+    "sha256": "0c7c51c9290532728859e7210d0f1cf6e53ca1bdcd0a17bdbb988e870690243e"
+  },
+  "tests": [
+    {
+      "name": "smoke",
+      "cmd": "echo hello; echo PASS"
+    }
+  ],
+  "status": "passed",
+  "logs": "\n>> RUN: echo hello; echo PASS\nhello\nPASS\n",
+  "created_at": "2025-11-08T16:00:39.293Z",
+  "finished_at": "2025-11-08T16:00:39.336Z"
+}

@@ -1,0 +1,36 @@
+// RepoWriter/web/src/components/LeftRail.tsx
+import React from "react";
+import LeftTaskBoard from "./LeftTaskBoard.tsx";
+import ContextSelector from "./ContextSelector.tsx";
+
+/**
+ * Thin wrapper for the left rail.
+ * Uses the existing LeftTaskBoard (local task board) and ContextSelector.
+ * Keeps props minimal so it's safe to drop into the new Layout.
+ */
+export default function LeftRail() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        padding: 8,
+        height: "100%",
+        boxSizing: "border-box",
+      }}
+    >
+      <div style={{ flex: "0 0 auto" }}>
+        {/* Local task board component (keeps task UX compact) */}
+        <LeftTaskBoard />
+      </div>
+
+      <div style={{ marginTop: 8, flex: "1 1 auto", overflow: "auto" }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Repository Context</div>
+        {/* We pass a no-op onChange so this wrapper doesn't need app state */}
+        <ContextSelector initialSelected={[]} onChange={() => {}} />
+      </div>
+    </div>
+  );
+}
+

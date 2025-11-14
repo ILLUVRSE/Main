@@ -1,0 +1,181 @@
+"use strict";
+/**
+ * kernel/src/models.ts
+ *
+ * DB ↔ API mapping helpers for Kernel models.
+ * - Convert Postgres rows (snake_case) into camelCase API types.
+ * - Provide lightweight helpers to prepare values for DB INSERT/UPDATE.
+ *
+ * Keep these mapping functions small and deterministic so tests can validate transformations.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.dbRowToDivisionManifest = dbRowToDivisionManifest;
+exports.dbRowToAgentProfile = dbRowToAgentProfile;
+exports.dbRowToEvalReport = dbRowToEvalReport;
+exports.dbRowToMemoryNode = dbRowToMemoryNode;
+exports.memoryNodeToDbRow = memoryNodeToDbRow;
+exports.dbRowToManifestSignature = dbRowToManifestSignature;
+exports.dbRowToAuditEvent = dbRowToAuditEvent;
+exports.dbRowToResourceAllocation = dbRowToResourceAllocation;
+exports.divisionManifestToDbRow = divisionManifestToDbRow;
+/** Utility: convert Postgres timestamp (Date|string) to ISO string or undefined */
+function toIso(ts) {
+    if (!ts)
+        return undefined;
+    const d = ts instanceof Date ? ts : new Date(ts);
+    return isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+/** Division: DB row -> DivisionManifest (camelCase) */
+function dbRowToDivisionManifest(row) {
+    if (!row)
+        return row;
+    return {
+        id: String(row.id),
+        name: row.name ?? undefined,
+        goals: row.goals ?? undefined,
+        budget: row.budget != null ? Number(row.budget) : undefined,
+        currency: row.currency ?? undefined,
+        kpis: row.kpis ?? undefined,
+        policies: row.policies ?? undefined,
+        metadata: row.metadata ?? undefined,
+        status: row.status ?? undefined,
+        version: row.version ?? undefined,
+        createdAt: toIso(row.created_at),
+        updatedAt: toIso(row.updated_at),
+        manifestSignatureId: row.manifest_signature_id ?? undefined,
+    };
+}
+/** Agent: DB row -> AgentProfile */
+function dbRowToAgentProfile(row) {
+    if (!row)
+        return row;
+    return {
+        id: String(row.id),
+        templateId: row.template_id ?? undefined,
+        role: row.role ?? undefined,
+        skills: row.skills ?? undefined,
+        codeRef: row.code_ref ?? undefined,
+        divisionId: row.division_id ?? undefined,
+        state: row.state ?? undefined,
+        score: row.score != null ? Number(row.score) : undefined,
+        resourceAllocation: row.resource_allocation ?? undefined,
+        lastHeartbeat: toIso(row.last_heartbeat),
+        owner: row.owner ?? undefined,
+        createdAt: toIso(row.created_at),
+        updatedAt: toIso(row.updated_at),
+    };
+}
+/** Eval report: DB row -> EvalReport */
+function dbRowToEvalReport(row) {
+    if (!row)
+        return row;
+    return {
+        id: String(row.id),
+        agentId: row.agent_id,
+        metricSet: row.metric_set ?? {},
+        timestamp: toIso(row.timestamp),
+        source: row.source ?? undefined,
+        computedScore: row.computed_score != null ? Number(row.computed_score) : undefined,
+        window: row.window ?? undefined,
+    };
+}
+/** Memory node: DB row -> MemoryNode */
+function dbRowToMemoryNode(row) {
+    if (!row)
+        return row;
+    return {
+        id: String(row.id),
+        text: row.text ?? undefined,
+        embeddingId: row.embedding_id ?? undefined,
+        metadata: row.metadata ?? undefined,
+        createdAt: toIso(row.created_at),
+        ttl: toIso(row.ttl),
+    };
+}
+/** Memory node: MemoryNode -> DB values */
+function memoryNodeToDbRow(node) {
+    return [
+        node.id ?? null,
+        node.text ?? null,
+        node.embeddingId ?? null,
+        node.metadata ?? {},
+        node.ttl ?? null,
+    ];
+}
+/** ManifestSignature: DB row -> ManifestSignature */
+function dbRowToManifestSignature(row) {
+    if (!row)
+        return row;
+    return {
+        id: String(row.id),
+        manifestId: row.manifest_id ?? undefined,
+        signerId: row.signer_id ?? undefined,
+        signature: row.signature ?? undefined,
+        version: row.version ?? undefined,
+        ts: toIso(row.ts),
+        prevHash: row.prev_hash ?? undefined,
+    };
+}
+/** AuditEvent: DB row -> AuditEvent */
+function dbRowToAuditEvent(row) {
+    if (!row)
+        return row;
+    return {
+        id: String(row.id),
+        eventType: row.event_type,
+        payload: row.payload ?? {},
+        prevHash: row.prev_hash ?? undefined,
+        hash: row.hash ?? undefined,
+        signature: row.signature ?? undefined,
+        signerId: row.signer_id ?? undefined,
+        ts: toIso(row.ts),
+    };
+}
+/** ResourceAllocation: DB row -> ResourceAllocation */
+function dbRowToResourceAllocation(row) {
+    if (!row)
+        return row;
+    return {
+        id: String(row.id),
+        entityId: row.entity_id,
+        pool: row.pool ?? undefined,
+        delta: row.delta != null ? Number(row.delta) : undefined,
+        reason: row.reason ?? undefined,
+        requestedBy: row.requested_by ?? undefined,
+        status: row.status ?? undefined,
+        ts: toIso(row.ts),
+    };
+}
+/**
+ * Prepare a DivisionManifest for DB upsert: returns tuple of values in appropriate order.
+ * Used by server handlers to avoid repeating mapping logic.
+ *
+ * Order: id, name, goals, budget, currency, kpis, policies, metadata, status, version, manifest_signature_id
+ */
+function divisionManifestToDbRow(m) {
+    return [
+        m.id,
+        m.name ?? null,
+        m.goals ?? [],
+        m.budget ?? 0,
+        m.currency ?? 'USD',
+        m.kpis ?? [],
+        m.policies ?? [],
+        m.metadata ?? {},
+        m.status ?? 'active',
+        m.version ?? '1.0.0',
+        m.manifestSignatureId ?? null,
+    ];
+}
+/**
+ * Acceptance criteria (short, testable):
+ *
+ * - Each dbRowTo* function maps snake_case DB rows to camelCase API types consistently.
+ *   Test: Create a mock DB row for each table and assert mapping output matches expected API shape.
+ *
+ * - divisionManifestToDbRow produces values in exact order expected by server upsert SQL.
+ *   Test: Call divisionManifestToDbRow(manifest) and use returned array as parameters for the divisions upsert; SQL should succeed.
+ *
+ * - toIso returns undefined for null/invalid values and ISO string for valid timestamps.
+ *   Test: pass Date, ISO string, and null and assert outputs.
+ */

@@ -1,186 +1,151 @@
 /**
  * memory-layer/service/audit/kmsAdapter.ts
  *
- * Lightweight KMS/HSM adapter for audit signing and verification.
+ * KMS adapter for audit signing and verification using AWS SDK v3.
  *
  * Exports:
  *  - signAuditCanonical(canonical: string): Promise<{ kid, alg, signature }>
  *  - signAuditHash(digestBuf: Buffer): Promise<{ kid, alg, signature }>
  *  - verifySignature(signatureBase64: string, digestBuf: Buffer): Promise<boolean>
  *
- * Environment variables:
- *  - AUDIT_SIGNING_KMS_KEY_ID   (required for signing/verification)
- *  - AUDIT_SIGNING_ALG          (optional, defaults to "hmac-sha256")
- *  - AWS_REGION / AWS_DEFAULT_REGION (optional, default us-east-1)
+ * Behavior & notes:
+ *  - Prefers digest-path signing for audit (caller computes SHA-256 digest and passes it).
+ *  - Supports HMAC (HMAC_SHA_256 via GenerateMac/VerifyMac), RSA (RSASSA_PKCS1_V1_5_SHA_256),
+ *    and ED25519 (if supported by the KMS account/region).
+ *  - Uses small runtime mapping helpers (kmsAdapter.types) so we avoid scattered string literals.
+ *  - Throws helpful errors on misconfiguration (missing AUDIT_SIGNING_KMS_KEY_ID).
  *
- * Notes:
- *  - Uses AWS KMS v3 client (@aws-sdk/client-kms).
- *  - Supports: HMAC (HMAC_SHA_256), RSA (RSASSA_PKCS1_V1_5_SHA_256), ED25519.
- *  - For HMAC: GenerateMac / VerifyMac are used.
- *  - For RSA: Sign with MessageType='DIGEST' for digest-path; Verify uses VerifyCommand.
+ * Environment variables:
+ *  - AUDIT_SIGNING_KMS_KEY_ID  (required when using KMS signing)
+ *  - AUDIT_SIGNING_ALG         (optional; defaults to "hmac-sha256")
+ *  - AWS_REGION / AWS_DEFAULT_REGION
  */
 
 import { KMSClient, SignCommand, GenerateMacCommand, VerifyCommand, VerifyMacCommand } from '@aws-sdk/client-kms';
+import { normalizeAlg, kmsParamsForAlg, KMS_ALGS, KMS_MESSAGE_TYPES } from './kmsAdapter.types';
+import { Buffer } from 'buffer';
 
 const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
-const client = new KMSClient({ region });
+
+/**
+ * Lazily created KMS client
+ */
+let kmsClient: KMSClient | null = null;
+function getKmsClient(): KMSClient {
+  if (!kmsClient) kmsClient = new KMSClient({ region });
+  return kmsClient;
+}
 
 function getKeyId(): string {
-  const keyId = process.env.AUDIT_SIGNING_KMS_KEY_ID;
+  const keyId = process.env.AUDIT_SIGNING_KMS_KEY_ID || process.env.AUDIT_SIGNING_KMS_KEY;
   if (!keyId) {
-    throw new Error('AUDIT_SIGNING_KMS_KEY_ID is not set (required for KMS signing)');
+    throw new Error('AUDIT_SIGNING_KMS_KEY_ID (or AUDIT_SIGNING_KMS_KEY) is required for KMS signing');
   }
   return keyId;
 }
 
-function getAlg(): string {
-  return (process.env.AUDIT_SIGNING_ALG || 'hmac-sha256').toLowerCase();
+function getNormalizedAlg(): 'hmac-sha256' | 'rsa-sha256' | 'ed25519' {
+  const env = process.env.AUDIT_SIGNING_ALG ?? 'hmac-sha256';
+  return normalizeAlg(env);
 }
 
 /**
- * Sign canonical payload (message path).
- * This mirrors a "message signing" semantics where KMS will hash internally when required.
+ * Sign canonical: convenience wrapper that hashes canonical payload and signs the digest.
  */
 export async function signAuditCanonical(canonical: string): Promise<{ kid: string; alg: string; signature: string }> {
-  const keyId = getKeyId();
-  const alg = getAlg();
-  const msgBuf = Buffer.from(canonical);
-
-  if (alg === 'hmac-sha256' || alg === 'hmac') {
-    const cmd = new GenerateMacCommand({
-      KeyId: keyId,
-      Message: msgBuf,
-      MacAlgorithm: 'HMAC_SHA_256'
-    });
-    const resp = await client.send(cmd);
-    if (!resp || !resp.Mac) throw new Error('KMS GenerateMac returned no Mac');
-    return { kid: keyId, alg: 'hmac-sha256', signature: Buffer.from(resp.Mac).toString('base64') };
-  }
-
-  if (alg === 'rsa-sha256' || alg === 'rsa') {
-    const cmd = new SignCommand({
-      KeyId: keyId,
-      Message: msgBuf,
-      SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256'
-      // MessageType omitted => KMS will hash the message internally
-    });
-    const resp = await client.send(cmd);
-    if (!resp || !resp.Signature) throw new Error('KMS Sign returned no Signature');
-    return { kid: keyId, alg: 'rsa-sha256', signature: Buffer.from(resp.Signature).toString('base64') };
-  }
-
-  if (alg === 'ed25519' || alg === 'ed25519-sha') {
-    const cmd = new SignCommand({
-      KeyId: keyId,
-      Message: msgBuf,
-      SigningAlgorithm: 'ED25519' as any
-    });
-    const resp = await client.send(cmd);
-    if (!resp || !resp.Signature) throw new Error('KMS Sign returned no Signature');
-    return { kid: keyId, alg: 'ed25519', signature: Buffer.from(resp.Signature).toString('base64') };
-  }
-
-  throw new Error(`Unsupported AUDIT_SIGNING_ALG for KMS adapter: ${alg}`);
+  if (canonical === null || canonical === undefined) throw new Error('canonical required');
+  const digest = Buffer.from(require('crypto').createHash('sha256').update(Buffer.from(canonical, 'utf8')).digest());
+  return signAuditHash(digest);
 }
 
 /**
- * Sign precomputed 32-byte SHA-256 digest (digest path).
- * This is the preferred path for audit digest signing (no additional hashing).
+ * Sign precomputed digest buffer (32-byte SHA-256 digest).
  */
 export async function signAuditHash(digestBuf: Buffer): Promise<{ kid: string; alg: string; signature: string }> {
   if (!Buffer.isBuffer(digestBuf)) throw new Error('digestBuf must be a Buffer');
   const keyId = getKeyId();
-  const alg = getAlg();
+  const alg = getNormalizedAlg();
 
-  if (alg === 'hmac-sha256' || alg === 'hmac') {
+  const client = getKmsClient();
+
+  if (alg === 'hmac-sha256') {
+    // HMAC path
+    const macAlg = kmsParamsForAlg(alg).macAlgorithm ?? KMS_ALGS.HMAC_SHA_256;
     const cmd = new GenerateMacCommand({
       KeyId: keyId,
       Message: digestBuf,
-      MacAlgorithm: 'HMAC_SHA_256'
+      MacAlgorithm: macAlg
     });
     const resp = await client.send(cmd);
     if (!resp || !resp.Mac) throw new Error('KMS GenerateMac returned no Mac');
     return { kid: keyId, alg: 'hmac-sha256', signature: Buffer.from(resp.Mac).toString('base64') };
   }
 
-  if (alg === 'rsa-sha256' || alg === 'rsa') {
-    // Use digest semantics so KMS does not re-hash
+  if (alg === 'rsa-sha256') {
+    // RSA digest semantics: MessageType = 'DIGEST'
+    const signingAlg = kmsParamsForAlg(alg).signingAlgorithm ?? KMS_ALGS.RSASSA_PKCS1_V1_5_SHA_256;
     const cmd = new SignCommand({
       KeyId: keyId,
       Message: digestBuf,
-      SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256',
-      MessageType: 'DIGEST'
-    } as any); // MessageType is supported by KMS but typings might differ
+      SigningAlgorithm: signingAlg,
+      MessageType: KMS_MESSAGE_TYPES.DIGEST as any
+    } as any);
     const resp = await client.send(cmd);
     if (!resp || !resp.Signature) throw new Error('KMS Sign returned no Signature');
     return { kid: keyId, alg: 'rsa-sha256', signature: Buffer.from(resp.Signature).toString('base64') };
   }
 
-  if (alg === 'ed25519' || alg === 'ed25519-sha') {
-    // ED25519 signs arbitrary bytes; pass digest buffer directly.
+  if (alg === 'ed25519') {
+    const signingAlg = kmsParamsForAlg(alg).signingAlgorithm ?? KMS_ALGS.ED25519;
+    // ED25519 expects bytes; we pass digestBuf (32 bytes) - acceptable as "message"
     const cmd = new SignCommand({
       KeyId: keyId,
       Message: digestBuf,
-      SigningAlgorithm: 'ED25519' as any
-      // MessageType left unset: KMS will sign the provided bytes
-    });
+      SigningAlgorithm: signingAlg
+    } as any);
     const resp = await client.send(cmd);
     if (!resp || !resp.Signature) throw new Error('KMS Sign returned no Signature');
     return { kid: keyId, alg: 'ed25519', signature: Buffer.from(resp.Signature).toString('base64') };
   }
 
-  throw new Error(`Unsupported AUDIT_SIGNING_ALG for KMS adapter (digest path): ${alg}`);
+  throw new Error(`Unsupported AUDIT_SIGNING_ALG: ${alg}`);
 }
 
 /**
- * Verify a signature over a precomputed digest (digestBuf).
- * For HMAC: uses VerifyMacCommand.
- * For RSA/ED25519: uses VerifyCommand with MessageType='DIGEST' where applicable.
+ * Verify a signature (base64) against a precomputed digest buffer.
  */
 export async function verifySignature(signatureBase64: string, digestBuf: Buffer): Promise<boolean> {
+  if (!signatureBase64) throw new Error('signatureBase64 is required');
   if (!Buffer.isBuffer(digestBuf)) throw new Error('digestBuf must be a Buffer');
-  const keyId = getKeyId();
-  const alg = getAlg();
-  const signatureBuf = Buffer.from(signatureBase64, 'base64');
 
-  if (alg === 'hmac-sha256' || alg === 'hmac') {
+  const keyId = getKeyId();
+  const alg = getNormalizedAlg();
+  const client = getKmsClient();
+  const sigBuf = Buffer.from(signatureBase64, 'base64');
+
+  if (alg === 'hmac-sha256') {
+    const macAlg = kmsParamsForAlg(alg).macAlgorithm ?? KMS_ALGS.HMAC_SHA_256;
     const cmd = new VerifyMacCommand({
       KeyId: keyId,
       Message: digestBuf,
-      Mac: signatureBuf,
-      MacAlgorithm: 'HMAC_SHA_256'
+      Mac: sigBuf,
+      MacAlgorithm: macAlg
     } as any);
     const resp = await client.send(cmd);
-    // VerifyMacCommand returns { MacValid: boolean } on success
-    // but different SDK versions may return `MacValid` or `MacValid` under a different name; handle generically
-    // (Type assertion used because @aws-sdk types can vary)
+    // VerifyMac returns MacValid in some SDK versions
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const anyResp: any = resp;
     return Boolean(anyResp?.MacValid);
   }
 
-  if (alg === 'rsa-sha256' || alg === 'rsa') {
+  if (alg === 'rsa-sha256') {
+    const signingAlg = kmsParamsForAlg(alg).signingAlgorithm ?? KMS_ALGS.RSASSA_PKCS1_V1_5_SHA_256;
     const cmd = new VerifyCommand({
       KeyId: keyId,
       Message: digestBuf,
-      Signature: signatureBuf,
-      SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256',
-      MessageType: 'DIGEST'
-    } as any);
-    const resp = await client.send(cmd);
-    // VerifyCommand returns { SignatureValid: boolean }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const anyResp: any = resp;
-    return Boolean(anyResp?.SignatureValid);
-  }
-
-  if (alg === 'ed25519' || alg === 'ed25519-sha') {
-    const cmd = new VerifyCommand({
-      KeyId: keyId,
-      Message: digestBuf,
-      Signature: signatureBuf,
-      SigningAlgorithm: 'ED25519' as any
-      // MessageType omitted (KMS treats message bytes as-is)
+      Signature: sigBuf,
+      SigningAlgorithm: signingAlg,
+      MessageType: KMS_MESSAGE_TYPES.DIGEST as any
     } as any);
     const resp = await client.send(cmd);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -188,6 +153,26 @@ export async function verifySignature(signatureBase64: string, digestBuf: Buffer
     return Boolean(anyResp?.SignatureValid);
   }
 
-  throw new Error(`Unsupported AUDIT_SIGNING_ALG for KMS adapter (verify): ${alg}`);
+  if (alg === 'ed25519') {
+    const signingAlg = kmsParamsForAlg(alg).signingAlgorithm ?? KMS_ALGS.ED25519;
+    const cmd = new VerifyCommand({
+      KeyId: keyId,
+      Message: digestBuf,
+      Signature: sigBuf,
+      SigningAlgorithm: signingAlg
+    } as any);
+    const resp = await client.send(cmd);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyResp: any = resp;
+    return Boolean(anyResp?.SignatureValid);
+  }
+
+  throw new Error(`Unsupported AUDIT_SIGNING_ALG for verify: ${alg}`);
 }
+
+export default {
+  signAuditCanonical,
+  signAuditHash,
+  verifySignature
+};
 

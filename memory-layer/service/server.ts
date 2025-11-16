@@ -85,7 +85,7 @@ app.get('/readyz', async (_req: Request, res: Response) => {
   }
 });
 
-app.use('/v1', (authMiddleware as unknown) as any, memoryRoutes(memoryService));
+app.use('/v1', authMiddleware, memoryRoutes(memoryService));
 
 // Simple error handler so the scaffold surfaces JSON errors.
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {

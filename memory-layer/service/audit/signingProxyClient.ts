@@ -1,48 +1,49 @@
 /**
  * memory-layer/service/audit/signingProxyClient.ts
  *
- * Lightweight client for a remote signing proxy (optional).
- *
- * The signing proxy is an HTTP service that performs signing/verification on behalf
- * of the application (useful if you have a centralized HSM/signing service).
- *
- * Environment:
- *  - SIGNING_PROXY_URL        (required to enable this client, e.g. https://signer.example.local)
- *  - SIGNING_PROXY_API_KEY    (optional, sent as Authorization: Bearer <key>)
+ * Thin HTTP client for a remote signing proxy. This module intentionally
+ * avoids ESM-only dependencies and uses the Node http/https APIs for max compatibility.
  *
  * Expected proxy endpoints (JSON):
  *  POST /sign/canonical   { canonical: string } -> { kid, alg, signature }
  *  POST /sign/hash        { digest_hex: string } -> { kid, alg, signature }
  *  POST /verify           { digest_hex: string, signature: string } -> { valid: boolean }
  *
- * This module is a thin wrapper — it does not implement retry logic; callers
- * should handle retries if desired. It throws on transport or proxy errors.
+ * Environment:
+ *  - SIGNING_PROXY_URL        (required to enable this client, e.g. https://signer.example.local)
+ *  - SIGNING_PROXY_API_KEY    (optional, sent as Authorization: Bearer <key>)
+ *
+ * Use:
+ *  - signAuditCanonical(canonical)
+ *  - signAuditHash(digestBuf)
+ *  - verifySignature(signatureBase64, digestBuf)
+ *
+ * Notes:
+ *  - Request/response JSON is assumed. Throws on HTTP errors.
+ *  - Timeout defaults are conservative (30s).
  */
 
-import http from 'http';
-import https from 'https';
-import { URL } from 'url';
+import http from 'node:http';
+import https from 'node:https';
+import { URL } from 'node:url';
+import { Buffer } from 'buffer';
 
-const proxyUrl = process.env.SIGNING_PROXY_URL?.trim();
+const proxyUrl = (process.env.SIGNING_PROXY_URL || '').trim();
 const proxyApiKey = process.env.SIGNING_PROXY_API_KEY ?? undefined;
 
 if (!proxyUrl) {
-  // module can still be imported in environments without a signing proxy; functions will throw if used.
-  // No action required here.
+  // module can still be imported; calls will throw if used and no proxy configured.
 }
 
-/** Minimal helper to POST JSON and parse response. */
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  if (!proxyUrl) {
-    throw new Error('SIGNING_PROXY_URL is not configured');
-  }
+/** Generic POST JSON helper using node http/https */
+async function postJson<T>(path: string, body: unknown, timeoutMs = 30_000): Promise<T> {
+  if (!proxyUrl) throw new Error('SIGNING_PROXY_URL is not configured');
   const base = new URL(proxyUrl);
-  // ensure path starts with '/'
+  // Build full URL (preserve path)
   const full = new URL(path.startsWith('/') ? path : `/${path}`, base).toString();
   const parsed = new URL(full);
   const isHttps = parsed.protocol === 'https:';
   const lib = isHttps ? https : http;
-
   const json = JSON.stringify(body);
   const opts: (https.RequestOptions | http.RequestOptions) = {
     method: 'POST',
@@ -54,11 +55,10 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
       'content-length': Buffer.byteLength(json),
       accept: 'application/json'
     },
-    timeout: 30_000
+    timeout: timeoutMs
   };
 
   if (proxyApiKey) {
-    // Bearer token auth
     (opts.headers as Record<string, string>)['authorization'] = `Bearer ${proxyApiKey}`;
   }
 
@@ -70,7 +70,8 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
       res.on('end', () => {
         const status = res.statusCode ?? 0;
         if (status < 200 || status >= 300) {
-          return reject(new Error(`signing-proxy ${parsed.pathname} responded ${status}: ${data}`));
+          const msg = `signing-proxy ${parsed.pathname} responded ${status}: ${data}`;
+          return reject(new Error(msg));
         }
         try {
           const parsedJson = data ? JSON.parse(data) : {};
@@ -90,20 +91,24 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-/** Sign canonical message (message path) */
+/** Sign canonical payload (message path) */
 export async function signAuditCanonical(canonical: string): Promise<{ kid: string; alg: string; signature: string }> {
-  if (!canonical) throw new Error('canonical message required');
-  return postJson<{ kid: string; alg: string; signature: string }>('/sign/canonical', { canonical });
+  if (!canonical) throw new Error('canonical required');
+  const resp = await postJson<{ kid: string; alg: string; signature: string }>('/sign/canonical', { canonical });
+  if (!resp || !resp.signature) throw new Error('signing proxy returned no signature');
+  return resp;
 }
 
-/** Sign precomputed digest (digest path) - digestHex is a lowercase hex string */
+/** Sign precomputed digest (digestBuf) - returns kid/alg/signature */
 export async function signAuditHash(digestBuf: Buffer): Promise<{ kid: string; alg: string; signature: string }> {
   if (!Buffer.isBuffer(digestBuf)) throw new Error('digestBuf must be a Buffer');
   const digestHex = digestBuf.toString('hex');
-  return postJson<{ kid: string; alg: string; signature: string }>('/sign/hash', { digest_hex: digestHex });
+  const resp = await postJson<{ kid: string; alg: string; signature: string }>('/sign/hash', { digest_hex: digestHex });
+  if (!resp || !resp.signature) throw new Error('signing proxy returned no signature');
+  return resp;
 }
 
-/** Verify signature against precomputed digest */
+/** Verify a signature against a digest buffer using the proxy */
 export async function verifySignature(signatureBase64: string, digestBuf: Buffer): Promise<boolean> {
   if (!signatureBase64) throw new Error('signature required');
   if (!Buffer.isBuffer(digestBuf)) throw new Error('digestBuf must be a Buffer');

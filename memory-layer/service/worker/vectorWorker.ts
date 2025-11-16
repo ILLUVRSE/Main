@@ -6,34 +6,28 @@
  * Behavior:
  *  - Grabs a small batch via SELECT ... FOR UPDATE SKIP LOCKED inside a transaction.
  *  - For each row, attempts to call VectorDbAdapter.upsertEmbedding(...) using the stored vector_data.
- *  - On success: sets status='completed', updates external_vector_id and updated_at.
+ *  - On success: sets status='completed', updates external_vector_id (if provided) and updated_at.
  *  - On failure: sets status='error', writes error text and updated_at (so humans can inspect).
  *
  * Exports:
  *  - processBatch(vectorAdapter, limit)
  *  - startPolling(vectorAdapter, { intervalMs, batchSize })
  *
- * Can be invoked as a one-shot CLI (useful in k8s job):
- *   VECTOR_DB_PROVIDER=postgres node dist/.../vectorWorker.js
- *
- * Notes:
- *  - This worker is intentionally conservative: it locks rows with FOR UPDATE SKIP LOCKED,
- *    so multiple workers can run concurrently without clashing.
- *  - Assumes `memory_vectors.vector_data` is stored as JSONB array of numbers.
+ * CLI:
+ *   VECTOR_DB_PROVIDER=postgres npx ts-node memory-layer/service/worker/vectorWorker.ts
  */
 
-import { PoolClient } from 'pg';
+import { Readable } from 'stream';
 import { getPool } from '../db';
 import { VectorDbAdapter } from '../vector/vectorDbAdapter';
-import type { VectorWriteResult } from '../vector/vectorDbAdapter';
 
 type MemoryVectorRow = {
   id: string;
   memory_node_id: string;
   provider: string;
   namespace: string;
-  embedding_model: string;
-  dimension: number;
+  embedding_model: string | null;
+  dimension: number | null;
   external_vector_id: string | null;
   status: string;
   error: string | null;
@@ -55,7 +49,6 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
   try {
     await client.query('BEGIN');
 
-    // Select rows that are not completed, lock them so other workers skip them.
     const selectRes = await client.query<MemoryVectorRow>(
       `
       SELECT id, memory_node_id, provider, namespace, embedding_model, dimension,
@@ -88,25 +81,24 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
           continue;
         }
 
-        // Build embedding payload
+        // Prepare embedding payload
         const embedding = {
-          model: row.embedding_model,
+          model: row.embedding_model ?? 'unknown',
           dimension: row.dimension ?? row.vector_data.length,
           vector: row.vector_data,
           namespace: row.namespace
         };
 
         // Attempt upsert via adapter
-        let writeResult: VectorWriteResult;
+        let writeResult;
         try {
           writeResult = await vectorAdapter.upsertEmbedding({
             memoryNodeId: row.memory_node_id,
             embeddingId: row.external_vector_id ?? undefined,
             embedding,
-            metadata: row.metadata ?? { owner: row.metadata?.['owner'] ?? undefined }
+            metadata: row.metadata ?? {}
           });
         } catch (err) {
-          // Adapter-level failure: mark as error with message and continue to next row.
           const msg = (err as Error).message || String(err);
           await client.query(
             `UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`,
@@ -116,15 +108,14 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
           continue;
         }
 
-        // On success, update status and external_vector_id (if provided)
-        const externalRef = writeResult.externalVectorId ?? null;
+        // On success, update memory_vectors status and external_vector_id if present
+        const externalRef = (writeResult && writeResult.externalVectorId) ? writeResult.externalVectorId : row.external_vector_id;
         await client.query(
           `UPDATE memory_vectors SET status = 'completed', external_vector_id = $2, error = NULL, updated_at = now() WHERE id = $1`,
           [id, externalRef]
         );
         console.info(`[vectorWorker] processed ${id} -> externalRef=${externalRef}`);
       } catch (rowErr) {
-        // Per-row unexpected error: set status=error and continue
         const msg = (rowErr as Error).message || String(rowErr);
         try {
           await client.query(
@@ -151,7 +142,7 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
 
 /**
  * Start polling loop that runs processBatch periodically.
- * Returns a stop function that will clear the interval.
+ * Returns a controller with stop().
  */
 export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs?: number; batchSize?: number }) {
   const intervalMs = opts?.intervalMs ?? Number(process.env.VECTOR_WORKER_INTERVAL_MS ?? '5000');
@@ -166,10 +157,7 @@ export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs
     isProcessing = true;
     try {
       const count = await processBatch(vectorAdapter, batchSize);
-      // If no rows processed, this is quiet; otherwise log.
-      if (count > 0) {
-        console.info(`[vectorWorker] processed ${count} rows`);
-      }
+      if (count > 0) console.info(`[vectorWorker] processed ${count} rows`);
     } catch (err) {
       console.error('[vectorWorker] poll error:', (err as Error).message || err);
     } finally {
@@ -178,7 +166,7 @@ export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs
   };
 
   const handle = setInterval(tick, intervalMs);
-  // run immediately once
+  // run immediately
   void tick();
 
   console.info(`[vectorWorker] started polling every ${intervalMs}ms (batchSize=${batchSize})`);
@@ -193,7 +181,7 @@ export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs
 }
 
 /**
- * CLI entry: one-shot or polling mode depending on VECTOR_WORKER_POLL env.
+ * CLI entry: one-shot or polling depending on VECTOR_WORKER_POLL (default true)
  */
 if (require.main === module) {
   (async () => {
@@ -209,7 +197,6 @@ if (require.main === module) {
       const poll = String(process.env.VECTOR_WORKER_POLL ?? 'true').toLowerCase() === 'true';
       if (poll) {
         const controller = startPolling(adapter, {});
-        // graceful shutdown
         process.on('SIGINT', () => {
           controller.stop();
           process.exit(0);

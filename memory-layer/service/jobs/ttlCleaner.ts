@@ -15,12 +15,10 @@
  *
  * Notes:
  *  - This file performs manual audit_event insertion in the same transaction
- *    to guarantee atomicity between the soft-delete and audit row (mirrors
- *    memory-layer/service/db.insertAuditEvent logic).
+ *    to guarantee atomicity between the soft-delete and audit row.
  *  - It uses auditChain functions: canonicalizePayload, computeAuditDigest, signAuditDigest.
  */
 
-import { Readable } from 'stream';
 import { getPool } from '../db';
 import { canonicalizePayload, computeAuditDigest, signAuditDigest } from '../audit/auditChain';
 
@@ -30,7 +28,7 @@ type MemoryNodeRow = {
   expires_at: string | null;
   legal_hold: boolean;
   deleted_at: string | null;
-  metadata: Record<string, unknown>;
+  metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };
@@ -78,7 +76,7 @@ export async function processBatch(limit = DEFAULT_BATCH_SIZE): Promise<number> 
     for (const node of rows) {
       const id = node.id;
       try {
-        // 1) soft-delete (same logic as db.softDeleteMemoryNode)
+        // 1) soft-delete (set deleted_at and record deletedBy in metadata)
         await client.query(
           `
           UPDATE memory_nodes
@@ -91,26 +89,23 @@ export async function processBatch(limit = DEFAULT_BATCH_SIZE): Promise<number> 
         );
 
         // 2) Compute prev_hash (global last audit) and prepare payload
-        const prevRes = await client.query<{ hash: string }>(
-          `SELECT hash FROM audit_events ORDER BY created_at DESC LIMIT 1 FOR UPDATE`
-        );
+        const prevRes = await client.query<{ hash: string }>(`SELECT hash FROM audit_events ORDER BY created_at DESC LIMIT 1 FOR UPDATE`);
         const prevHash = prevRes.rows[0]?.hash ?? null;
 
-        // Prepare payload similar to insertAuditEvent usage
         const auditPayload = {
           requestedBy: 'system',
           caller: 'ttl-cleaner',
-          callerPrevHash: null
+          nodeId: id
         };
 
         const canonical = canonicalizePayload(auditPayload);
         const digestHex = computeAuditDigest(canonical, prevHash);
-        const digestBuf = Buffer.from(digestHex, 'hex');
+        const signature = await signAuditDigest(digestHex);
 
-        const signature = signAuditDigest(digestHex);
-        if (!signature) {
-          // In production we expect signing to be available. Treat missing signature as failure.
-          throw new Error('audit signing failed or not configured (signature missing)');
+        const requireKms = String(process.env.REQUIRE_KMS ?? '').toLowerCase() === 'true';
+        const isProd = (process.env.NODE_ENV ?? '').toLowerCase() === 'production';
+        if (!signature && (requireKms || isProd)) {
+          throw new Error('audit signing required but no signature produced');
         }
 
         // 3) Insert audit_event row referencing the memory node
@@ -120,22 +115,12 @@ export async function processBatch(limit = DEFAULT_BATCH_SIZE): Promise<number> 
             (event_type, memory_node_id, artifact_id, payload, hash, prev_hash, signature, manifest_signature_id, created_at)
           VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, now())
         `,
-          [
-            'memory.node.deleted',
-            id,
-            null,
-            auditPayload,
-            digestHex,
-            prevHash,
-            signature,
-            null
-          ]
+          ['memory.node.deleted', id, null, auditPayload, digestHex, prevHash, signature, null]
         );
 
         console.info(`[ttlCleaner] soft-deleted node ${id} and recorded audit entry`);
       } catch (err) {
-        // If anything fails while processing this node, record error and continue with next node.
-        // We prefer to mark the node's metadata with an error flag so operators can investigate.
+        // Record error in node metadata to aid debugging (do not rethrow so other nodes process)
         const msg = (err as Error).message || String(err);
         try {
           await client.query(
@@ -146,7 +131,7 @@ export async function processBatch(limit = DEFAULT_BATCH_SIZE): Promise<number> 
           console.error(`[ttlCleaner] failed to mark error on node ${id}:`, (uerr as Error).message || uerr);
         }
         console.error(`[ttlCleaner] failed processing node ${id}: ${msg}`);
-        // Note: do not rethrow; continue with other nodes. The transaction stays alive until end and will commit the successful ones.
+        // continue with next node
       }
     }
 

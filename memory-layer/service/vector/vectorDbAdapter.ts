@@ -1,35 +1,25 @@
 /**
  * memory-layer/service/vector/vectorDbAdapter.ts
  *
- * Vector DB adapter with provider abstraction and queue fallback.
+ * Vector DB adapter with provider abstraction and DB-queue fallback.
  *
- * Behavior:
- *  - Supports `provider = 'postgres'` by writing vector payloads into `memory_vectors` table
- *    (this is the simple/default provider used for dev and small-scale infra).
- *  - For other providers (pinecone, milvus, etc.) the adapter will attempt an HTTP-based write
- *    if `endpoint` is configured. If that fails or provider not supported, and if
- *    process.env.VECTOR_WRITE_QUEUE === 'true' then the adapter will enqueue a `memory_vectors`
- *    row with status='pending' so `vectorWorker` can retry.
+ * - Default provider: 'postgres' (writes vector_data JSONB to memory_vectors table,
+ *   which is suitable for small-scale dev + pgvector if the extension is installed).
+ * - External providers: attempt HTTP write to configured endpoint; on failure enqueue
+ *   a pending memory_vectors row so `vectorWorker` can retry.
+ * - Search: for postgres provider we compute brute-force cosine similarity over stored
+ *   vector_data. Production should replace this with a proper ANN provider.
  *
- *  - Search is implemented as a brute-force cosine similarity over `memory_vectors.vector_data`
- *    for namespace where status = 'completed'. This is functional and deterministic for dev;
- *    production should register a provider that offers ANN search.
- *
- * NOTE: This adapter intentionally keeps provider implementations small and pluggable.
+ * Notes:
+ * - This implementation focuses on correctness and observability for acceptance.
+ * - For production integrate real provider SDKs (pgvector, milvus, pinecone) and ensure
+ *   SLOs for latency and idempotent upserts.
  */
 
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
 import { getPool } from '../db';
-import https from 'https';
 import http from 'http';
-
-export interface VectorDbConfig {
-  provider?: string;
-  endpoint?: string;
-  apiKey?: string;
-  namespace?: string;
-  pool?: Pool;
-}
+import https from 'https';
 
 export interface VectorWriteResult {
   status: 'queued' | 'completed';
@@ -43,55 +33,72 @@ export interface VectorSearchResult {
   vectorRef?: string | null;
 }
 
-const cosineSimilarity = (a: number[], b: number[]): number => {
-  if (!a.length || a.length !== b.length) return 0;
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  if (!normA || !normB) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-};
+export interface VectorDbConfig {
+  provider?: string;
+  endpoint?: string;
+  apiKey?: string;
+  namespace?: string;
+  pool?: Pool;
+}
 
-const ensureVector = (embedding: { vector?: number[]; dimension?: number }): number[] => {
-  if (!embedding?.vector?.length) {
-    throw new Error('Embedding vector is required for upsert.');
+const DEFAULT_NAMESPACE = 'kernel-memory';
+const DEFAULT_PROVIDER = 'postgres';
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (!a?.length || !b?.length || a.length !== b.length) return 0;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const ai = Number(a[i]) || 0;
+    const bi = Number(b[i]) || 0;
+    dot += ai * bi;
+    na += ai * ai;
+    nb += bi * bi;
+  }
+  if (!na || !nb) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+function ensureVector(embedding: { vector?: number[]; dimension?: number }): number[] {
+  if (!embedding?.vector || !Array.isArray(embedding.vector) || !embedding.vector.length) {
+    throw new Error('embedding.vector is required and must be a non-empty array');
   }
   if (typeof embedding.dimension === 'number' && embedding.dimension !== embedding.vector.length) {
-    throw new Error(`Embedding dimension mismatch (expected ${embedding.dimension}, got ${embedding.vector.length}).`);
+    throw new Error(`embedding.dimension mismatch: declared=${embedding.dimension} actual=${embedding.vector.length}`);
   }
-  return embedding.vector.map((value, idx) => {
-    if (!Number.isFinite(value)) {
-      throw new Error(`Embedding vector index ${idx} is not a finite number.`);
-    }
-    return value;
+  // coerce to numbers
+  return embedding.vector.map((v, i) => {
+    const n = Number(v);
+    if (!isFinite(n)) throw new Error(`embedding.vector[${i}] is not a finite number`);
+    return n;
   });
-};
+}
 
+/**
+ * VectorDbAdapter
+ */
 export class VectorDbAdapter {
-  private readonly provider: string;
-  private readonly namespace: string;
-  private readonly pool?: Pool;
-  private readonly endpoint?: string;
-  private readonly apiKey?: string;
+  private provider: string;
+  private namespace: string;
+  private pool: Pool;
+  private endpoint?: string;
+  private apiKey?: string;
 
-  constructor(private readonly config: VectorDbConfig) {
-    this.provider = (config?.provider ?? 'postgres').toLowerCase();
-    this.namespace = config.namespace ?? 'kernel-memory';
-    this.pool = config.pool ?? getPool();
-    this.endpoint = config.endpoint;
-    this.apiKey = config.apiKey;
+  constructor(cfg: VectorDbConfig = {}) {
+    this.provider = (cfg.provider ?? DEFAULT_PROVIDER).toLowerCase();
+    this.namespace = cfg.namespace ?? DEFAULT_NAMESPACE;
+    this.pool = cfg.pool ?? getPool();
+    this.endpoint = cfg.endpoint;
+    this.apiKey = cfg.apiKey;
   }
 
   /**
    * Upsert embedding for a memory node.
-   * - For `postgres` provider: writes `memory_vectors` row with status='completed' and vector_data JSONB.
-   * - For other providers: attempts a best-effort HTTP write to `endpoint` (if configured). On failure,
-   *   will enqueue a pending `memory_vectors` row if VECTOR_WRITE_QUEUE === 'true', otherwise throws.
+   * Behavior:
+   *  - postgres: write memory_vectors row with status='completed'
+   *  - external provider with endpoint: attempt HTTP POST; on failure, enqueue pending memory_vectors row
+   *  - if queue fallback enabled (VECTOR_WRITE_QUEUE=true) will write pending row for retry
    */
   async upsertEmbedding(params: {
     memoryNodeId: string;
@@ -102,40 +109,26 @@ export class VectorDbAdapter {
     const namespace = params.embedding.namespace ?? this.namespace;
     const vector = ensureVector(params.embedding);
     const provider = this.provider;
-    const metadata = {
-      ...(params.metadata ?? {}),
-      owner: (params.metadata as { owner?: string })?.owner ?? undefined
-    };
+    const metadata = params.metadata ?? {};
     const externalRef = params.embeddingId ?? params.memoryNodeId;
 
     if (provider === 'postgres') {
-      // Store the vector in memory_vectors table for local postgres-based vector store/search.
-      const { rows } = await (this.pool as Pool).query<{ id: string }>(
+      // Insert or update memory_vectors with completed state
+      const { rows } = await this.pool.query<{ id: string }>(
         `
         INSERT INTO memory_vectors (
-          memory_node_id,
-          provider,
-          namespace,
-          embedding_model,
-          dimension,
-          external_vector_id,
-          status,
-          error,
-          vector_data,
-          metadata,
-          created_at,
-          updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, 'completed', NULL, $7::jsonb, COALESCE($8::jsonb,'{}'::jsonb), now(), now())
+          memory_node_id, provider, namespace, embedding_model, dimension,
+          external_vector_id, status, error, vector_data, metadata, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,'completed',NULL,$7::jsonb,$8::jsonb, now(), now())
         ON CONFLICT (memory_node_id, namespace) DO UPDATE
-        SET embedding_model = EXCLUDED.embedding_model,
-            dimension = EXCLUDED.dimension,
-            external_vector_id = EXCLUDED.external_vector_id,
-            status = 'completed',
-            error = NULL,
-            vector_data = EXCLUDED.vector_data,
-            metadata = EXCLUDED.metadata,
-            updated_at = now()
+          SET embedding_model = EXCLUDED.embedding_model,
+              dimension = EXCLUDED.dimension,
+              external_vector_id = EXCLUDED.external_vector_id,
+              status = 'completed',
+              error = NULL,
+              vector_data = EXCLUDED.vector_data,
+              metadata = EXCLUDED.metadata,
+              updated_at = now()
         RETURNING id
       `,
         [
@@ -146,102 +139,73 @@ export class VectorDbAdapter {
           params.embedding.dimension ?? vector.length,
           externalRef,
           JSON.stringify(vector),
-          JSON.stringify(metadata ?? {})
+          JSON.stringify(metadata)
         ]
       );
-
-      return {
-        status: 'completed',
-        externalVectorId: rows[0]?.id ?? externalRef
-      };
+      return { status: 'completed', externalVectorId: rows[0]?.id ?? externalRef };
     }
 
-    // Non-postgres provider path: try to call external provider if endpoint is configured.
+    // Non-postgres provider path
     if (this.endpoint) {
       try {
-        await this.callExternalProviderWrite(provider, this.endpoint, this.apiKey ?? undefined, {
+        await this.callExternalProviderWrite({
           id: externalRef,
           vector,
           metadata,
           model: params.embedding.model,
           namespace
         });
-        // On success, return completed. (We don't have an external id; use externalRef)
+        // on success, return completed and externalRef
         return { status: 'completed', externalVectorId: externalRef };
       } catch (err) {
-        // on failure, either queue or throw
         const msg = (err as Error).message || String(err);
-        // if queue fallback enabled, insert pending row into memory_vectors and return queued.
         const queueEnabled = String(process.env.VECTOR_WRITE_QUEUE ?? 'true').toLowerCase() === 'true';
         if (queueEnabled) {
-          try {
-            await (this.pool as Pool).query(
-              `
-              INSERT INTO memory_vectors (
-                memory_node_id,
-                provider,
-                namespace,
-                embedding_model,
-                dimension,
-                external_vector_id,
-                status,
-                error,
-                vector_data,
-                metadata,
-                created_at,
-                updated_at
-              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,now(),now())
-              ON CONFLICT (memory_node_id, namespace) DO UPDATE
-                SET vector_data = EXCLUDED.vector_data,
-                    embedding_model = EXCLUDED.embedding_model,
-                    dimension = EXCLUDED.dimension,
-                    external_vector_id = EXCLUDED.external_vector_id,
-                    status = 'pending',
-                    error = EXCLUDED.error,
-                    updated_at = now()
-            `,
-              [
-                params.memoryNodeId,
-                provider,
-                namespace,
-                params.embedding.model,
-                params.embedding.dimension ?? vector.length,
-                externalRef,
-                'pending',
-                `external_write_error: ${msg}`,
-                JSON.stringify(vector),
-                JSON.stringify(metadata ?? {})
-              ]
-            );
-            return { status: 'queued', externalVectorId: null };
-          } catch (uerr) {
-            // If queue enqueue fails, throw original error
-            throw new Error(`external provider write failed: ${msg}; additionally failed enqueue: ${(uerr as Error).message || uerr}`);
-          }
+          // enqueue pending row in Postgres
+          await this.pool.query(
+            `
+            INSERT INTO memory_vectors (
+              memory_node_id, provider, namespace, embedding_model, dimension,
+              external_vector_id, status, error, vector_data, metadata, created_at, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb, now(), now())
+            ON CONFLICT (memory_node_id, namespace) DO UPDATE
+              SET vector_data = EXCLUDED.vector_data,
+                  embedding_model = EXCLUDED.embedding_model,
+                  dimension = EXCLUDED.dimension,
+                  external_vector_id = EXCLUDED.external_vector_id,
+                  status = 'pending',
+                  error = EXCLUDED.error,
+                  updated_at = now()
+          `,
+            [
+              params.memoryNodeId,
+              provider,
+              namespace,
+              params.embedding.model,
+              params.embedding.dimension ?? vector.length,
+              externalRef,
+              'pending',
+              `external_write_error: ${msg}`,
+              JSON.stringify(vector),
+              JSON.stringify(metadata)
+            ]
+          );
+          return { status: 'queued', externalVectorId: null };
         }
+        // otherwise propagate error
         throw new Error(`external provider write failed: ${msg}`);
       }
     }
 
-    // No endpoint configured: fallback to queue if enabled, otherwise error.
+    // No endpoint & not postgres: fallback to queue or error
     const queueEnabled = String(process.env.VECTOR_WRITE_QUEUE ?? 'true').toLowerCase() === 'true';
     if (queueEnabled) {
-      await (this.pool as Pool).query(
+      await this.pool.query(
         `
         INSERT INTO memory_vectors (
-          memory_node_id,
-          provider,
-          namespace,
-          embedding_model,
-          dimension,
-          external_vector_id,
-          status,
-          error,
-          vector_data,
-          metadata,
-          created_at,
-          updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,now(),now())
+          memory_node_id, provider, namespace, embedding_model, dimension,
+          external_vector_id, status, error, vector_data, metadata, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb, now(), now())
         ON CONFLICT (memory_node_id, namespace) DO UPDATE
           SET vector_data = EXCLUDED.vector_data,
               embedding_model = EXCLUDED.embedding_model,
@@ -261,7 +225,7 @@ export class VectorDbAdapter {
           'pending',
           'no_provider_endpoint',
           JSON.stringify(vector),
-          JSON.stringify(metadata ?? {})
+          JSON.stringify(metadata)
         ]
       );
       return { status: 'queued', externalVectorId: null };
@@ -271,8 +235,8 @@ export class VectorDbAdapter {
   }
 
   /**
-   * Brute-force search over memory_vectors.vector_data (JSONB array).
-   * Returns topK results with cosine similarity.
+   * Brute-force search for postgres provider using stored vector_data JSONB.
+   * Production: replace with ANN provider.
    */
   async search(request: {
     queryEmbedding?: number[];
@@ -280,20 +244,15 @@ export class VectorDbAdapter {
     namespace?: string;
     scoreThreshold?: number;
   }): Promise<VectorSearchResult[]> {
-    if (!request.queryEmbedding?.length) {
-      throw new Error('queryEmbedding is required.');
+    if (!request.queryEmbedding || !Array.isArray(request.queryEmbedding) || !request.queryEmbedding.length) {
+      throw new Error('queryEmbedding is required');
     }
     const namespace = request.namespace ?? this.namespace;
     const queryVector = ensureVector({ vector: request.queryEmbedding, dimension: request.queryEmbedding.length });
-    const topK = Math.max(1, Math.min(request.topK ?? 10, 100));
+    const topK = Math.max(1, Math.min(request.topK ?? 10, 200));
 
-    // Query Postgres memory_vectors where namespace matches and status completed.
-    const { rows } = await (this.pool as Pool).query<{
-      id: string;
-      memory_node_id: string;
-      vector_data: number[];
-      metadata: Record<string, unknown>;
-    }>(
+    // For postgres: select completed rows with vector_data not null
+    const { rows } = await this.pool.query<{ id: string; memory_node_id: string; vector_data: number[]; metadata: Record<string, unknown> }>(
       `
       SELECT id, memory_node_id, vector_data, metadata
       FROM memory_vectors
@@ -305,18 +264,18 @@ export class VectorDbAdapter {
     );
 
     const scored = rows
-      .map((row) => {
-        const targetVector = Array.isArray(row.vector_data) ? row.vector_data : [];
-        const score = cosineSimilarity(queryVector, targetVector);
+      .map((r) => {
+        const target = Array.isArray(r.vector_data) ? r.vector_data : [];
+        const score = cosineSimilarity(queryVector, target);
         return {
-          memoryNodeId: row.memory_node_id,
+          memoryNodeId: r.memory_node_id,
           score,
-          metadata: row.metadata ?? {},
-          vectorRef: row.id
-        };
+          metadata: r.metadata ?? {},
+          vectorRef: r.id
+        } as VectorSearchResult;
       })
-      .filter((entry) => Number.isFinite(entry.score))
-      .filter((entry) => (typeof request.scoreThreshold === 'number' ? entry.score >= request.scoreThreshold : true))
+      .filter((e) => Number.isFinite(e.score))
+      .filter((e) => (typeof request.scoreThreshold === 'number' ? e.score >= request.scoreThreshold : true))
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
 
@@ -324,116 +283,108 @@ export class VectorDbAdapter {
   }
 
   /**
-   * Health check: for postgres provider ensure pool query works; for others ensure pool ok and endpoint optionally reachable.
+   * Health check: for postgres provider ensure DB connectivity; for others check endpoint reachable.
    */
   async healthCheck(): Promise<{ healthy: boolean; details?: Record<string, unknown> }> {
     try {
+      // basic DB connectivity
+      await this.pool.query('SELECT 1');
+
       if (this.provider === 'postgres') {
-        await (this.pool as Pool).query('SELECT 1');
-        return {
-          healthy: true,
-          details: { provider: 'postgres', namespace: this.namespace }
-        };
+        return { healthy: true, details: { provider: 'postgres', namespace: this.namespace } };
       }
 
-      // For non-postgres, try DB connectivity (for queue writes) and optionally ping endpoint
-      await (this.pool as Pool).query('SELECT 1');
-
+      // For external provider, attempt to ping endpoint if configured
       if (this.endpoint) {
-        // perform basic HTTP GET to endpoint root
-        const url = new URL(this.endpoint);
-        const isHttps = url.protocol === 'https:';
-        const lib = isHttps ? https : http;
-        // promise wrapper for simple GET
-        await new Promise<void>((resolve, reject) => {
-          const req = lib.request(
-            {
-              method: 'GET',
-              hostname: url.hostname,
-              port: url.port ? Number(url.port) : undefined,
-              path: url.pathname || '/',
-              timeout: 5000,
-              headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}
-            },
-            (res) => {
-              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 500) {
-                // treat 2xx-4xx as reachable (4xx could be auth denied)
-                resolve();
-              } else {
-                reject(new Error(`endpoint returned ${res.statusCode}`));
-              }
-            }
-          );
-          req.on('error', (err) => reject(err));
-          req.on('timeout', () => {
-            req.destroy(new Error('timeout'));
-          });
-          req.end();
-        });
-        return { healthy: true, details: { provider: this.provider, endpoint: this.endpoint } };
+        try {
+          await this.pingEndpoint(this.endpoint, this.apiKey);
+          return { healthy: true, details: { provider: this.provider, endpoint: this.endpoint } };
+        } catch (err) {
+          return { healthy: false, details: { provider: this.provider, error: (err as Error).message } };
+        }
       }
 
-      return { healthy: true, details: { provider: this.provider, note: 'no endpoint configured, using DB queue' } };
-    } catch (error) {
-      return { healthy: false, details: { error: (error as Error).message } };
+      return { healthy: true, details: { provider: this.provider, note: 'no external endpoint configured, queue mode' } };
+    } catch (err) {
+      return { healthy: false, details: { error: (err as Error).message } };
     }
   }
 
   /**
-   * Generic external provider write helper (best-effort).
-   * Implementations for real providers should replace this with SDK clients.
+   * Best-effort ping to external endpoint using simple HTTP POST /health or GET.
+   */
+  private async pingEndpoint(endpoint: string, apiKey?: string): Promise<void> {
+    const url = new URL(endpoint);
+    const isHttps = url.protocol === 'https:';
+    const lib = isHttps ? https : http;
+    return new Promise<void>((resolve, reject) => {
+      const opts: (http.RequestOptions | https.RequestOptions) = {
+        method: 'GET',
+        hostname: url.hostname,
+        port: url.port ? Number(url.port) : undefined,
+        path: url.pathname || '/',
+        timeout: 5000,
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+      };
+      const req = lib.request(opts, (res) => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 500) {
+          resolve();
+        } else {
+          reject(new Error(`endpoint returned ${res.statusCode}`));
+        }
+      });
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => {
+        req.destroy(new Error('timeout'));
+      });
+      req.end();
+    });
+  }
+
+  /**
+   * Generic best-effort external provider write helper (HTTP POST /vectors).
    */
   private callExternalProviderWrite(
-    provider: string,
-    endpoint: string,
-    apiKey: string | undefined,
     payload: { id: string; vector: number[]; metadata?: Record<string, unknown>; model?: string; namespace?: string }
   ): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      try {
-        const url = new URL(endpoint);
-        const isHttps = url.protocol === 'https:';
-        const lib = isHttps ? https : http;
-        const path = url.pathname.endsWith('/') ? `${url.pathname}vectors` : `${url.pathname}/vectors`;
-        const fullPath = path + (url.search ?? '');
-        const body = JSON.stringify(payload);
-
-        const opts: (https.RequestOptions | http.RequestOptions) = {
-          method: 'POST',
-          hostname: url.hostname,
-          port: url.port ? Number(url.port) : undefined,
-          path: fullPath,
-          headers: {
-            'content-type': 'application/json',
-            'content-length': Buffer.byteLength(body),
-            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-          },
-          timeout: 10_000
-        };
-
-        const req = lib.request(opts, (res) => {
-          const status = res.statusCode ?? 0;
-          if (status >= 200 && status < 300) {
-            resolve();
-          } else {
-            let data = '';
-            res.setEncoding('utf8');
-            res.on('data', (chunk) => (data += chunk));
-            res.on('end', () => {
-              reject(new Error(`provider ${provider} responded ${status}: ${data}`));
-            });
-          }
-        });
-
-        req.on('error', (err) => reject(err));
-        req.on('timeout', () => {
-          req.destroy(new Error('request timed out'));
-        });
-        req.write(body);
-        req.end();
-      } catch (err) {
-        reject(err);
+    if (!this.endpoint) throw new Error('external endpoint not configured');
+    const url = new URL(this.endpoint);
+    const isHttps = url.protocol === 'https:';
+    const lib = isHttps ? https : http;
+    const path = url.pathname.endsWith('/') ? `${url.pathname}vectors` : `${url.pathname}/vectors`;
+    const fullPath = path + (url.search ?? '');
+    const body = JSON.stringify(payload);
+    const opts: (http.RequestOptions | https.RequestOptions) = {
+      method: 'POST',
+      hostname: url.hostname,
+      port: url.port ? Number(url.port) : undefined,
+      path: fullPath,
+      timeout: 10_000,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
       }
+    };
+
+    return new Promise<void>((resolve, reject) => {
+      const req = lib.request(opts, (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 200 && status < 300) {
+          resolve();
+        } else {
+          let data = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => reject(new Error(`provider responded ${status}: ${data}`)));
+        }
+      });
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => {
+        req.destroy(new Error('request timed out'));
+      });
+      req.write(body);
+      req.end();
     });
   }
 }

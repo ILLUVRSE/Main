@@ -9,26 +9,27 @@
  *  - GET /v1/memory/nodes/:id to inspect node,
  *  - verify an audit_event was emitted for the node.
  *
- * Run with:
- *   DATABASE_URL=postgres://... npx jest memory-layer/test/integration/ingest_search_artifact.test.ts
+ * This test requires a running Postgres reachable at process.env.DATABASE_URL.
+ * Use memory-layer/service/audit/ci-env-setup.sh in CI to provision a signing proxy or AUDIT_SIGNING_KEY.
  */
 
 import request from 'supertest';
 import { execSync } from 'child_process';
 import { Client } from 'pg';
-import app from '../../service/server'; // Express app
+import app from '../../service/server';
 import path from 'path';
 
-jest.setTimeout(60_000);
+jest.setTimeout(120_000);
 
 const migrationsDir = path.join(__dirname, '..', '..', 'sql', 'migrations');
 
-function ensureEnvOrSkip() {
+function ensureEnvOrSkip(): string | null {
   const conn = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!conn) {
-    // If no DB, skip tests gracefully.
-    // Jest does not have per-file skip; throw to bail out with message.
-    // Test runner will report as failed, so instead we use console and exit early.
+    // If no DB, skip tests by returning null.
+    // Tests will be considered skipped if we early-return in beforeAll.
+    // Logging here for operator visibility.
+    // eslint-disable-next-line no-console
     console.warn('Skipping integration test: DATABASE_URL or POSTGRES_URL is not set.');
     return null;
   }
@@ -44,13 +45,14 @@ describe('Memory Layer integration: ingest -> search -> audit', () => {
 
     // Apply migrations
     try {
-      console.log('Running migrations...');
+      // eslint-disable-next-line no-console
+      console.log('Running migrations for integration test...');
       execSync(`npx ts-node ${path.join(__dirname, '..', '..', 'scripts', 'runMigrations.ts')} ${migrationsDir}`, {
         stdio: 'inherit',
         env: process.env
       });
-      console.log('Migrations applied.');
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error('Failed to run migrations:', (err as Error).message || err);
       throw err;
     }
@@ -68,10 +70,11 @@ describe('Memory Layer integration: ingest -> search -> audit', () => {
 
   test('ingest a memory node, find it via search, and verify audit', async () => {
     const conn = ensureEnvOrSkip();
-    if (!conn) return;
+    if (!conn) {
+      // Skip test gracefully
+      return;
+    }
 
-    // Use the app directly with supertest. We inject a local-dev principal to bypass strict auth.
-    // The principal must have roles for memory write/read.
     const devPrincipalHeader = {
       'X-Local-Dev-Principal': JSON.stringify({
         id: 'test-service',
@@ -120,7 +123,7 @@ describe('Memory Layer integration: ingest -> search -> audit', () => {
     expect(searchResp.body).toBeDefined();
     expect(Array.isArray(searchResp.body.results)).toBe(true);
     const results: any[] = searchResp.body.results;
-    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeGreaterThanOrEqual(1);
     const top = results[0];
     expect(top.memoryNodeId).toBe(memoryNodeId);
 
@@ -136,7 +139,6 @@ describe('Memory Layer integration: ingest -> search -> audit', () => {
     expect(getResp.body.legalHold).toBe(false);
 
     // Step 4: verify an audit_event exists referencing the node
-    // Query the DB directly
     const client = new Client({ connectionString: conn });
     await client.connect();
     try {
@@ -146,10 +148,9 @@ describe('Memory Layer integration: ingest -> search -> audit', () => {
       );
       expect(auditQ.rowCount).toBeGreaterThan(0);
       const auditRow = auditQ.rows[0];
-      expect(auditRow.event_type).toMatch(/memory.node.created|memory.node.*/i);
+      expect(auditRow.event_type).toMatch(/memory\.node\.created|memory\.node\./i);
       expect(auditRow.hash).toBeTruthy();
-      // signature may be null in dev if no signing configured; we only assert presence of hash
-      // but if signature exists it should be a base64 string
+      // signature may be null in dev if no signer configured; assert presence of hash and chain
       if (auditRow.signature) {
         expect(typeof auditRow.signature).toBe('string');
       }

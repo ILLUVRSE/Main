@@ -1,16 +1,25 @@
 {
+  "name": "illuvrse-main",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
     "memory-layer:build": "tsc -p tsconfig.json",
     "memory-layer:start": "node dist/memory-layer/service/server.js",
-    "finance:export": "ts-node --transpile-only finance/exports/canonical_exporter.ts"
+    "memory-layer:migrate": "npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations",
+    "memory-layer:vector-worker": "npx ts-node memory-layer/service/worker/vectorWorker.ts",
+    "memory-layer:ttl-cleaner": "npx ts-node memory-layer/service/jobs/ttlCleaner.ts",
+    "memory-layer:audit-verify": "npx ts-node memory-layer/service/audit/verifyTool.ts",
+    "memory-layer:audit-replay": "npx ts-node memory-layer/tools/auditReplay.ts",
+    "memory-layer:test:integration": "jest memory-layer/test/integration --runInBand",
+    "test": "jest"
   },
   "dependencies": {
-    "@aws-sdk/client-kms": "^3.927.0",
-    "@aws-sdk/client-s3": "^3.927.0",
-    "aws-sdk": "^2.1692.0",
+    "@aws-sdk/client-kms": "^3.331.0",
+    "@aws-sdk/client-s3": "^3.331.0",
+    "@aws-sdk/lib-storage": "^3.331.0",
+    "@aws-sdk/client-s3-browser": "^3.331.0",
     "dotenv": "^17.2.3",
-    "express": "^5.0.0",
-    "express-openapi-validator": "^5.6.0",
+    "express": "^4.18.2",
     "jose": "^4.15.9",
     "node-fetch": "^3.3.2",
     "pg": "^8.16.3",
@@ -18,15 +27,16 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@types/aws-sdk": "^0.0.42",
-    "@types/express": "^5.0.0",
+    "@types/express": "^4.17.20",
     "@types/jest": "^30.0.0",
-    "@types/node": "^24.10.0",
+    "@types/node": "^20.4.2",
     "@types/pg": "^8.11.10",
+    "@types/uuid": "^9.0.2",
     "jest": "^30.2.0",
-    "pg-mem": "^3.0.5",
-    "ts-jest": "^29.4.5",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.9.3",
+    "@types/node-fetch": "^2.6.2"
   }
 }
+

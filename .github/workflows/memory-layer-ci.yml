@@ -1,0 +1,99 @@
+name: Memory Layer CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'memory-layer/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run TypeScript build, migrations, and integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: illuvrse
+          POSTGRES_PASSWORD: illuvrse_pass
+          POSTGRES_DB: illuvrse_memory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U illuvrse -d illuvrse_memory -h localhost"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgres://illuvrse:illuvrse_pass@localhost:5432/illuvrse_memory
+      NODE_ENV: development
+      # Provide a local signing key so auditChain can sign in tests (dev/local mode).
+      AUDIT_SIGNING_KEY: test-ci-signing-key-please-change
+      # Allow vector writes to queue if provider absent
+      VECTOR_WRITE_QUEUE: 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for Postgres to be ready
+        run: |
+          echo "Waiting for Postgres..."
+          for i in $(seq 1 20); do
+            pg_isready -h localhost -p 5432 -U illuvrse -d illuvrse_memory && break
+            echo "Postgres not ready yet... ($i)"
+            sleep 3
+          done
+        env:
+          PGPASSWORD: illuvrse
+
+      - name: Build TypeScript (memory-layer)
+        run: npm run memory-layer:build
+
+      - name: Run DB migrations
+        run: |
+          npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Run integration tests (memory-layer)
+        run: npm run memory-layer:test:integration
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          AUDIT_SIGNING_KEY: ${{ env.AUDIT_SIGNING_KEY }}
+          NODE_ENV: development
+          # If vector provider is required, configure VECTOR_DB_PROVIDER and endpoint here; default is postgres.
+          VECTOR_DB_PROVIDER: postgres
+
+      - name: Audit verification (quick)
+        run: |
+          # verify recent audit events (limit optional inside verifyTool)
+          npx ts-node memory-layer/service/audit/verifyTool.ts --limit=100
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          AUDIT_SIGNING_KEY: ${{ env.AUDIT_SIGNING_KEY }}
+
+      - name: Upload test logs (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-layer-logs
+          path: |
+            memory-layer/test/**/jest-*.log
+            /tmp/jest.log
+

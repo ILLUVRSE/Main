@@ -6,6 +6,20 @@ import { createMemoryService } from './services/memoryService';
 import { getPool } from './db';
 import { authMiddleware } from './middleware/auth';
 
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+const requireKms = String(process.env.REQUIRE_KMS ?? '').toLowerCase() === 'true';
+if (nodeEnv === 'production' && String(process.env.DEV_SKIP_MTLS ?? '').toLowerCase() === 'true') {
+  console.error('[startup] DEV_SKIP_MTLS=true is forbidden in production');
+  process.exit(1);
+}
+if (nodeEnv === 'production' || requireKms) {
+  const kmsConfigured = Boolean(process.env.AUDIT_KMS_KEY_ID || process.env.KMS_ENDPOINT);
+  if (!kmsConfigured) {
+    console.error('[startup] KMS configuration required in production (set AUDIT_KMS_KEY_ID/KMS_ENDPOINT)');
+    process.exit(1);
+  }
+}
+
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 

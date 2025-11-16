@@ -1,0 +1,5 @@
+- Kernel and SentinelNet have signing proxies that call `/sign` with mTLS support, retry once on transient/5xx, and fall back to `*_SIGNER_KEY_B64` when KMS is unavailable.
+- Fallback signer IDs follow `local-ed25519:<first-8-hex-of-sha256(pubkey)>`; verify path works for both KMS and fallback signatures.
+- Unit tests cover a KMS happy path and a fallback Ed25519 path for both Kernel (`go test ./kernel/internal/signing`) and SentinelNet (`npm test -- --runInBand`).
+- CI guardrails fail fast on `main/prod` when `DEV_SKIP_MTLS=true` or required KMS endpoints are missing; summary warns for non-protected branches.
+- Optional `kms-integration` workflow probes an actual KMS when secrets are available and fails if sign/verify fails.

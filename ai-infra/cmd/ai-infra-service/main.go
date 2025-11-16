@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,9 +24,27 @@ import (
 	"github.com/ILLUVRSE/Main/ai-infra/internal/store"
 )
 
+func enforceProdGuardrails() {
+	nodeEnv := os.Getenv("NODE_ENV")
+	if nodeEnv == "" {
+		nodeEnv = "development"
+	}
+	requireKMS := strings.EqualFold(os.Getenv("REQUIRE_KMS"), "true")
+	if nodeEnv == "production" && strings.EqualFold(os.Getenv("DEV_SKIP_MTLS"), "true") {
+		log.Fatalf("[startup] DEV_SKIP_MTLS=true is forbidden in production")
+	}
+	if nodeEnv == "production" || requireKMS {
+		if os.Getenv("AI_INFRA_KMS_ENDPOINT") == "" && os.Getenv("KMS_ENDPOINT") == "" {
+			log.Fatalf("[startup] KMS endpoint is required in production (set AI_INFRA_KMS_ENDPOINT or KMS_ENDPOINT)")
+		}
+	}
+}
+
 func main() {
 	runRunner := flag.Bool("run-runner", false, "start the local training runner")
 	flag.Parse()
+
+	enforceProdGuardrails()
 
 	cfg, err := config.Load()
 	if err != nil {

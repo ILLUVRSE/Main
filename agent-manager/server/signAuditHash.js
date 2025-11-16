@@ -76,6 +76,9 @@ function signWithLocalRsaDigest(hashBuf, keyMaterial) {
  */
 async function signAuditHash(hash) {
   const hashBuf = normalizeHashInput(hash);
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const requireKms = String(process.env.REQUIRE_KMS || '').toLowerCase() === 'true';
+  const localSigningAllowed = !(nodeEnv === 'production' || requireKms);
 
   // Determine configured key info (may return kid/alg/key or only kid/alg when KMS)
   const keyInfo = await keyStore.getAuditSigningKey();
@@ -86,6 +89,9 @@ async function signAuditHash(hash) {
 
   // 1) If we have local key material (env/file/url), sign locally.
   if (keyInfo && keyInfo.key) {
+    if (!localSigningAllowed) {
+      throw new Error('Local signing is disabled in production; configure AUDIT_SIGNING_KMS_KEY_ID');
+    }
     const keyMaterial = keyInfo.key;
     if (alg === 'hmac-sha256') {
       const signature = signWithLocalHmac(hashBuf, keyMaterial);
@@ -168,10 +174,12 @@ async function signAuditHash(hash) {
   }
 
   // 3) No key material and no KMS -> unsigned
+  if (!localSigningAllowed) {
+    throw new Error('KMS signing required in production but no KMS key configured');
+  }
   return { kid: kid || null, alg, signature: null };
 }
 
 module.exports = {
   signAuditHash
 };
-

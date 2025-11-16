@@ -117,29 +117,6 @@ async function createSignedAuditEvent(actorId = null, eventType, payload = {}) {
         signature = signed.signature;
         signerKid = signed.kid || signerKid;
       }
-    } else {
-      // Last resort: try env-based signing directly here (best-effort).
-      const envKey = process.env.AUDIT_SIGNING_PRIVATE_KEY || null;
-      const alg = (process.env.AUDIT_SIGNING_ALG || 'hmac-sha256').toLowerCase();
-      signerKid = process.env.AUDIT_SIGNER_KID || signerKid;
-      if (envKey) {
-        if (alg === 'hmac-sha256') {
-          signature = crypto.createHmac('sha256', envKey).update(hashBuf).digest('base64');
-        } else if (alg === 'rsa-sha256' || alg === 'rsa') {
-          // Wrap digest in DigestInfo and perform private-key operation for PKCS#1 v1.5 signatures.
-          // DigestInfo prefix for SHA-256:
-          const DIGEST_PREFIX_HEX = '3031300d060960864801650304020105000420';
-          const DIGEST_PREFIX = Buffer.from(DIGEST_PREFIX_HEX, 'hex');
-          const toSign = Buffer.concat([DIGEST_PREFIX, hashBuf]);
-          const signatureBuf = crypto.privateEncrypt(
-            { key: envKey, padding: crypto.constants.RSA_PKCS1_PADDING },
-            toSign
-          );
-          signature = signatureBuf.toString('base64');
-        } else if (alg === 'ed25519') {
-          signature = crypto.sign(null, hashBuf, envKey).toString('base64');
-        }
-      }
     }
   } catch (e) {
     // Log and continue — we still persist the event (unsigned) to avoid losing audit events.
@@ -158,6 +135,9 @@ async function createSignedAuditEvent(actorId = null, eventType, payload = {}) {
     }
   }
 
+  if ((process.env.NODE_ENV || 'development') === 'production' && !signature) {
+    throw new Error('audit_signer: refused to persist unsigned audit event in production (configure KMS)');
+  }
   // 4) persist event
   const ev = await db.createAuditEvent(actorId, eventType, payload, signature, signerKid, prev_hash);
   return {
@@ -174,4 +154,3 @@ module.exports = {
   canonicalize, // exported for testing/debug if needed
   sha256Hex
 };
-

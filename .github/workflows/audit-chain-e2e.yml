@@ -1,0 +1,30 @@
+name: Audit Chain E2E
+
+on:
+  push:
+    branches: [ main, prod ]
+  pull_request:
+    branches: [ main, prod ]
+
+jobs:
+  audit-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: agent-manager/package-lock.json
+
+      - name: Install agent-manager deps
+        run: npm ci
+        working-directory: agent-manager
+
+      - name: Run audit chain integration
+        run: |
+          chmod +x kernel/integration/e2e_audit_chain.sh
+          ./kernel/integration/e2e_audit_chain.sh

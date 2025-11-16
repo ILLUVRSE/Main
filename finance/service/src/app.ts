@@ -17,6 +17,19 @@ import payoutRouter from './controllers/payoutController';
 import proofRouter from './controllers/proofController';
 import payoutApprovalRouter from './controllers/payoutApprovalController';
 
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+const requireKms = String(process.env.REQUIRE_KMS ?? '').toLowerCase() === 'true';
+if (nodeEnv === 'production' && String(process.env.DEV_SKIP_MTLS ?? '').toLowerCase() === 'true') {
+  // mTLS is mandatory in prod; bail fast to avoid accidental insecure runs.
+  throw new Error('DEV_SKIP_MTLS=true is forbidden in production');
+}
+if (nodeEnv === 'production' || requireKms) {
+  const kmsConfigured = Boolean(process.env.KMS_ENDPOINT || process.env.FINANCE_KMS_ENDPOINT || process.env.KMS_KEY_ID || process.env.AWS_KMS_KEY_ID);
+  if (!kmsConfigured) {
+    throw new Error('KMS configuration required in production (set FINANCE_KMS_ENDPOINT/KMS_ENDPOINT + key id)');
+  }
+}
+
 const config = loadConfig();
 const repo =
   config.ledgerRepo === 'postgres'

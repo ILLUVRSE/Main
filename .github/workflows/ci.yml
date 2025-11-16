@@ -7,8 +7,52 @@ on:
     branches: [ main ]
 
 jobs:
+  ci-security-guard:
+    runs-on: ubuntu-latest
+    env:
+      DEV_SKIP_MTLS: ${{ env.DEV_SKIP_MTLS || 'false' }}
+      KERNEL_KMS_ENDPOINT: ${{ secrets.KERNEL_KMS_ENDPOINT || '' }}
+      SENTINEL_KMS_ENDPOINT: ${{ secrets.SENTINEL_KMS_ENDPOINT || '' }}
+      REQUIRE_KMS: ${{ env.REQUIRE_KMS || '' }}
+      AUDIT_SIGNING_PRIVATE_KEY: ${{ secrets.AUDIT_SIGNING_PRIVATE_KEY || '' }}
+    steps:
+      - name: Enforce KMS/mTLS guardrails
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF##*/}"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
+            branch="${GITHUB_BASE_REF}"
+          fi
+          protected=0
+          if [ "$branch" = "main" ] || [ "$branch" = "prod" ]; then
+            protected=1
+          fi
+
+          if [ "$protected" -eq 1 ] && [ "${DEV_SKIP_MTLS}" = "true" ]; then
+            echo "DEV_SKIP_MTLS must be false on protected branches"
+            exit 1
+          fi
+
+          if [ "$protected" -eq 1 ] && [ "${REQUIRE_KMS}" = "false" ]; then
+            echo "REQUIRE_KMS cannot be false on protected branches"
+            exit 1
+          fi
+
+          if [ "$protected" -eq 1 ] && [ -n "${AUDIT_SIGNING_PRIVATE_KEY}" ]; then
+            echo "AUDIT_SIGNING_PRIVATE_KEY must not be provided on protected branches (use KMS)"
+            exit 1
+          fi
+
+          if [ "$protected" -eq 1 ]; then
+            if [ -z "${KERNEL_KMS_ENDPOINT}" ] && [ -z "${SENTINEL_KMS_ENDPOINT}" ]; then
+              echo "KMS endpoints missing for protected branch; set KERNEL_KMS_ENDPOINT or SENTINEL_KMS_ENDPOINT"
+              exit 1
+            fi
+          fi
+
   test:
     runs-on: ubuntu-latest
+    needs: ci-security-guard
     services:
       postgres:
         image: postgres:15
@@ -66,4 +110,3 @@ jobs:
         env:
           SENTINEL_DB_URL: postgres://postgres:password@localhost:5432/sentinel_db
           NODE_ENV: test
-

@@ -11,9 +11,52 @@ on:
       - '.github/workflows/sentinelnet-ci.yml'
 
 jobs:
+  ci-security-guard:
+    runs-on: ubuntu-latest
+    env:
+      DEV_SKIP_MTLS: ${{ env.DEV_SKIP_MTLS || 'false' }}
+      KERNEL_KMS_ENDPOINT: ${{ secrets.KERNEL_KMS_ENDPOINT || '' }}
+      SENTINEL_KMS_ENDPOINT: ${{ secrets.SENTINEL_KMS_ENDPOINT || '' }}
+    steps:
+      - name: Enforce KMS/mTLS safety defaults
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF##*/}"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
+            branch="${GITHUB_BASE_REF}"
+          fi
+          protected=0
+          if [ "$branch" = "main" ] || [ "$branch" = "prod" ]; then
+            protected=1
+          fi
+
+          if [ "$protected" -eq 1 ] && [ "${DEV_SKIP_MTLS}" = "true" ]; then
+            echo "DEV_SKIP_MTLS cannot be true on protected branches ($branch)"
+            exit 1
+          fi
+
+          if [ "$protected" -eq 1 ]; then
+            missing=0
+            if [ -z "${SENTINEL_KMS_ENDPOINT}" ]; then
+              echo "SENTINEL_KMS_ENDPOINT missing for protected branch"
+              missing=1
+            fi
+            if [ -z "${KERNEL_KMS_ENDPOINT}" ]; then
+              echo "KERNEL_KMS_ENDPOINT missing for protected branch (required for Kernel consumers)"
+            fi
+            if [ "$missing" -eq 1 ]; then
+              exit 1
+            fi
+          else
+            if [ -z "${SENTINEL_KMS_ENDPOINT}" ]; then
+              echo "warning: SENTINEL_KMS_ENDPOINT not set; signing will fall back to dev key" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
   sentinelnet:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: ci-security-guard
     services:
       postgres:
         image: postgres:15
@@ -29,7 +72,7 @@ jobs:
           --health-retries 5
     env:
       SENTINEL_DB_URL: postgres://postgres:password@localhost:5432/sentinel_db
-      DEV_SKIP_MTLS: 'true'
+      DEV_SKIP_MTLS: ${{ (github.ref_name == 'main' || github.ref_name == 'prod') && 'false' || 'true' }}
       NODE_ENV: test
     steps:
       - name: Checkout
@@ -64,6 +107,64 @@ jobs:
       - name: Run run-local script
         env:
           SENTINEL_DB_URL: postgres://postgres:password@postgres:5432/sentinel_db
-          DEV_SKIP_MTLS: 'true'
+          DEV_SKIP_MTLS: ${{ (github.ref_name == 'main' || github.ref_name == 'prod') && 'false' || 'true' }}
         run: ./run-local.sh
         working-directory: sentinelnet
+
+  kms-integration:
+    runs-on: ubuntu-latest
+    needs: [ci-security-guard, sentinelnet]
+    if: ${{ secrets.SENTINEL_KMS_ENDPOINT != '' && secrets.SENTINEL_CLIENT_CERT != '' && secrets.SENTINEL_CLIENT_KEY != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Smoke test KMS sign/verify
+        env:
+          KMS_ENDPOINT: ${{ secrets.SENTINEL_KMS_ENDPOINT }}
+          CLIENT_CERT: ${{ secrets.SENTINEL_CLIENT_CERT }}
+          CLIENT_KEY: ${{ secrets.SENTINEL_CLIENT_KEY }}
+          CA_CERT: ${{ secrets.SENTINEL_CA_CERT || '' }}
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          write_pem() {
+            local content="$1" dest="$2"
+            printf '%s' "$content" | base64 --decode >"$dest" 2>/dev/null || printf '%s' "$content" >"$dest"
+          }
+          write_pem "${CLIENT_CERT}" "${workdir}/client.crt"
+          write_pem "${CLIENT_KEY}" "${workdir}/client.key"
+          if [ -n "${CA_CERT}" ]; then
+            write_pem "${CA_CERT}" "${workdir}/ca.crt"
+            ca_flag="--cacert ${workdir}/ca.crt"
+          else
+            ca_flag=""
+          fi
+
+          payload="$(printf 'kms-ci-check-%s' "$(date +%s)" | base64 | tr -d '\n')"
+          sign_resp="$(curl --fail --silent --show-error \
+            --cert "${workdir}/client.crt" --key "${workdir}/client.key" ${ca_flag} \
+            -H "Content-Type: application/json" \
+            -X POST -d "{\"payload_b64\":\"${payload}\"}" \
+            "${KMS_ENDPOINT}/sign")"
+
+          sig="$(python3 - <<'PY' "$sign_resp"
+import json,sys
+resp=json.loads(sys.argv[1])
+sig=resp.get("signature_b64","")
+sid=resp.get("signer_id","")
+print(f"{sig}|{sid}")
+PY
+)"
+          signature="${sig%|*}"
+          signer_id="${sig#*|}"
+          if [ -z "$signature" ]; then
+            echo "missing signature_b64 in KMS response"; exit 1;
+          fi
+
+          verify_resp="$(curl --fail --silent --show-error \
+            --cert "${workdir}/client.crt" --key "${workdir}/client.key" ${ca_flag} \
+            -H "Content-Type: application/json" \
+            -X POST -d "{\"payload_b64\":\"${payload}\",\"signature_b64\":\"${signature}\",\"signer_id\":\"${signer_id}\"}" \
+            "${KMS_ENDPOINT}/verify")"
+          echo "verify response: $verify_resp"

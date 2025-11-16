@@ -15,7 +15,6 @@ import (
 func TestSigningProxyKMSRetryThenSuccess(t *testing.T) {
 	payload := []byte("retry-payload")
 	pub, priv, _ := ed25519.GenerateKey(crand.Reader)
-	_ = pub
 
 	call := 0
 	ts := newLockedDownServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +87,6 @@ func TestSigningProxyKMSRetryThenSuccess(t *testing.T) {
 func TestVerifyWithKMSReturnsFalse(t *testing.T) {
 	payload := []byte("verify-false")
 	pub, priv, _ := ed25519.GenerateKey(crand.Reader)
-	_ = pub
 
 	ts := newLockedDownServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

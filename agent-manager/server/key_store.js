@@ -212,6 +212,9 @@ function normalizeHashInput(hash) {
  */
 async function signAuditHash(hash) {
   const hashBuf = normalizeHashInput(hash);
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const requireKms = String(process.env.REQUIRE_KMS || '').toLowerCase() === 'true';
+  const localSigningAllowed = !(nodeEnv === 'production' || requireKms);
 
   // Try KMS adapter digest signing first if configured
   const src = (process.env.AUDIT_SIGNING_KEY_SOURCE || 'env').toLowerCase();
@@ -236,6 +239,9 @@ async function signAuditHash(hash) {
 
   // 3) Local key material signing (env/file/url)
   if (keyInfo && keyInfo.key) {
+    if (!localSigningAllowed) {
+      throw new Error('Local signing is disabled in production; configure AUDIT_SIGNING_KMS_KEY_ID');
+    }
     const keyMaterial = keyInfo.key;
     if (alg === 'hmac-sha256') {
       const sig = crypto.createHmac('sha256', keyMaterial).update(hashBuf).digest('base64');
@@ -264,6 +270,9 @@ async function signAuditHash(hash) {
   }
 
   // 4) Fallback: if no key material and no KMS adapter, attempt env fallbacks (already covered above)
+  if (!localSigningAllowed) {
+    throw new Error('KMS signing required in production but no KMS key configured');
+  }
   // If nothing available, return unsigned marker
   return { kid, alg, signature: null };
 }
@@ -271,6 +280,9 @@ async function signAuditHash(hash) {
 /* ---------- Existing signAuditCanonical retained for message signing path ---------- */
 async function signAuditCanonical(canonical) {
   const src = (process.env.AUDIT_SIGNING_KEY_SOURCE || 'env').toLowerCase();
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const requireKms = String(process.env.REQUIRE_KMS || '').toLowerCase() === 'true';
+  const localSigningAllowed = !(nodeEnv === 'production' || requireKms);
 
   // 1) If using KMS and a KMS adapter is available, delegate signing to it.
   if ((src === 'kms' || src === 'aws-kms') && kmsAdapter && typeof kmsAdapter.signAuditCanonical === 'function') {
@@ -282,6 +294,9 @@ async function signAuditCanonical(canonical) {
   if (!keyInfo) {
     // No key known; return null to indicate unsigned.
     return null;
+  }
+  if (!localSigningAllowed && keyInfo.key) {
+    throw new Error('Local canonical signing is disabled in production; configure AUDIT_SIGNING_KMS_KEY_ID');
   }
   const alg = (keyInfo.alg || 'hmac-sha256').toLowerCase();
   const kid = keyInfo.kid || (process.env.AUDIT_SIGNER_KID || 'local');
@@ -313,4 +328,3 @@ module.exports = {
   signAuditCanonical,
   signAuditHash
 };
-

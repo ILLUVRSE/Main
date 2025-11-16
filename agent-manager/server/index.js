@@ -15,6 +15,25 @@ const db = require('./db');
 const auditSigner = require('./audit_signer');
 const signatureVerify = require('./middleware/signatureVerify');
 
+function enforceProdGuardrails() {
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const requireKms = String(process.env.REQUIRE_KMS || '').toLowerCase() === 'true';
+  if (nodeEnv === 'production' && String(process.env.DEV_SKIP_MTLS || '').toLowerCase() === 'true') {
+    console.error('[startup] DEV_SKIP_MTLS=true is forbidden in production');
+    process.exit(1);
+  }
+
+  if (nodeEnv === 'production' || requireKms) {
+    const kmsConfigured = Boolean(process.env.AUDIT_SIGNING_KMS_KEY_ID || process.env.KMS_ENDPOINT);
+    if (!kmsConfigured) {
+      console.error('[startup] KMS is required in production: set AUDIT_SIGNING_KMS_KEY_ID or KMS_ENDPOINT');
+      process.exit(1);
+    }
+  }
+}
+
+enforceProdGuardrails();
+
 const app = express();
 
 // capture raw body for signature verification
@@ -428,4 +447,3 @@ process.on('SIGTERM', shutdown);
 
 /* Launch */
 start();
-

@@ -10,6 +10,24 @@ import metrics from './metrics/metrics';
 import logger from './logger';
 import { runMigrations } from './db';
 
+function enforceProdGuardrails() {
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const requireKms = String(process.env.REQUIRE_KMS || '').toLowerCase() === 'true';
+  if (nodeEnv === 'production' && String(process.env.DEV_SKIP_MTLS || '').toLowerCase() === 'true') {
+    logger.error('[startup] DEV_SKIP_MTLS=true is forbidden in production');
+    process.exit(1);
+  }
+  if (nodeEnv === 'production' || requireKms) {
+    const kmsConfigured = Boolean(process.env.SENTINEL_KMS_ENDPOINT || process.env.KMS_ENDPOINT);
+    if (!kmsConfigured) {
+      logger.error('[startup] KMS endpoint is required in production (set SENTINEL_KMS_ENDPOINT or KMS_ENDPOINT)');
+      process.exit(1);
+    }
+  }
+}
+
+enforceProdGuardrails();
+
 const config = loadConfig();
 
 export async function boot(opts?: { migrate?: boolean }) {
@@ -46,4 +64,3 @@ export async function boot(opts?: { migrate?: boolean }) {
 }
 
 export default app;
-

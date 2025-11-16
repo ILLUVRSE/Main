@@ -1,51 +1,146 @@
-# Memory Layer — Core Module
+# Memory Layer — Local Development, Testing, and Operations
 
-## # Purpose
-The Memory Layer provides persistent, auditable memory for ILLUVRSE: relational state (Postgres), semantic vectors (Vector DB), and large artifacts (S3). It is the canonical store for MemoryNodes, artifact metadata, embeddings, and provenance references used by Kernel, Agent Manager, and other platform services.
+This README explains how to run, test, and operate the Memory Layer locally and in CI. It summarizes all core commands and environment variables required by the service.
 
-All writes must emit AuditEvents linking to manifestSignatureId and artifact checksums in order to preserve an auditable provenance chain.
+> **Note:** This module is part of the ILLUVRSE monorepo. Many scripts assume you run them either from the repository root or from the `memory-layer` subdirectory.
 
-## # Location
-All files for the Memory Layer live under:
-`~/ILLUVRSE/Main/memory-layer/`
+---
 
-## # Files in this module
-- `memory-layer-spec.md` — canonical specification (data models, APIs, storage patterns, security, retention, and acceptance criteria).  
-- `README.md` — this file.  
-- `deployment.md` — deployment guidance and infra notes (to be created).  
-- `api.md` — API surface and examples (to be created).  
-- `acceptance-criteria.md` — testable checks for the Memory Layer (to be created).  
-- `.gitignore` — local ignores for runtime files (to be created).
+## Quick Start (Local Development)
 
-## # How to use this module
-1. Read `memory-layer-spec.md` to understand canonical models, required Postgres schema, Vector DB indexing, and artifact metadata.  
-2. Implement or integrate services that provide documented public interfaces: `createMemoryNode`, `storeEmbedding`, `searchEmbedding`, `putArtifact`, `getArtifactMetadata`.  
-3. On each write:
-   * Persist metadata in Postgres and vector in Vector DB.  
-   * Attach manifestSignatureId and artifact checksum.  
-   * Emit AuditEvent with `hash`, `prevHash`, `signature`, and provenance pointers so the audit chain can be verified.  
-4. Enforce TTL, legal-hold, and PII flags; provide soft-delete semantics and legal-hold exceptions.
+### Prerequisites
 
-## # Security & compliance
-- TLS everywhere and encryption-at-rest required.  
-- RBAC must be enforced for read/write operations; Kernel/authorized services only for certain actions.  
-- PII must be flagged and read operations must be restricted or redacted per SentinelNet policy.  
-- Archive audit events to S3 with object-lock for immutability.
+* Node 18+
+* Docker (used for Postgres)
+* `npx` and `ts-node` installed (via `npm install`)
 
-## # Observability & recovery
-- Expose ingestion rate, vector write latency, search latency (p95), queue depth, and worker error rate.  
-- Provide tracing that includes memoryNodeId, traceId, and caller.  
-- Test backup/restore for Postgres and Vector DB, and replay of audit archives to rebuild metadata.
+### Start Local Postgres
 
-## # Acceptance & sign-off
-Memory Layer is accepted when:
-* Postgres schema (`memory_nodes`, `artifact` and indexes) implemented and tested.  
-* Vector DB index and embedding pipeline function and idempotency guaranteed.  
-* Artifact uploads produce checksums stored in Postgres and linked audit events.  
-* Retention, TTL, and legal-hold behavior works in tests.  
+```bash
+docker run -d --name illuvrse-postgres \
+  -e POSTGRES_USER=illuvrse \
+  -e POSTGRES_PASSWORD=illuvrse_pass \
+  -e POSTGRES_DB=illuvrse_memory \
+  -p 5432:5432 \
+  postgres:14
+```
 
-Final approver: **Ryan (SuperAdmin)**. Security Engineer should review encryption, PII handling, and KMS/Vault integration.
+### Install Dependencies
 
-## # Next single step
-Create `deployment.md` for the Memory Layer (one file) describing Postgres schema migrations, Vector DB provisioning, and S3 bucket policies (versioning + object-lock). When ready, reply **“next-memory-layer”** and I’ll generate the exact content for that file.
+From the repo root:
+
+```bash
+npm ci
+```
+
+### Run Migrations
+
+```bash
+DATABASE_URL=postgres://illuvrse:illuvrse_pass@localhost:5432/illuvrse_memory \
+  npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations
+```
+
+### Start the Service (Dev)
+
+```bash
+DATABASE_URL=postgres://illuvrse:illuvrse_pass@localhost:5432/illuvrse_memory \
+PORT=4300 \
+NODE_ENV=development \
+npx ts-node memory-layer/service/server.ts
+```
+
+### Optional: Vector Worker & TTL Cleaner
+
+```bash
+# Vector worker
+npx ts-node memory-layer/service/worker/vectorWorker.ts
+
+# TTL cleaner
+npx ts-node memory-layer/service/jobs/ttlCleaner.ts
+```
+
+---
+
+## Integration Tests
+
+Integration tests require a running Postgres instance reachable via `DATABASE_URL`.
+
+```bash
+# ensure Postgres + migrations
+DATABASE_URL=postgres://illuvrse:illuvrse_pass@localhost:5432/illuvrse_memory \
+npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations
+
+# run integration tests
+npm run test:integration --prefix memory-layer
+# or
+npm run memory-layer:test:integration
+```
+
+CI environments can use `memory-layer/service/audit/ci-env-setup.sh`, which boots a local signing‑proxy mock and sets `AUDIT_SIGNING_KEY` / `SIGNING_PROXY_URL` to support audit signing in tests.
+
+---
+
+## Audit & Signing
+
+* Production must use KMS (`AUDIT_SIGNING_KMS_KEY_ID`) or a secure signing proxy (`SIGNING_PROXY_URL`).
+* Local dev / CI may use `AUDIT_SIGNING_KEY` or the included mock signer.
+* `REQUIRE_KMS=true` or `NODE_ENV=production` blocks startup unless a signer is configured.
+
+### Tools
+
+* `memory-layer/tools/auditReplay.ts` — replay archived audit JSON into Postgres.
+* `memory-layer/service/audit/verifyTool.ts` — verify audit chain & signatures.
+* `memory-layer/service/audit/archiver.ts` — export audit batches to S3 with object‑lock.
+
+---
+
+## Vector DB
+
+* Default dev provider is Postgres (stores JSON vector data in `memory_vectors`).
+* Production should use an ANN provider (pgvector, Milvus, Pinecone).
+* Configure via: `VECTOR_DB_PROVIDER`, `VECTOR_DB_ENDPOINT`, `VECTOR_DB_API_KEY`.
+* `VECTOR_WRITE_QUEUE=true` enables queue fallback when external writes fail.
+
+---
+
+## Key Environment Variables
+
+* `DATABASE_URL` — Postgres connection string
+* `NODE_ENV` — `development` or `production`
+* `REQUIRE_KMS` — require signer at startup
+* `AUDIT_SIGNING_KMS_KEY_ID`, `AUDIT_SIGNING_ALG`
+* `SIGNING_PROXY_URL`, `SIGNING_PROXY_API_KEY`
+* `AUDIT_SIGNING_KEY` / `MOCK_AUDIT_SIGNING_KEY`
+* `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET`
+* `VECTOR_DB_PROVIDER`, `VECTOR_DB_ENDPOINT`, `VECTOR_DB_API_KEY`, `VECTOR_WRITE_QUEUE`
+
+---
+
+## CI Workflow
+
+The GitHub Actions workflow (`.github/workflows/memory-layer-ci.yml`) performs:
+
+1. Boots a Postgres 14 service container
+2. Installs dependencies
+3. Builds TypeScript (`npm run memory-layer:build`)
+4. Runs DB migrations
+5. Executes integration tests
+6. Runs audit verification
+
+---
+
+## Operational Notes
+
+* See `memory-layer/docs/runbook_signing.md` for signing/KMS operations.
+* See `memory-layer/deployment.md` for deployment & DR procedures.
+* Production requires `AUDIT_SIGNING_KMS_KEY_ID` or a valid signer configuration.
+
+---
+
+## Next Steps / TODO
+
+* Replace mock signer with real KMS or signing proxy in staging/prod.
+* Migrate vector adapter to a production ANN provider.
+* Align `@types/express` versions and remove remaining `as any` casts.
+* Complete CI secret handling via Vault.
 

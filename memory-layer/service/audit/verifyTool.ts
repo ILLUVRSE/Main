@@ -9,17 +9,17 @@
  * Behavior:
  *  - Verifies prev_hash chaining (each row.prev_hash === previousRow.hash).
  *  - Recomputes digest via canonicalizePayload + computeAuditDigest and compares to stored `hash`.
- *  - If signature present, calls kmsAdapter.verifySignature(signatureBase64, Buffer.from(digestHex,'hex')).
+ *  - If signature present, calls auditChain.verifySignature(signatureBase64, Buffer.from(digestHex,'hex')).
  *
  * Exit code: 0 if everything verified; non-zero if any failures detected.
  */
 
 import { Client } from 'pg';
-import { canonicalizePayload, computeAuditDigest } from './auditChain';
-import * as kmsAdapter from './kmsAdapter';
+import auditChain from './auditChain';
 
 type AuditRow = {
   id: string;
+  event_type: string;
   payload: any;
   prev_hash: string | null;
   hash: string;
@@ -28,12 +28,11 @@ type AuditRow = {
   created_at: string;
 };
 
-const argv = process.argv.slice(2);
-const parseArg = (name: string) => {
+function parseArg(name: string): string | undefined {
   const prefix = `--${name}=`;
-  const arg = argv.find((a) => a.startsWith(prefix));
+  const arg = process.argv.slice(2).find((a) => a.startsWith(prefix));
   return arg ? arg.slice(prefix.length) : undefined;
-};
+}
 
 async function main() {
   const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
@@ -51,7 +50,7 @@ async function main() {
 
   try {
     const qParts: string[] = [
-      'SELECT id, payload, prev_hash, hash, signature, manifest_signature_id, created_at',
+      'SELECT id, event_type, payload, prev_hash, hash, signature, manifest_signature_id, created_at',
       'FROM audit_events'
     ];
     const params: any[] = [];
@@ -80,29 +79,28 @@ async function main() {
     console.log(`Verifying ${res.rows.length} audit events...`);
     for (const row of res.rows) {
       idx += 1;
-      const canonical = canonicalizePayload(row.payload ?? null);
-      const computedDigestHex = computeAuditDigest(canonical, row.prev_hash ?? null);
+
+      const canonical = auditChain.canonicalizePayload(row.payload ?? null);
+      const computedDigestHex = auditChain.computeAuditDigest(canonical, row.prev_hash ?? null);
 
       const chainOk = row.prev_hash === lastHashSeen;
       const hashMatches = computedDigestHex === row.hash;
       let sigValid = false;
       let sigError: string | null = null;
-      let signaturePresent = Boolean(row.signature);
+      const signaturePresent = Boolean(row.signature);
 
       if (signaturePresent) {
         try {
           const digestBuf = Buffer.from(computedDigestHex, 'hex');
-          sigValid = await kmsAdapter.verifySignature(row.signature as string, digestBuf);
+          sigValid = await auditChain.verifySignature(row.signature as string, digestBuf);
         } catch (err) {
           sigError = (err as Error).message || String(err);
         }
       }
 
-      // If prev_hash is null for the first row, chainOk expects lastHashSeen to be null.
-      // For non-first rows, chainOk must be true.
       const rowIssues: string[] = [];
-      if (!chainOk) rowIssues.push(`CHAIN_BROKEN(prev_hash != previous.hash)`);
-      if (!hashMatches) rowIssues.push(`HASH_MISMATCH(computed != stored)`);
+      if (!chainOk) rowIssues.push('CHAIN_BROKEN(prev_hash != previous.hash)');
+      if (!hashMatches) rowIssues.push('HASH_MISMATCH(computed != stored)');
       if (!signaturePresent) rowIssues.push('UNSIGNED');
       else if (!sigValid) {
         rowIssues.push(sigError ? `SIG_INVALID(${sigError})` : 'SIG_INVALID');
@@ -110,9 +108,8 @@ async function main() {
 
       if (rowIssues.length) anyFailures = true;
 
-      // Output concise per-row status
       console.log(
-        `[${idx.toString().padStart(3)}] id=${row.id} ts=${row.created_at} manifestSig=${row.manifest_signature_id ?? 'n/a'}`
+        `[${idx.toString().padStart(3)}] id=${row.id} ts=${row.created_at} type=${row.event_type} manifestSig=${row.manifest_signature_id ?? 'n/a'}`
       );
       console.log(`       prev_hash=${row.prev_hash ?? 'null'}`);
       console.log(`       stored_hash=${row.hash}`);
@@ -121,6 +118,7 @@ async function main() {
       if (sigError) console.log(`       sig_error=${sigError}`);
       if (rowIssues.length) console.log(`       ISSUES: ${rowIssues.join('; ')}`);
       console.log('');
+
       lastHashSeen = row.hash;
     }
 

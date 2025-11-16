@@ -3,20 +3,18 @@
  *
  * PII redaction middleware and helpers.
  *
- * Improvements:
- *  - Stronger safety: also wraps res.send for JSON string responses.
- *  - Keeps existing exported helpers: canReadPii, redactMemoryNodeView, redactPayloadIfNeeded.
- *  - More defensive handling for unexpected shapes and errors (middleware will never crash the request).
- *
  * Behavior:
- *  - If caller has read:pii scope, responses are passed through unchanged.
+ *  - If principal has the read:pii scope, responses are passed through unchanged.
  *  - Otherwise, removes `piiFlags` / `pii_flags` fields and any nested occurrences.
  *  - Applies to JSON responses produced by res.json(...) and JSON strings sent via res.send(...).
+ *
+ * Safety:
+ *  - Middleware is defensive: it never throws; in failure cases it leaves the body unchanged.
+ *  - Does not attempt to detect or redact arbitrary PII values (only the structured `piiFlags` markers).
  */
 
 import { Request, Response, NextFunction } from 'express';
-import type { AuthenticatedPrincipal } from '../../../kernel/src/middleware/auth';
-import type { MemoryNodeView } from '../types';
+import { AuthenticatedPrincipal } from './auth';
 import { hasScope, MemoryScopes } from './auth';
 
 /**
@@ -34,93 +32,89 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
 };
 
 /**
- * Remove PII flags from an object recursively.
- * Preserves shape but replaces any `piiFlags`/`pii_flags` objects with empty objects.
- *
- * NOTE: This deliberately only strips the PII *flags* structure. If you want to redact specific
- * fields (emails, ssn, etc.) implement a separate sanitizer that runs before sending.
+ * Deep clone and strip PII flags recursively.
+ * Replaces any property named `piiFlags`, `pii_flags`, or `pii` (case-insensitive) with an empty object.
  */
-const stripPiiFlags = (payload: unknown): unknown => {
+export function stripPiiFlags(value: unknown): unknown {
   try {
-    if (Array.isArray(payload)) {
-      return payload.map((item) => stripPiiFlags(item));
-    }
-    if (!isPlainObject(payload)) {
-      return payload;
+    if (Array.isArray(value)) {
+      return value.map((item) => stripPiiFlags(item));
     }
 
-    const clone: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(payload)) {
-      const lower = key.toLowerCase();
+    if (!isPlainObject(value)) {
+      return value;
+    }
+
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      const lower = k.toLowerCase();
       if (lower === 'piiflags' || lower === 'pii_flags' || lower === 'pii') {
-        // zero out the PII flags object
-        clone[key] = {};
+        // preserve key but zero out PII flags object
+        out[k] = {};
         continue;
       }
-      // Recurse for nested objects/arrays
-      clone[key] = stripPiiFlags(value);
+
+      // Recurse into objects/arrays
+      if (Array.isArray(v)) {
+        out[k] = v.map((item) => stripPiiFlags(item));
+      } else if (isPlainObject(v)) {
+        out[k] = stripPiiFlags(v);
+      } else {
+        out[k] = v;
+      }
     }
-    return clone;
+    return out;
   } catch (err) {
-    // In the unlikely event of an error during redaction, fail-open by returning original payload.
-    // We log to console for operators to inspect (do not throw).
+    // Fail-open: on error, return original value (do not throw from middleware)
     // eslint-disable-next-line no-console
     console.error('[piiRedaction] stripPiiFlags error:', (err as Error).message || err);
+    return value;
+  }
+}
+
+/**
+ * Convenience to redact a response payload if principal lacks READ_PII scope.
+ */
+export const redactPayloadIfNeeded = <T>(payload: T, principal?: AuthenticatedPrincipal): T => {
+  try {
+    if (canReadPii(principal)) return payload;
+    return stripPiiFlags(payload) as T;
+  } catch {
     return payload;
   }
 };
 
 /**
- * Redact MemoryNodeView (returns a copy).
- */
-export const redactMemoryNodeView = (node: MemoryNodeView, principal?: AuthenticatedPrincipal): MemoryNodeView =>
-  canReadPii(principal)
-    ? node
-    : {
-        ...node,
-        piiFlags: {}
-      };
-
-/**
- * Generic payload redactor: strips PII flags for non-authorized principals.
- */
-export const redactPayloadIfNeeded = <T>(payload: T, principal?: AuthenticatedPrincipal): T =>
-  canReadPii(principal) ? payload : (stripPiiFlags(payload) as T);
-
-/**
- * Express middleware: if the principal cannot read PII, override res.json and res.send to strip PII flags.
- * This is defensive and will not modify non-JSON responses.
+ * Express middleware: override res.json and res.send to redact PII flags for unauthorized principals.
  */
 export const piiRedactionMiddleware = (req: Request, res: Response, next: NextFunction): void => {
   const principal = req.principal as AuthenticatedPrincipal | undefined;
 
   if (canReadPii(principal)) {
+    // authorized to view PII — no-op
     next();
     return;
   }
 
-  // Preserve original methods
+  // Preserve originals
   const originalJson = res.json.bind(res);
   const originalSend = res.send.bind(res);
 
   // Override res.json(body)
-  res.json = ((body: unknown) => {
+  res.json = ((body?: any) => {
     try {
       const redacted = stripPiiFlags(body);
-      // Ensure we still use the original json sender
       return originalJson(redacted);
     } catch (err) {
-      // If anything went wrong, log and fall back to original body
       // eslint-disable-next-line no-console
       console.error('[piiRedaction] res.json redaction failed:', (err as Error).message || err);
       return originalJson(body);
     }
   }) as typeof res.json;
 
-  // Override res.send for JSON strings/objects
+  // Override res.send for JSON-like strings and objects
   res.send = ((body?: any) => {
     try {
-      // If body is a string that looks like JSON, attempt parse -> redact -> stringify
       if (typeof body === 'string') {
         const trimmed = body.trim();
         if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
@@ -129,21 +123,17 @@ export const piiRedactionMiddleware = (req: Request, res: Response, next: NextFu
             const redacted = stripPiiFlags(parsed);
             return originalSend(JSON.stringify(redacted));
           } catch {
-            // not valid JSON — fall through to send original body
             return originalSend(body);
           }
         }
-        // not JSON string, send as-is
         return originalSend(body);
       }
 
-      // If body is object/array, apply redaction
-      if (typeof body === 'object' && body !== null) {
+      if (Array.isArray(body) || isPlainObject(body)) {
         const redacted = stripPiiFlags(body);
         return originalSend(redacted);
       }
 
-      // primitive types — send as-is
       return originalSend(body);
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -153,5 +143,12 @@ export const piiRedactionMiddleware = (req: Request, res: Response, next: NextFu
   }) as typeof res.send;
 
   next();
+};
+
+export default {
+  canReadPii,
+  stripPiiFlags,
+  redactPayloadIfNeeded,
+  piiRedactionMiddleware
 };
 

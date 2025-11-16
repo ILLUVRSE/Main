@@ -1,184 +1,302 @@
-# Memory Layer — Deployment Guide (Hardened)
+# Memory Layer Deployment, Security, and Operations Specification
 
-This document describes how to provision, configure, and operate the Memory Layer service.
-It has been updated to reflect strict audit-signing guardrails, Vector DB queue fallback, and operational runbooks.
+0. Summary / Intent
 
----
+Memory Layer is a multi-store service (Postgres + Vector DB + S3) that must guarantee:
 
-## 0. Summary / Intent
-
-Memory Layer is a multi-store subsystem (Postgres + Vector DB + S3) fronted by an Express API and worker pool. Production must ensure:
-
-- Audit chain signing is always available and enforced (KMS, signing proxy, or a controlled local key only as fallback).
-- Audit events are canonicalized and signed before any state-changing operation commits.
-- Artifacts stored in S3-compatible storage with object-lock for audit archives.
-- Vector writes are idempotent and queued for replay on failure.
-- TTL/Legal-hold behavior supported by scheduled job(s).
+* Atomic, signed audit events for every state change (no unsigned rows in production).
+* Auditable provenance (hash, prev_hash, signature, manifestSignatureId).
+* Immutable audit archive (S3 Object Lock) and verification tooling.
+* Idempotent, reliable vector pipeline with queue fallback.
+* TTL / legal-hold semantics and signed deletion audit events.
+* RBAC, PII redaction, observability, and documented operational runbook.
 
 ---
 
-## 1. Required Components
+## 1) Required cloud components & names (exact)
 
-- **Postgres** (>= 14, PITR enabled) — canonical metadata + audit store.
-- **Vector DB** (Milvus / Pinecone / pgvector / custom) — ANN index for embeddings.
-- **Object storage** (S3 or S3-compatible like MinIO) — artifacts + audit archive with object-lock.
-- **KMS / Signing Service** — AWS KMS or a signing proxy/HSM to sign audit digests.
-- **Workers** — vector worker + TTL cleaner.
-- **Secrets manager** — Vault or platform secret manager for runtime secrets.
+* **Postgres** (>=14) with PITR + WAL archiving.
 
----
+  * Connection string: `DATABASE_URL` (e.g., `postgresql://user:pass@host:5432/illuvrse`)
 
-## 2. Environment variables (key ones)
+* **Vector DB**
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres connection string |
-| `VECTOR_DB_PROVIDER` | `postgres` (default) or provider name |
-| `VECTOR_DB_ENDPOINT` | Vector provider endpoint (optional) |
-| `VECTOR_DB_API_KEY` | Vector provider API key (if applicable) |
-| `VECTOR_DB_NAMESPACE` | Namespace for vectors (default `kernel-memory`) |
-| `VECTOR_WRITE_QUEUE` | `true` to enable DB queue fallback for external provider writes |
-| `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET` | S3 or MinIO config |
-| `AUDIT_SIGNING_KMS_KEY_ID` | Preferred: AWS KMS KeyId/ARN for signing |
-| `SIGNING_PROXY_URL` | Optional: remote signing proxy endpoint |
-| `AUDIT_SIGNING_KEY` / `AUDIT_SIGNING_SECRET` / `AUDIT_SIGNING_PRIVATE_KEY` | Local-signing fallback (not for prod unless managed) |
-| `REQUIRE_KMS` | If `true`, service refuses start when no signer is configured |
-| `NODE_ENV` | `production`/`staging`/`dev` — production enables strict guards |
-| `PORT` | Service port (default 4300) |
+  * Provider choices: `pgvector`, `milvus`, `pinecone`, etc.
+  * Environment variables:
 
-**Startup signing guard**  
-On startup, the service performs a conservative check: if `NODE_ENV=production` **or** `REQUIRE_KMS=true`, at least one of the following must be configured:
+    * `VECTOR_DB_PROVIDER` — `postgres` | `milvus` | `pinecone` | ...
+    * `VECTOR_DB_ENDPOINT` — (if required)
+    * `VECTOR_DB_API_KEY` — (if required)
+    * `VECTOR_DB_NAMESPACE` — default `kernel-memory`
 
-- `AUDIT_SIGNING_KMS_KEY_ID` (preferred—AWS KMS)
-- `SIGNING_PROXY_URL` (centralized signing/HSM proxy)
-- `AUDIT_SIGNING_KEY` / `AUDIT_SIGNING_SECRET` / `AUDIT_SIGNING_PRIVATE_KEY` (local key fallback)
+* **Object storage (S3-compatible)**:
 
-If none present, the service exits with a clear error message. This prevents unsigned audit events in production.
+  * Primary artifact bucket: `illuvrse-memory-${ENV}`
+  * Audit archive bucket (COMPLIANCE/immutable): `illuvrse-audit-archive-${ENV}` (Object Lock COMPLIANCE, versioning ON)
+  * Environment variables:
 
----
+    * `S3_ENDPOINT` (optional for MinIO)
+    * `S3_REGION` (optional)
+    * `S3_ACCESS_KEY`, `S3_SECRET` (or IAM)
 
-## 3. Postgres provisioning & migrations
+* **Audit Signing** (KMS preferred)
 
-- Provision HA Postgres (>=14) with PITR and WAL archiving.
-- Run migrations via:
-  ```bash
-  DATABASE_URL=... npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations
-  ```
+  * Preferred: AWS KMS key (HMAC or asymmetric).
 
-* Important tables: `memory_nodes`, `memory_vectors`, `artifacts`, `audit_events`, `schema_migrations`.
-* Ensure `pgcrypto` extension is enabled (migrations create it).
-* Use role grants / RLS so only service role can mutate; auditors have read-only views.
+    * `AUDIT_SIGNING_KMS_KEY_ID`
+    * Ensure `AWS_REGION` and IAM credentials.
+  * Alternative: Signing proxy (HSM / centralized signer).
 
----
+    * `SIGNING_PROXY_URL`
+    * `SIGNING_PROXY_API_KEY`
+  * Emergency fallback: local key:
 
-## 4. Vector DB provisioning
+    * `AUDIT_SIGNING_KEY` or `AUDIT_SIGNING_PRIVATE_KEY` or `AUDIT_SIGNING_SECRET`
+  * Enforcement:
 
-* Choose a provider with ANN + metadata filtering (Milvus, Pinecone, pgvector).
-* If using `postgres` provider (dev): production must use a proper ANN provider.
-* Vector collection config:
+    * `REQUIRE_KMS=true` or `NODE_ENV=production` requires a signer.
 
-  * name: `kernel-memory-${SERVICE_ENV}`
-  * dimension: match embedding model (e.g. 1536)
-  * metric: cosine
-  * replicas: ≥2
-* Enable nightly snapshots to S3 and configure autoscaling.
-* If external provider is used, `VECTOR_WRITE_QUEUE` may be enabled to queue writes when provider is unavailable (adapter will enqueue rows into `memory_vectors` with `status='pending'`).
+* **Secrets manager**
+
+  * Use Vault / cloud secret manager.
+  * Recommended secret names:
+
+    * `memory-layer/database-url` → `DATABASE_URL`
+    * `memory-layer/s3-access-key` → `S3_ACCESS_KEY`
+    * `memory-layer/s3-secret` → `S3_SECRET`
+    * `memory-layer/audit/kms-key-id` → `AUDIT_SIGNING_KMS_KEY_ID`
+    * `memory-layer/signing-proxy-api-key` → `SIGNING_PROXY_API_KEY`
+    * `memory-layer/vector/api-key` → `VECTOR_DB_API_KEY`
+    * `memory-layer/audit/public-key` → `AUDIT_SIGNING_PUBLIC_KEY`
 
 ---
 
-## 5. Object storage (S3 / MinIO)
+## 2) Required environment variables (exact)
 
-* Primary artifact bucket: `illuvrse-memory-${SERVICE_ENV}`
-* Audit archive bucket: `illuvrse-audit-archive-${SERVICE_ENV}` — **Object Lock (COMPLIANCE)** enabled.
-* Settings:
+**Runtime minimum**:
 
-  * Versioning ON, SSE-KMS encryption, Object Lock (COMPLIANCE), default retention >= 365 days.
-  * IAM: `memory-layer-writer` role allowed to `PutObject`/`PutObjectLegalHold` but not delete.
-  * Bucket policy: deny `s3:DeleteObject*` unless called by `audit-admin` with MFA.
-* Run the restore & checksum drill quarterly (see *DR drills* below).
+```
+NODE_ENV=production
+PORT=4300
+DATABASE_URL=postgresql://...
+REQUIRE_KMS=true
+VECTOR_DB_PROVIDER=postgres|milvus|pinecone
+VECTOR_DB_NAMESPACE=kernel-memory
+S3_ENDPOINT=...
+S3_REGION=...
+S3_ACCESS_KEY=...
+S3_SECRET=...
+AUDIT_SIGNING_KMS_KEY_ID=arn:...
+SIGNING_PROXY_URL=...
+AUDIT_SIGNING_KEY=...
+OPENAPI_SPEC_PATH=/app/dist/memory-layer/api/openapi.yaml
+```
 
----
+**Optional**:
 
-## 6. KMS / signing
-
-* Preferred: AWS KMS asymmetric or HMAC keys.
-* If using KMS:
-
-  * Set `AUDIT_SIGNING_KMS_KEY_ID`.
-  * Use digest semantics (sign the 32-byte SHA-256 digest).
-  * Rotate keys per policy and restrict access to signing roles.
-* Alternative: Signing proxy that provides `/sign/hash` and `/verify` endpoints. If used, set `SIGNING_PROXY_URL` and secure it (mutual TLS / API key).
-* **Never** commit private keys in the repo or bake into images. Use secrets manager.
-
----
-
-## 7. Worker processes
-
-* **vectorWorker**
-
-  * Processes `memory_vectors` rows with `status != 'completed'` using `FOR UPDATE SKIP LOCKED`.
-  * Config via `VECTOR_WORKER_INTERVAL_MS` and `VECTOR_WORKER_BATCH_SIZE`.
-  * Should run as a Deployment/Job; multiple replicas allowed.
-
-* **ttlCleaner**
-
-  * Periodic job that soft-deletes expired `memory_nodes` (honors `legal_hold`) and writes a signed `memory.node.deleted` audit event inside the same DB transaction.
-  * Config via `TTL_CLEANER_INTERVAL_MS` and `TTL_CLEANER_BATCH_SIZE`.
+```
+VECTOR_WRITE_QUEUE=true
+VECTOR_WORKER_INTERVAL_MS=5000
+TTL_CLEANER_INTERVAL_MS=60000
+MEMORY_METRICS_ENABLED=true
+MEMORY_TRACING_ENABLED=true
+```
 
 ---
 
-## 8. Health & readiness
+## 3) Docker build & OpenAPI inclusion (exact)
 
-* `/healthz` — checks DB and vectorAdapter.healthCheck()
-* `/readyz` — verifies migrations applied and adapter warmed
-* Add liveness/readiness probes in k8s to hit these endpoints.
-
----
-
-## 9. Backup & DR
-
-* Postgres daily snapshots + PITR.
-* Vector nightly snapshots to S3 (same lifecycle as artifacts), and a tested restore path.
-* Audit archives stored in `illuvrse-audit-archive-*` with object-lock and cross-region replication.
-* **Quarterly DR drill**:
-
-  1. Select a random archived audit object.
-  2. Restore and verify SHA-256 and signature.
-  3. Replay via `memory-layer/tools/auditReplay.ts` into staging DB.
-  4. Verify audit chain parity and artifact existence.
+```dockerfile
+COPY memory-layer/api/openapi.yaml ./dist/memory-layer/api/openapi.yaml
+ENV OPENAPI_SPEC_PATH=/app/dist/memory-layer/api/openapi.yaml
+```
 
 ---
 
-## 10. CI / Local dev
+## 4) Migrations & local CI
 
-* CI must run `npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations` before running integration tests.
-* For local dev:
+Run migrations:
 
-  * `NODE_ENV=development` allows a local signing key via `AUDIT_SIGNING_KEY` or bypass via `X-Local-Dev-Principal` header.
-  * To simulate KMS locally, set `SIGNING_PROXY_URL` to a local signer or provide `AUDIT_SIGNING_KEY`.
-* Integration tests expect `DATABASE_URL` and run the migrations.
+```bash
+DATABASE_URL=postgresql://... npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations
+```
+
+CI order:
+
+1. `npm ci`
+2. `npm run memory-layer:build`
+3. Run migrations
+4. Start test signer (`mock-kms` or proxy) with `REQUIRE_KMS=true`
+5. Start server
+6. Run integration tests
+7. Run audit verify tool
+
+---
+
+## 5) KMS / Signing: exact behavior & policies
+
+**Signing semantics:**
+
+* Signs precomputed SHA-256 digest.
+* Use `signAuditDigest(digestHex)`.
+
+**IAM policy**:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["kms:Sign","kms:Verify","kms:GenerateMac","kms:VerifyMac"],
+      "Resource": "arn:aws:kms:REGION:ACCOUNT_ID:key/YOUR_KEY_ID"
+    }
+  ]
+}
+```
+
+**Signing proxy:** mTLS + API key. Expose `/sign/hash`, `/verify`.
 
 ---
 
-## 11. Operational runbook highlights
+## 6) S3 audit archive & IAM policy (exact)
 
-* Incident: audit signing failures → service startup fails or audit insert fails. Check KMS connectivity, key rotation, and `REQUIRE_KMS` flag.
-* Incident: vector DB desync → run `vectorWorker` replay and compare counts between Postgres (`memory_vectors`) and Vector DB collection count.
-* Incident: S3 corruption → restore from audit archive and run `memory-layer/tools/auditReplay.ts` to reconstruct state for staging.
-* Security: enforce mTLS for signing proxy and service-to-service calls where feasible.
+Bucket: `illuvrse-audit-archive-${ENV}`
+
+Policy:
+
+```json
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    {"Sid":"AllowMemoryLayerWrite","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::ACCOUNT:role/memory-layer-writer"},"Action":["s3:PutObject","s3:GetObject","s3:PutObjectLegalHold"],"Resource":["arn:aws:s3:::illuvrse-audit-archive-${ENV}/*"]},
+    {"Sid":"DenyDeleteUnlessAuditAdminMFA","Effect":"Deny","Principal":"*","Action":["s3:DeleteObject","s3:DeleteObjectVersion"],"Resource":["arn:aws:s3:::illuvrse-audit-archive-${ENV}/*"],"Condition":{"StringNotEquals":{"aws:PrincipalArn":"arn:aws:iam::ACCOUNT:role/audit-admin"}}}
+  ]
+}
+```
+
+Object Lock: COMPLIANCE mode.
+
+---
+
+## 7) Secrets / Vault exact recipe
+
+Recommended: Vault Agent Injector.
+
+Example annotation snippet:
+
+```yaml
+vault.hashicorp.com/agent-inject: "true"
+vault.hashicorp.com/role: "memory-layer-role"
+vault.hashicorp.com/agent-inject-secret-DATABASE_URL: "secret/data/memory-layer/database#DATABASE_URL"
+```
 
 ---
 
-## 12. Notes & references
+## 8) Healthchecks & readiness
 
-* CLI/tools:
+Endpoints:
 
-  * `memory-layer/scripts/runMigrations.ts`
-  * `memory-layer/service/worker/vectorWorker.ts`
-  * `memory-layer/service/jobs/ttlCleaner.ts`
-  * `memory-layer/service/audit/verifyTool.ts`
-  * `memory-layer/tools/auditReplay.ts`
-* Acceptance criteria: `memory-layer/acceptance-criteria.md`
+* `/healthz`
+* `/readyz`
+
+K8s probes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 4300
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 4300
+```
 
 ---
+
+## 9) Observability & SLOs
+
+**Metrics:**
+
+* `memory_search_seconds`
+* `memory_vector_write_seconds`
+* `memory_vector_queue_depth`
+* `memory_audit_sign_failures_total`
+* `memory_ingestion_total`
+* `memory_ttl_cleaner_processed_total`
+
+**Tracing:** OpenTelemetry via OTLP.
+
+---
+
+## 10) Backup & DR
+
+**Postgres:** WAL archiving + restore drills.
+**Vector DB:** Nightly snapshots.
+**Audit archive DR drill:** restore object → verify → replay.
+
+---
+
+## 11) Operational runbook – incidents
+
+**Audit signing failure:** check signer, KMS, proxy.
+
+**Vector provider outage:** inspect queue, run worker.
+
+**S3 issues:** ensure Object Lock; test replay.
+
+**TTL cleaner issues:** inspect metadata + audit events.
+
+---
+
+## 12) Governance & sign-off
+
+Canonical payload:
+
+```json
+{
+  "approver": "Ryan Lueckenotte",
+  "role": "SuperAdmin",
+  "module": "memory-layer",
+  "approved_at": "2025-XX-XXTXX:XX:XXZ",
+  "notes": "Production acceptance: migrations applied, audit signing configured, vector provider active, TTL/DR tests green"
+}
+```
+
+Use signed audit event for final approval.
+
+---
+
+## 13) Example Kubernetes Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-layer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: memory-layer
+  template:
+    metadata:
+      labels:
+        app: memory-layer
+    spec:
+      containers:
+        - name: memory-layer
+          image: illuvrse/memory-layer:prod
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: memory-layer-secrets
+                  key: DATABASE_URL
+            - name: AUDIT_SIGNING
+
+```
 

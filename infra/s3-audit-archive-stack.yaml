@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  S3 Audit Archive bucket (COMPLIANCE Object Lock) + KMS key (optional) + bucket policy.
+  - Bucket: illuvrse-audit-archive-{Env}
+  - Object Lock COMPLIANCE, Versioning ON, SSE-KMS encryption
+  - Lifecycle rule: noncurrent versions / cleanup beyond retention policy (but Object Lock prevents deletion)
+  - Bucket policy: allow memory-layer-writer put/get/putObjectLegalHold; allow deletes only for audit-admin role when MFA present.
+
+Parameters:
+  Env:
+    Type: String
+    Description: Deployment environment (e.g., staging, prod)
+    Default: prod
+  AccountId:
+    Type: String
+    Description: AWS Account ID where roles/bucket will live
+  AuditAdminRoleArn:
+    Type: String
+    Description: ARN of the audit-admin IAM Role (allowed to delete with MFA)
+  MemoryLayerWriterRoleArn:
+    Type: String
+    Description: ARN of the memory-layer-writer IAM Role (allowed to write audit archive objects)
+  CreateKmsKey:
+    Type: String
+    AllowedValues: [ "true", "false" ]
+    Default: "true"
+    Description: Create a KMS key for bucket encryption (true) or use existing KmsKeyArn (false)
+  KmsKeyArn:
+    Type: String
+    Description: ARN of existing KMS key to use (leave blank if CreateKmsKey=true)
+    Default: ""
+
+Conditions:
+  UseNewKmsKey: !Equals [ !Ref CreateKmsKey, "true" ]
+
+Resources:
+
+  ## Optional KMS Key if CreateKmsKey = true
+  AuditBucketKmsKey:
+    Type: AWS::KMS::Key
+    Condition: UseNewKmsKey
+    Properties:
+      Description: "KMS key for illuvrse audit archive bucket (Env: !Ref Env)"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+      EnableKeyRotation: true
+  AuditBucketKmsAlias:
+    Type: AWS::KMS::Alias
+    Condition: UseNewKmsKey
+    Properties:
+      AliasName: !Sub "alias/illuvrse-audit-${Env}"
+      TargetKeyId: !Ref AuditBucketKmsKey
+
+  ## S3 Bucket
+  AuditArchiveBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "illuvrse-audit-archive-${Env}"
+      VersioningConfiguration:
+        Status: Enabled
+      ObjectLockEnabledForBucket: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !If
+                - UseNewKmsKey
+                - !Ref AuditBucketKmsKey
+                - !If
+                  - !Equals [ !Ref KmsKeyArn, "" ]
+                  - !Ref "AWS::NoValue"
+                  - !Ref KmsKeyArn
+      LifecycleConfiguration:
+        Rules:
+          - Id: AuditArchiveRetention
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 3650 # keep non-current versions long; Object Lock enforces immutability
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+            # Keep versions forever by default; Object Lock controls immutability.
+      Tags:
+        - Key: Name
+          Value: !Sub "illuvrse-audit-archive-${Env}"
+        - Key: Environment
+          Value: !Ref Env
+
+  ## Bucket policy: allow writes from memory-layer-writer and restrict deletes to audit-admin with MFA
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditArchiveBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Allow memory-layer-writer to put/get and put object legal hold (and list if desired)
+          - Sid: AllowMemoryLayerWriterPutGet
+            Effect: Allow
+            Principal:
+              AWS: !Ref MemoryLayerWriterRoleArn
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:PutObjectLegalHold
+              - s3:GetObjectVersion
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::illuvrse-audit-archive-${Env}/*"
+              - !Sub "arn:aws:s3:::illuvrse-audit-archive-${Env}"
+          # Deny everyone except audit-admin role from deleting objects (i.e., deny NotPrincipal=audit-admin)
+          - Sid: DenyDeletesExceptAuditAdmin
+            Effect: Deny
+            NotPrincipal:
+              AWS: !Ref AuditAdminRoleArn
+            Action:
+              - s3:DeleteObject
+              - s3:DeleteObjectVersion
+            Resource:
+              - !Sub "arn:aws:s3:::illuvrse-audit-archive-${Env}/*"
+          # Deny audit-admin role from deleting unless MFA is present
+          - Sid: DenyAuditAdminDeleteUnlessMFA
+            Effect: Deny
+            Principal:
+              AWS: !Ref AuditAdminRoleArn
+            Action:
+              - s3:DeleteObject
+              - s3:DeleteObjectVersion
+            Resource:
+              - !Sub "arn:aws:s3:::illuvrse-audit-archive-${Env}/*"
+            Condition:
+              Bool:
+                aws:MultiFactorAuthPresent: "false"
+          # Optional: deny bucket-level delete (DeleteBucket) for all (protect bucket)
+          - Sid: DenyBucketDelete
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:DeleteBucket
+            Resource:
+              - !Sub "arn:aws:s3:::illuvrse-audit-archive-${Env}"
+
+  ## Outputs for convenience
+  Outputs:
+    AuditBucketName:
+      Description: "S3 bucket name for audit archive"
+      Value: !Ref AuditArchiveBucket
+    KmsKeyArn:
+      Description: "KMS Key ARN used for bucket encryption (may be created by this stack)"
+      Value: !If
+        - UseNewKmsKey
+        - !GetAtt AuditBucketKmsKey.Arn
+        - !Ref KmsKeyArn
+

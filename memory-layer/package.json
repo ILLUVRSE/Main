@@ -1,44 +1,52 @@
 {
   "name": "memory-layer",
-  "version": "0.1.0",
-  "private": true,
+  "version": "1.0.0",
+  "description": "ILLUVRSE — Memory Layer service",
+  "main": "dist/memory-layer/service/server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/service/server.js",
-    "dev": "ts-node service/server.ts",
-    "migrate": "npx ts-node scripts/runMigrations.ts memory-layer/sql/migrations",
-    "vector-worker": "npx ts-node service/worker/vectorWorker.ts",
-    "ttl-cleaner": "npx ts-node service/jobs/ttlCleaner.ts",
-    "audit-verify": "npx ts-node service/audit/verifyTool.ts",
-    "audit-replay": "npx ts-node tools/auditReplay.ts",
-    "test:integration": "jest test/integration --runInBand",
-    "lint": "eslint . --ext .ts"
+    "memory-layer:build": "tsc -p tsconfig.json",
+    "memory-layer:start": "node dist/memory-layer/service/server.js",
+    "memory-layer:migrate": "npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations",
+    "memory-layer:vector-worker": "node dist/memory-layer/service/worker/vectorWorker.js",
+    "memory-layer:ttl-cleaner": "node dist/memory-layer/service/jobs/ttlCleaner.js",
+    "memory-layer:audit-verify": "npx ts-node memory-layer/service/audit/verifyTool.ts",
+    "memory-layer:audit-replay": "npx ts-node memory-layer/tools/auditReplay.ts",
+    "memory-layer:test:integration": "jest memory-layer/test/integration --runInBand"
   },
   "dependencies": {
-    "@aws-sdk/client-kms": "^3.331.0",
-    "@aws-sdk/client-s3": "^3.331.0",
-    "@aws-sdk/lib-storage": "^3.331.0",
-    "body-parser": "^1.20.2",
+    "@aws-sdk/client-kms": "^3.927.0",
+    "@aws-sdk/client-s3": "^3.927.0",
     "dotenv": "^17.2.3",
-    "express": "^4.18.2",
+    "express": "^5.0.0",
+    "express-openapi-validator": "^5.6.0",
+    "jose": "^4.15.9",
     "node-fetch": "^3.3.2",
     "pg": "^8.16.3",
-    "uuid": "^13.0.0"
+    "stripe": "^14.19.0",
+    "uuid": "^13.0.0",
+    "prom-client": "^14.0.0",
+    "@opentelemetry/api": "^1.0.0",
+    "@opentelemetry/sdk-node": "^0.34.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.34.0",
+    "@opentelemetry/resources": "^1.14.0",
+    "@opentelemetry/semantic-conventions": "^1.1.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.34.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.20",
+    "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^20.4.2",
+    "@types/node": "^24.10.0",
     "@types/pg": "^8.11.10",
-    "@types/supertest": "^2.0.12",
+    "@types/prom-client": "^14.0.0",
     "jest": "^30.2.0",
-    "supertest": "^6.3.3",
-    "ts-jest": "^29.1.1",
-    "ts-node": "^10.9.1",
-    "typescript": "^5.9.3",
-    "eslint": "^8.46.0",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0"
-  }
+    "pg-mem": "^3.0.5",
+    "ts-jest": "^29.4.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT"
 }
 

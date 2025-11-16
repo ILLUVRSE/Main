@@ -38,7 +38,7 @@ const DEFAULT_INTERVAL_MS = 60_000;
  * Uses FOR UPDATE SKIP LOCKED so multiple cleaners can run concurrently.
  */
 async function fetchExpiredNodesForUpdate(client: any, limit = DEFAULT_BATCH_SIZE): Promise<MemoryNodeRow[]> {
-  const res = await client.query<MemoryNodeRow>(
+  const res = await client.query(
     `
     SELECT id, owner, expires_at, legal_hold, deleted_at, metadata, created_at, updated_at
     FROM memory_nodes
@@ -100,7 +100,7 @@ export async function processBatch(limit = DEFAULT_BATCH_SIZE): Promise<number> 
           );
 
           // 2) Compute prev_hash (global last audit) and prepare payload
-          const prevRes = await client.query<{ hash: string }>(
+          const prevRes = await client.query(
             `SELECT hash FROM audit_events ORDER BY created_at DESC LIMIT 1 FOR UPDATE`
           );
           const prevHash = prevRes.rows[0]?.hash ?? null;

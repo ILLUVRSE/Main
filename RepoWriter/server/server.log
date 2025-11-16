@@ -7,56 +7,199 @@
 [33m[nodemon] watching path(s): src/**/*[39m
 [33m[nodemon] watching extensions: ts[39m
 [32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
-(node:145244) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+(node:9045) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
 --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
 (Use `node --trace-warnings ...` to show where the warning was created)
-[Env] OPENAI_API_KEY prefix: sk-proj-i5
-[Env] OPENAI_PROJECT_ID: undefined
-[Env] SANDBOX_ENABLED: 1
-[Env] REPOWRITER_ALLOW_NO_KEY: 1
-[Env] GITHUB_TOKEN present: true
-[config] SANDBOX_ENABLED=1 but SANDBOX_IMAGE and SANDBOX_COMMAND are not set. The host-based sandbox will be used. For production consider configuring SANDBOX_IMAGE or SANDBOX_COMMAND.
-[RepoWriter] conversationManager initialized
-[RepoWriter] server listening on http://localhost:7071
-[RepoWriter] sandbox: enabled
+Server is running on port 7071
+OPENAI /plan body: {"prompt":"Implement Kernel OpenAPI + server. Create kernel/openapi.yaml and implement POST /kernel/sign, POST /kernel/agent, POST /kernel/allocate, POST /kernel/division, GET /kernel/audit/{id}, GET /kernel/reason/{node}. Add kernel/acceptance-criteria.md, CI workflow, and docs.","memory":[]}
+PLANNER result: {"steps":["Create kernel/openapi.yaml with POST /kernel/sign, POST /kernel/agent, POST /kernel/allocate, POST /kernel/division, GET /kernel/audit/{id}, GET /kernel/reason/{node}","Add kernel/acceptance-criteria.md file","Implement CI workflow","Create documentation"],"patches":[{"path":"kernel/openapi.yaml","content":"openapi: 3.0.0\ninfo:\n  title: Kernel OpenAPI\n  version: 1.0.0\npaths:\n  /kernel/sign:\n    post:\n      summary: Sign kernel\n  /kernel/agent:\n    post:\n      summary: Agent kernel\n  /kernel/allocate:\n    post:\n      summary: Allocate kernel\n  /kernel/division:\n    post:\n      summary: Divide kernel\n  /kernel/audit/{id}:\n    get:\n      summary: Get audit by ID\n  /kernel/reason/{node}:\n    get:\n      summary: Get reason by node\n"},{"path":"kernel/acceptance-criteria.md","content":"# Kernel Acceptance Criteria\n\n- Criteria 1\n- Criteria 2\n"}]}
+OPENAI /apply body: {"patches":[{"path":"kernel/openapi.yaml","content":"openapi: 3.0.0\ninfo:\n  title: Kernel OpenAPI\n  version: 1.0.0\npaths:\n  /kernel/sign:\n    post:\n      summary: Sign kernel\n  /kernel/agent:\n    post:\n      summary: Agent kernel\n  /kernel/allocate:\n    post:\n      summary: Allocate kernel\n  /kernel/division:\n    post:\n      summary: Divide kernel\n  /kernel/audit/{id}:\n    get:\n      summary: Get audit by ID\n  /kernel/reason/{node}:\n    get:\n      summary: Get reason by node\n"},{"path":"kernel/acceptance-criteria.md","content":"# Kernel Acceptance Criteria\n\n- Criteria 1\n- Criteria 2\n"}],"mode":"dry"}
+APPLY result: {"applied":true,"patches":[{"path":"kernel/openapi.yaml","content":"openapi: 3.0.0\ninfo:\n  title: Kernel OpenAPI\n  version: 1.0.0\npaths:\n  /kernel/sign:\n    post:\n      summary: Sign kernel\n  /kernel/agent:\n    post:\n      summary: Agent kernel\n  /kernel/allocate:\n    post:\n      summary: Allocate kernel\n  /kernel/division:\n    post:\n      summary: Divide kernel\n  /kernel/audit/{id}:\n    get:\n      summary: Get audit by ID\n  /kernel/reason/{node}:\n    get:\n      summary: Get reason by node\n"},{"path":"kernel/acceptance-criteria.md","content":"# Kernel Acceptance Criteria\n\n- Criteria 1\n- Criteria 2\n"}]}
+OPENAI /apply body: {"patches":[{"path":"kernel/openapi.yaml","content":"openapi: 3.0.0\ninfo:\n  title: Kernel OpenAPI\n  version: 1.0.0\npaths:\n  /kernel/sign:\n    post:\n      summary: Sign kernel\n  /kernel/agent:\n    post:\n      summary: Agent kernel\n  /kernel/allocate:\n    post:\n      summary: Allocate kernel\n  /kernel/division:\n    post:\n      summary: Divide kernel\n  /kernel/audit/{id}:\n    get:\n      summary: Get audit by ID\n  /kernel/reason/{node}:\n    get:\n      summary: Get reason by node\n"},{"path":"kernel/acceptance-criteria.md","content":"# Kernel Acceptance Criteria\n\n- Criteria 1\n- Criteria 2\n"}],"mode":"apply"}
+APPLY result: {"applied":true,"patches":[{"path":"kernel/openapi.yaml","content":"openapi: 3.0.0\ninfo:\n  title: Kernel OpenAPI\n  version: 1.0.0\npaths:\n  /kernel/sign:\n    post:\n      summary: Sign kernel\n  /kernel/agent:\n    post:\n      summary: Agent kernel\n  /kernel/allocate:\n    post:\n      summary: Allocate kernel\n  /kernel/division:\n    post:\n      summary: Divide kernel\n  /kernel/audit/{id}:\n    get:\n      summary: Get audit by ID\n  /kernel/reason/{node}:\n    get:\n      summary: Get reason by node\n"},{"path":"kernel/acceptance-criteria.md","content":"# Kernel Acceptance Criteria\n\n- Criteria 1\n- Criteria 2\n"}]}
 [32m[nodemon] restarting child process[39m
 [32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
-
-  #  Node.js[145230]: void node::ResetStdio() at ../src/node.cc:751
-  #  Assertion failed: !(err != 0) || (err == -1 && (*__errno_location ()) == 1)
-
------ Native stack trace -----
-
- 1: 0xcb2ef7 node::Assert(node::AssertionInfo const&) [node]
- 2: 0xc5f924  [node]
- 3: 0x7a7bd1245495  [/lib/x86_64-linux-gnu/libc.so.6]
- 4: 0x7a7bd1245610 on_exit [/lib/x86_64-linux-gnu/libc.so.6]
- 5: 0xbbf62f node::DefaultProcessExitHandlerInternal(node::Environment*, node::ExitCode) [node]
- 6: 0xc1ef0f node::Environment::Exit(node::ExitCode) [node]
- 7: 0xf4e44f v8::internal::FunctionCallbackArguments::Call(v8::internal::CallHandlerInfo) [node]
- 8: 0xf4ecbd  [node]
- 9: 0xf4f185 v8::internal::Builtin_HandleApiCall(int, unsigned long*, v8::internal::Isolate*) [node]
-10: 0x1959df6  [node]
-
-  #  Node.js[145230]: void node::ResetStdio() at ../src/node.cc:751
-  #  Assertion failed: !(err != 0) || (err == -1 && (*__errno_location ()) == 1)
-
------ Native stack trace -----
-
- 1: 0xcb2ef7 node::Assert(node::AssertionInfo const&) [node]
- 2: 0xc5f924  [node]
- 3: 0xc5ff3d node::TrapWebAssemblyOrContinue(int, siginfo_t*, void*) [node]
- 4: 0x7a7bd1242520  [/lib/x86_64-linux-gnu/libc.so.6]
- 5: 0x7a7bd01efde0 
-(node:147509) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+(node:9696) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
 --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
 (Use `node --trace-warnings ...` to show where the warning was created)
-[Env] OPENAI_API_KEY prefix: sk-proj-i5
-[Env] OPENAI_PROJECT_ID: undefined
-[Env] SANDBOX_ENABLED: 1
-[Env] REPOWRITER_ALLOW_NO_KEY: 1
-[Env] GITHUB_TOKEN present: true
-[config] SANDBOX_ENABLED=1 but SANDBOX_IMAGE and SANDBOX_COMMAND are not set. The host-based sandbox will be used. For production consider configuring SANDBOX_IMAGE or SANDBOX_COMMAND.
-[RepoWriter] conversationManager initialized
-[RepoWriter] server listening on http://localhost:7071
-[RepoWriter] sandbox: enabled
+Server is running on port 7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:12156) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+Server is running on port 7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:12411) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+Server is running on port 7071
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:12444) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error: Cannot find module '/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/routes/catalog.route' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/index.ts
+    at finalizeResolution (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:366:11)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:801:10)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:13118) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error: Cannot find module '/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/routes/catalog.route' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/index.ts
+    at finalizeResolution (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:366:11)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:801:10)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:13272) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error: Cannot find module '/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/routes/catalog.route' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/index.ts
+    at finalizeResolution (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:366:11)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:801:10)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:13312) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error: Cannot find module '/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/routes/catalog.route' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/index.ts
+    at finalizeResolution (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:366:11)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:801:10)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:13418) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error: Cannot find module '/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/routes/catalog.route' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/index.ts
+    at finalizeResolution (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:366:11)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:801:10)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:13452) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error: Cannot find module '/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/routes/catalog.route' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/index.ts
+    at finalizeResolution (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:366:11)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:801:10)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node --loader ts-node/esm src/index.ts`[39m
+(node:13925) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("ts-node/esm", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error: Cannot find module '/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/routes/catalog.route' imported from /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/src/index.ts
+    at finalizeResolution (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:366:11)
+    at moduleResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:801:10)
+    at Object.defaultResolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/dist-raw/node-internal-modules-esm-resolve.js:912:11)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:218:35
+    at entrypointFallback (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:168:34)
+    at /home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:217:14
+    at addShortCircuitFlag (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:409:21)
+    at resolve (/home/ryanlueckenotte/ILLUVRSE/Main/RepoWriter/server/node_modules/ts-node/src/esm.ts:197:12)
+    at nextResolve (node:internal/modules/esm/hooks:864:28)
+    at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+
+Node.js v20.19.5
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m

@@ -27,4 +27,4 @@ class RetentionService {
     // Additional methods and logic as needed
 }
 
-module.exports = new RetentionService();
+export default new RetentionService();

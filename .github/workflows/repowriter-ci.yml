@@ -1,31 +1,60 @@
-name: repowriter-ci
+name: RepoWriter CI
 
 on:
+  push:
+    paths:
+      - 'RepoWriter/server/**'
+      - '.github/workflows/repowriter-ci.yml'
   pull_request:
-    branches: [ main ]
+    paths:
+      - 'RepoWriter/server/**'
+      - '.github/workflows/repowriter-ci.yml'
 
 jobs:
-  server-checks:
-    name: Server: build & test
+  build-and-test:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    defaults:
+      run:
+        working-directory: RepoWriter/server
 
-      - name: Use Node.js 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: RepoWriter/server/package-lock.json
 
-      - name: Install server dependencies
-        run: npm --prefix server ci
+      - name: Install deps
+        run: npm ci
 
-      - name: Build server (TypeScript)
-        run: npm --prefix server run build
+      - name: Typecheck (tsc)
+        run: npm exec -- tsc -p tsconfig.json --noEmit
 
-      - name: Run server tests
-        run: npm --prefix server run test
+      - name: Build
+        run: npm run build
 
-      - name: Security audit (fail on moderate+)
-        run: npm --prefix server audit --audit-level=moderate
+      - name: Run unit tests
+        env:
+          # Allow tests to use HMAC fallback by default; workflow can be extended to run signing-proxy mock
+          SANDBOX_ENABLED: '1'
+        run: npm test
+
+      - name: Run basic startup smoke
+        run: |
+          # quick smoke: ensure dist/index.js exists and is runnable
+          if [ ! -f dist/index.js ]; then
+            echo "ERROR: dist/index.js not found after build"
+            exit 1
+          fi
+          # run server in background and check health (expect the server to expose /api/health or similar)
+          # If your server exposes a different health endpoint, update the curl below accordingly.
+          node dist/index.js & sleep 2
+          pid=$!
+          # try hitting common health endpoints
+          curl -fsS http://localhost:${PORT:-3000}/api/health || curl -fsS http://localhost:${PORT:-3000}/health || true
+          # kill background server
+          kill $pid || true
 

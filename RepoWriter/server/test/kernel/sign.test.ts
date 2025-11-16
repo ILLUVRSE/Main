@@ -1,4 +1,4 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from 'vitest';
 import { signManifest } from '../../src/kernel/sign';
 
 describe('Manifest Signing', () => {
@@ -7,6 +7,10 @@ describe('Manifest Signing', () => {
         const { signedManifest, signature } = await signManifest(manifest);
         expect(signedManifest).toEqual(manifest);
         expect(typeof signature).toBe('string');
-        expect(signature).toMatch(/^[0-9a-f]+$/i);
+        // signature may be a hex HMAC (hex) or base64 from signing proxy - accept either
+        const isHex = /^[0-9a-fA-F]+$/.test(signature);
+        const isBase64 = /^[A-Za-z0-9+/]+=*$/.test(signature);
+        expect(isHex || isBase64).toBe(true);
     });
 });
+

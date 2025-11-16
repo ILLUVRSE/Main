@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('openaiClient', () => {
   let realFetch: any;
 
   beforeEach(() => {
-    jest.resetModules();
+    vi.resetModules();
     realFetch = globalThis.fetch;
     process.env.OPENAI_API_KEY = 'test-key';
     process.env.OPENAI_PROJECT_ID = 'proj-test';
@@ -14,11 +14,11 @@ describe('openaiClient', () => {
     globalThis.fetch = realFetch;
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_PROJECT_ID;
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('sends Authorization and OpenAI-Project headers and parses JSON', async () => {
-    globalThis.fetch = jest.fn(async (url: any, opts: any) => {
+    globalThis.fetch = vi.fn(async (url: any, opts: any) => {
       expect(String(url)).toContain('/v1/chat/completions');
       expect(opts?.method).toBe('POST');
       expect(opts?.headers?.Authorization).toBe('Bearer test-key');
@@ -40,7 +40,7 @@ describe('openaiClient', () => {
   it('omits OpenAI-Project header when not present', async () => {
     delete process.env.OPENAI_PROJECT_ID;
 
-    globalThis.fetch = jest.fn(async (_url: any, opts: any) => {
+    globalThis.fetch = vi.fn(async (_url: any, opts: any) => {
       expect(opts?.headers?.['OpenAI-Project']).toBeUndefined();
       return {
         ok: true,
@@ -56,3 +56,4 @@ describe('openaiClient', () => {
     expect(res).toEqual({});
   });
 });
+

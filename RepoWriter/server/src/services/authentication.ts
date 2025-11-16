@@ -13,3 +13,5 @@ export function enforceMTLS() {
 export function checkSuperAdminRole(user) {
     // Logic to check if user has SuperAdmin role
 }
+
+export const roles = { SUPER_ADMIN: 'superadmin', USER: 'user' };

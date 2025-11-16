@@ -32,4 +32,4 @@ class PolicyLifecycleTooling {
     }
 }
 
-module.exports = new PolicyLifecycleTooling();
+export default new PolicyLifecycleTooling();

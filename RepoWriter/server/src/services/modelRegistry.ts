@@ -7,8 +7,9 @@
  * It supports model promotion, canary releases, and rollback functionality.
  */
 
-class ModelRegistry {
-    constructor() {
+ class ModelRegistry {
+  models: Record<string, any> = {};
+constructor() {
         this.models = {};
     }
 

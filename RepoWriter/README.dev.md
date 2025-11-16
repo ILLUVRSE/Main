@@ -1,319 +1,209 @@
-# RepoWriter — Local Development Guide
+# RepoWriter — Local Development & Runbook
 
-This document explains how to run, test, and develop RepoWriter locally. It assumes you have a working Node.js (>=16) environment and `git` installed.
-
-> **Security note:** `RepoWriter/server/.env` must contain your OpenAI secrets and is **never** committed. If an API key is exposed, revoke it immediately from the OpenAI dashboard and replace it.
+This document explains how to run, test, and develop **RepoWriter** locally, and how to run it in production. It documents the canonical server boot, signing/KMS configuration, startup checks, and CI.
 
 ---
 
-## Required environment variables
+## Table of contents
 
-Create `RepoWriter/server/.env` (this file is gitignored). Minimal values:
-
-```
-OPENAI_API_KEY=sk-...
-OPENAI_PROJECT_ID=proj_...    # optional for some OpenAI setups
-REPO_PATH=/absolute/path/to/your/repo/root   # default: current working dir if unset
-PORT=7071
-GITHUB_REMOTE=origin
-GIT_USER_NAME=Your Name
-GIT_USER_EMAIL=you@example.com
-```
-
-You can copy `RepoWriter/server/.env.example` and fill in values.
+* [Quickstart (dev)](#quickstart-dev)
+* [Environment variables (.env)](#environment-variables-repowriterserverenv)
+* [Canonical server bootstrap](#canonical-server-bootstrap)
+* [Signing / KMS (summary)](#signing--kms-summary)
+* [Startup checks](#startup-checks)
+* [Tests & CI](#tests--ci)
+* [Troubleshooting](#troubleshooting)
+* [Production checklist](#production-checklist-short)
+* [Notes about artifact-publisher compatibility](#notes-about-artifact-publisher-compatibility)
+* [Dev tips](#dev-tips)
 
 ---
 
-## Start dev servers
+## Quickstart (dev)
 
-Start the backend:
+1. Copy example env:
 
-```bash
-npm --prefix RepoWriter/server run dev
-```
+   ```bash
+   cp RepoWriter/server/.env.example RepoWriter/server/.env
+   # Edit RepoWriter/server/.env and set REPO_PATH to a reachable repo for local testing.
+   ```
 
-Start the frontend:
+2. Install dependencies:
 
-```bash
-npm --prefix RepoWriter/web run dev
-```
+   ```bash
+   npm --prefix RepoWriter/server ci
+   ```
 
-To run both in background (example):
+3. For local development (run TS directly with hot reload):
 
-```bash
-# from repo root
-npm --prefix RepoWriter/server run dev > RepoWriter/server/server.log 2>&1 & \
-pid1=$!; npm --prefix RepoWriter/web run dev > RepoWriter/web/web.log 2>&1 & pid2=$!; \
-echo "server:$pid1 web:$pid2"
-```
+   ```bash
+   # dev: uses nodemon and ts-node loader (fast iteration)
+   npm --prefix RepoWriter/server run dev
+   # This runs the TypeScript source at RepoWriter/server/src/index.ts via ts-node.
+   ```
 
-Check backend health:
+4. For a production-style run (build + run compiled JS):
 
-```bash
-curl -sS http://localhost:7071/api/health | jq .
-# expected: {"ok":true}
-```
+   ```bash
+   # build (compiles to RepoWriter/server/dist)
+   npm --prefix RepoWriter/server run build
 
----
+   # run compiled server (recommended for production)
+   npm --prefix RepoWriter/server start
+   # 'start' runs: node dist/index.js
+   ```
 
-## Basic API usage
+5. Health check (after startup):
 
-### Plan (synchronous)
-
-```bash
-curl -sS -X POST http://localhost:7071/api/openai/plan \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Add a util/summarize.ts that summarizes top-level comments","memory":[]}' | jq .
-```
-
-### Stream (SSE)
-
-```bash
-curl -N -X POST http://localhost:7071/api/openai/stream \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Add a util/summarize.ts that summarizes top-level comments","memory":[]}'
-```
-
-### Apply (dry-run)
-
-```bash
-curl -sS -X POST http://localhost:7071/api/openai/apply \
-  -H "Content-Type: application/json" \
-  -d '{"patches":[{"path":"hello.txt","content":"hi\n"}],"mode":"dry"}' | jq .
-```
+   ```bash
+   # server exposes either /api/health or /health depending on your configuration
+   curl -fsS http://localhost:7071/api/health || curl -fsS http://localhost:7071/health
+   ```
 
 ---
 
-## Tests and type checks
+## Environment variables (RepoWriter/server/.env)
 
-Server unit tests (vitest):
+The example file `RepoWriter/server/.env.example` contains full details. Key variables you must set for dev and production:
 
-```bash
-npm --prefix RepoWriter/server run test
-```
+* `PORT` — server port (default 7071).
+* `REPO_PATH` — absolute path to repo root the server will operate on.
+* **OpenAI:**
 
-Type-check server:
+  * `OPENAI_API_KEY` or `OPENAI_API_URL` for a mock.
+  * `REPOWRITER_ALLOW_NO_KEY` and `SANDBOX_ENABLED` are dev conveniences.
+* **Signing / KMS (Task 1):**
 
-```bash
-npm --prefix RepoWriter/server exec -- tsc -p RepoWriter/server/tsconfig.json
-```
+  * `REPOWRITER_SIGNING_SECRET` — dev HMAC fallback (do not use in prod).
+  * `SIGNING_PROXY_URL` — production signing proxy (e.g., `https://signer.prod.internal`).
+  * `SIGNING_PROXY_API_KEY` — optional bearer token.
+  * `REQUIRE_SIGNING_PROXY` — if `1`, production will fail if the signing proxy fails or returns invalid responses.
+* **Logging / telemetry:**
 
-Run repo-wide TypeScript check (may surface unrelated projects):
+  * `LOG_LEVEL`, `TELEMETRY_ENDPOINT`.
 
-```bash
-npm exec -- tsc --noEmit -p tsconfig.json
-```
-
----
-
-## Local mocks and CI
-
-For deterministic CI and local tests, we provide an OpenAI mock at `RepoWriter/test/mocks/openaiMock.ts`. Tests can mount it or run it on a port and point `OPENAI_API_URL` (or override fetch) to the mock.
-
-To run the mock standalone:
-
-```bash
-node RepoWriter/test/mocks/openaiMock.ts
-# or: ts-node RepoWriter/test/mocks/openaiMock.ts
-```
-
-CI will use `openaiMock` so tests never call the real OpenAI.
+> **Important:** Never commit `RepoWriter/server/.env` with secrets.
 
 ---
 
-## Patch workflow & safety
+## Canonical server bootstrap
 
-* The planner returns a **structured plan** with `steps` and `patches` (each patch is `{ path, content?, diff? }`).
-* The UI and server support `dry` mode (validation only) and `apply` mode (write + commit locally).
-* The `patcher` enforces path safety (no absolute paths, no traversal outside `REPO_PATH`).
-* Commits are created locally with `repowriter:` message; server refuses to push by default.
+The canonical server entrypoint is `RepoWriter/server/index.js`:
 
-If you need to roll back an apply, use the rollback metadata returned by `/api/openai/apply` (or call the `apply`/`rollback` path if implemented).
+* It prefers a compiled artifact at `RepoWriter/server/dist/index.js` (production).
+* If no compiled dist exists it will attempt to run the TypeScript source `RepoWriter/server/src/index.ts` using `ts-node` (development).
+* Only if neither path is available it falls back — with a warning — to the `artifact-publisher` compatibility artifact (temporary behavior during migration).
 
----
-
-## Development tips
-
-* Central config is at `RepoWriter/server/src/config.ts`. Keep secrets out of git.
-* Use `RepoWriter/web/src/pages/CodeAssistant.tsx` as the main UI for experimenting the Codex flow.
-* For streaming UI debugging, the PlanStream component and `codexWs` server will help you iterate quickly.
-* Add unit tests for planner and patcher when you change prompts or parsing logic.
+**Production recommendation:** Build (`npm run build`) and run the compiled JS (`npm start`).
 
 ---
 
-## Acceptance checklist (short)
+## Signing / KMS (summary)
 
-1. Server accepts `OPENAI_API_KEY` and refuses to start if missing.
-2. `POST /api/openai/plan` returns structured JSON plan.
-3. Streaming (`/api/openai/stream` or websocket) shows incremental plan fragments.
-4. Patch preview and dry-run work and do not modify disk.
-5. Apply commits with `repowriter:` and returns rollback metadata.
-6. Unit tests for core services pass; CI uses openaiMock.
+RepoWriter prefers signing via a signing-proxy backed by KMS/HSM:
 
----
+* **Proxy contract:**
 
-## Troubleshooting
+  * `POST ${SIGNING_PROXY_URL}/sign` with `{ payload_b64 }`
+  * Response: `{ signature_b64, signer_id }`
+* If `REQUIRE_SIGNING_PROXY=1` in production, RepoWriter **fails closed** if the proxy fails or the response is invalid.
+* Dev/CI fallback: deterministic HMAC signer using `REPOWRITER_SIGNING_SECRET`.
 
-* **Missing types / TS errors**: run `npm --prefix RepoWriter/server exec -- tsc -p RepoWriter/server/tsconfig.json` and fix the files listed.
-* **OpenAI auth issues**: confirm `OPENAI_API_KEY` in `RepoWriter/server/.env`; inspect server startup logs (they print key prefix only).
-* **Permissions**: repo operations (git, write) use `REPO_PATH`; ensure the process has permissions to modify files there.
-# RepoWriter — Local Development Guide
-
-This document explains how to run, test, and develop RepoWriter locally. It assumes you have a working Node.js (>=16) environment and `git` installed.
-
-> **Security note:** `RepoWriter/server/.env` must contain your OpenAI secrets and is **never** committed. If an API key is exposed, revoke it immediately from the OpenAI dashboard and replace it.
+See `RepoWriter/docs/signing.md` for full details.
 
 ---
 
-## Required environment variables
+## Startup checks
 
-Create `RepoWriter/server/.env` (this file is gitignored). Minimal values:
+`RepoWriter/server/src/startupCheck.ts` runs before the server binds:
 
-```
-OPENAI_API_KEY=sk-...
-OPENAI_PROJECT_ID=proj_...    # optional for some OpenAI setups
-REPO_PATH=/absolute/path/to/your/repo/root   # default: current working dir if unset
-PORT=7071
-GITHUB_REMOTE=origin
-GIT_USER_NAME=Your Name
-GIT_USER_EMAIL=you@example.com
-```
+* Ensures `REPO_PATH` is readable/writable.
+* If `NODE_ENV=production` and `REQUIRE_SIGNING_PROXY=1`, ensures `SIGNING_PROXY_URL` is configured.
+* If `SIGNING_PROXY_URL` is set, verifies `global.fetch` exists (Node 18+ or polyfill).
+* Warns if production lacks OpenAI config.
 
-You can copy `RepoWriter/server/.env.example` and fill in values.
+The server entrypoint calls `runStartupChecks()` before starting.
 
 ---
 
-## Start dev servers
+## Tests & CI
 
-Start the backend:
+* Unit tests:
 
-```bash
-npm --prefix RepoWriter/server run dev
-```
+  ```bash
+  npm --prefix RepoWriter/server run test
+  ```
 
-Start the frontend:
+  (uses Vitest).
 
-```bash
-npm --prefix RepoWriter/web run dev
-```
+* Type checking:
 
-To run both in background (example):
+  ```bash
+  npm --prefix RepoWriter/server exec -- tsc -p tsconfig.json --noEmit
+  ```
 
-```bash
-# from repo root
-npm --prefix RepoWriter/server run dev > RepoWriter/server/server.log 2>&1 & \
-pid1=$!; npm --prefix RepoWriter/web run dev > RepoWriter/web/web.log 2>&1 & pid2=$!; \
-echo "server:$pid1 web:$pid2"
-```
+* Build:
 
-Check backend health:
+  ```bash
+  npm --prefix RepoWriter/server run build
+  ```
 
-```bash
-curl -sS http://localhost:7071/api/health | jq .
-# expected: {"ok":true}
-```
-
----
-
-## Basic API usage
-
-### Plan (synchronous)
-
-```bash
-curl -sS -X POST http://localhost:7071/api/openai/plan \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Add a util/summarize.ts that summarizes top-level comments","memory":[]}' | jq .
-```
-
-### Stream (SSE)
-
-```bash
-curl -N -X POST http://localhost:7071/api/openai/stream \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Add a util/summarize.ts that summarizes top-level comments","memory":[]}'
-```
-
-### Apply (dry-run)
-
-```bash
-curl -sS -X POST http://localhost:7071/api/openai/apply \
-  -H "Content-Type: application/json" \
-  -d '{"patches":[{"path":"hello.txt","content":"hi\n"}],"mode":"dry"}' | jq .
-```
-
----
-
-## Tests and type checks
-
-Server unit tests (vitest):
-
-```bash
-npm --prefix RepoWriter/server run test
-```
-
-Type-check server:
-
-```bash
-npm --prefix RepoWriter/server exec -- tsc -p RepoWriter/server/tsconfig.json
-```
-
-Run repo-wide TypeScript check (may surface unrelated projects):
-
-```bash
-npm exec -- tsc --noEmit -p tsconfig.json
-```
-
----
-
-## Local mocks and CI
-
-For deterministic CI and local tests, we provide an OpenAI mock at `RepoWriter/test/mocks/openaiMock.ts`. Tests can mount it or run it on a port and point `OPENAI_API_URL` (or override fetch) to the mock.
-
-To run the mock standalone:
-
-```bash
-node RepoWriter/test/mocks/openaiMock.ts
-# or: ts-node RepoWriter/test/mocks/openaiMock.ts
-```
-
-CI will use `openaiMock` so tests never call the real OpenAI.
-
----
-
-## Patch workflow & safety
-
-* The planner returns a **structured plan** with `steps` and `patches` (each patch is `{ path, content?, diff? }`).
-* The UI and server support `dry` mode (validation only) and `apply` mode (write + commit locally).
-* The `patcher` enforces path safety (no absolute paths, no traversal outside `REPO_PATH`).
-* Commits are created locally with `repowriter:` message; server refuses to push by default.
-
-If you need to roll back an apply, use the rollback metadata returned by `/api/openai/apply` (or call the `apply`/`rollback` path if implemented).
-
----
-
-## Development tips
-
-* Central config is at `RepoWriter/server/src/config.ts`. Keep secrets out of git.
-* Use `RepoWriter/web/src/pages/CodeAssistant.tsx` as the main UI for experimenting the Codex flow.
-* For streaming UI debugging, the PlanStream component and `codexWs` server will help you iterate quickly.
-* Add unit tests for planner and patcher when you change prompts or parsing logic.
-
----
-
-## Acceptance checklist (short)
-
-1. Server accepts `OPENAI_API_KEY` and refuses to start if missing.
-2. `POST /api/openai/plan` returns structured JSON plan.
-3. Streaming (`/api/openai/stream` or websocket) shows incremental plan fragments.
-4. Patch preview and dry-run work and do not modify disk.
-5. Apply commits with `repowriter:` and returns rollback metadata.
-6. Unit tests for core services pass; CI uses openaiMock.
+**CI:** A GitHub Actions workflow `/.github/workflows/repowriter-ci.yml` builds, typechecks, runs tests, and does a short startup smoke test. The repository also contains the previous `artifact-publisher` CI; RepoWriter has its own CI workflow now.
 
 ---
 
 ## Troubleshooting
 
-* **Missing types / TS errors**: run `npm --prefix RepoWriter/server exec -- tsc -p RepoWriter/server/tsconfig.json` and fix the files listed.
-* **OpenAI auth issues**: confirm `OPENAI_API_KEY` in `RepoWriter/server/.env`; inspect server startup logs (they print key prefix only).
-* **Permissions**: repo operations (git, write) use `REPO_PATH`; ensure the process has permissions to modify files there.
+* `Startup checks failed: Global 'fetch' is not available...` — upgrade Node to 18+ or polyfill `fetch` before startup:
+
+  ```js
+  // e.g. in the very first line of your boot script for Node <18:
+  import { fetch } from 'undici';
+  globalThis.fetch = fetch;
+  ```
+
+* Signing errors: check `SIGNING_PROXY_URL` and `SIGNING_PROXY_API_KEY` connectivity; for dev set `REQUIRE_SIGNING_PROXY=0` to allow HMAC fallback (not for production).
+
+* If you see `FATAL: cannot find a runnable server` ensure you built `dist/` or installed `ts-node` for dev.
+
+---
+
+## Production checklist (short)
+
+1. Provision signing-proxy backed by KMS/HSM.
+
+2. Configure production secrets:
+
+   * `NODE_ENV=production`
+   * `SIGNING_PROXY_URL=https://signer.prod.internal`
+   * `SIGNING_PROXY_API_KEY=<secret>`
+   * `REQUIRE_SIGNING_PROXY=1`
+   * `REPO_PATH` (absolute path)
+   * Telemetry and logging endpoints
+
+3. Build and deploy:
+
+   ```bash
+   npm --prefix RepoWriter/server ci
+   npm --prefix RepoWriter/server run build
+   node RepoWriter/server/dist/index.js
+   ```
+
+4. Run acceptance job (smoke + e2e) in CI.
+
+5. Obtain Security + Finance + Ryan sign-off.
+
+---
+
+## Notes about artifact-publisher compatibility
+
+* The repo previously exported `artifact-publisher` as the canonical server. The new `RepoWriter/server/index.js` replaces the deprecation shim and prefers local/dist server. If you depend on `artifact-publisher` behavior, verify parity (routing, env) and migrate any glue code to RepoWriter in this repo.
+
+---
+
+## Dev tips
+
+* Use the local OpenAI mock for iteration: set `OPENAI_API_URL` to your mock or enable `SANDBOX_ENABLED=1`.
+* To run a signing-proxy mock for local end-to-end tests, point `SIGNING_PROXY_URL` to a simple HTTP mock that returns the expected JSON shape — a mock script for CI/dev can be added.
+* Keep `REPO_PATH` pointing to a disposable git repo for local tests.
 

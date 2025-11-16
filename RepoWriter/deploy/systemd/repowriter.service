@@ -1,0 +1,66 @@
+```ini
+[Unit]
+Description=RepoWriter Server
+After=network.target
+
+[Service]
+Type=simple
+User=repowriter
+Group=repowriter
+WorkingDirectory=/srv/repowriter
+# EnvironmentFile should be created by your deploy tooling or secret manager agent
+EnvironmentFile=/etc/repowriter.env
+ExecStart=/usr/bin/node /srv/repowriter/dist/index.js
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+# Recommended: restrict file descriptors and CPU/memory via cgroups at the system level if needed
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Quick install / usage notes
+
+1. Copy the compiled server artifact (from `RepoWriter/server/dist`) to `/srv/repowriter` on the target machine and install node modules as needed (or ship a docker image and adjust ExecStart accordingly). Example:
+
+```bash
+sudo mkdir -p /srv/repowriter
+# scp or tar extraction that places dist/ and node_modules/ under /srv/repowriter
+```
+
+2. Create `/etc/repowriter.env` (managed by your secrets manager). Minimal example (do **not** commit real secrets):
+
+```
+NODE_ENV=production
+PORT=7071
+REPO_PATH=/var/repowriter/repo
+SIGNING_PROXY_URL=https://signer.prod.internal
+SIGNING_PROXY_API_KEY=...
+REQUIRE_SIGNING_PROXY=1
+TELEMETRY_ENDPOINT=https://telemetry.internal/_ingest
+```
+
+3. Install the systemd unit and start:
+
+```bash
+sudo cp RepoWriter/deploy/systemd/repowriter.service /etc/systemd/system/repowriter.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now repowriter
+sudo journalctl -u repowriter -f
+```
+
+4. Stop / restart:
+
+```bash
+sudo systemctl restart repowriter
+sudo systemctl status repowriter
+```
+
+5. If you prefer running the process under a dedicated runtime user, create the user:
+
+```bash
+sudo useradd --system --home /srv/repowriter --shell /usr/sbin/nologin repowriter
+sudo chown -R repowriter:repowriter /srv/repowriter
+```
+

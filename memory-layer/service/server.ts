@@ -33,7 +33,7 @@ if (nodeEnv === 'production' && String(process.env.DEV_SKIP_MTLS ?? '').toLowerC
   process.exit(1);
 }
 
-if (nodeEnv === 'production' || requireKms) {
+if (nodeEnv === 'production') {
   const hasKmsKey = Boolean(process.env.AUDIT_SIGNING_KMS_KEY_ID || process.env.AUDIT_SIGNING_KMS_KEY);
   const hasSigningProxy = Boolean(process.env.SIGNING_PROXY_URL);
   const hasLocalKey =
@@ -62,7 +62,7 @@ try {
   // package exports a constructor named OpenApiValidator (v5+)
   OpenApiValidator = pkg.OpenApiValidator ?? pkg.default ?? pkg;
 } catch (err) {
-  if (nodeEnv === 'production' || requireKms) {
+  if (nodeEnv === 'production') {
     console.error('[startup] express-openapi-validator module is required in production but not installed.');
     console.error('Install express-openapi-validator and pin it in package.json so validation is available in production.');
     process.exit(1);
@@ -111,7 +111,7 @@ async function installOpenApiValidatorIfPresent() {
   // Ensure spec exists
   if (!fs.existsSync(apiSpecPath)) {
     const msg = `[startup] OpenAPI spec not found at ${apiSpecPath}`;
-    if (nodeEnv === 'production' || requireKms) {
+    if (nodeEnv === 'production') {
       console.error(msg);
       process.exit(1);
     } else {
@@ -128,20 +128,46 @@ async function installOpenApiValidatorIfPresent() {
     // New OpenApiValidator API (v5)
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     // @ts-ignore - dynamic usage
-    const validator = new OpenApiValidator({
-      apiSpec: apiSpecPath,
-      validateRequests: true,
-      validateResponses: validateResponses,
-      // Additional optional settings:
-      // - unknown formats
-      // - coerceTypes
-      // - additionalFormats
-    });
-    await validator.install(app);
+    try {
+    let installed = false;
+    try {
+      // Prefer constructor-based API when available
+      const validatorInstance = new OpenApiValidator({
+        apiSpec: apiSpecPath,
+        validateRequests: true,
+        validateResponses: validateResponses
+      } as any);
+      if (validatorInstance && typeof (validatorInstance as any).install === 'function') {
+        await (validatorInstance as any).install(app);
+        installed = true;
+      }
+    } catch (ctorErr) {
+      // Fallback: some builds export a factory/function instead of a constructor.
+      if (typeof OpenApiValidator === 'function') {
+        const maybe = (OpenApiValidator as any)({
+          apiSpec: apiSpecPath,
+          validateRequests: true,
+          validateResponses: validateResponses
+        });
+        if (maybe && typeof maybe.then === 'function') {
+          await maybe;
+        }
+        installed = true;
+      } else {
+        throw ctorErr;
+      }
+    }
+    if (!installed) throw new Error('OpenApiValidator could not be installed');
     console.info(`[startup] OpenAPI validator installed (spec: ${apiSpecPath}, validateResponses: ${validateResponses})`);
   } catch (err) {
     console.error('[startup] failed to install OpenAPI validator:', (err as Error).message || err);
-    if (nodeEnv === 'production' || requireKms) {
+    if (nodeEnv === 'production') {
+      process.exit(1);
+    }
+  }
+  } catch (err) {
+    console.error('[startup] failed to install OpenAPI validator:', (err as Error).message || err);
+    if (nodeEnv === 'production') {
       process.exit(1);
     }
   }

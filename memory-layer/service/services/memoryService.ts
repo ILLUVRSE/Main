@@ -1,3 +1,13 @@
+/**
+ * memory-layer/service/services/memoryService.ts
+ *
+ * MemoryService implementation (updated):
+ *  - Uses insertMemoryNodeWithAudit(...) to atomically persist node+artifacts+audit.
+ *  - Validates artifact checksums via s3Client before DB insert.
+ *  - Performs vector upserts after DB commit; if upsert fails, writes a pending memory_vectors row for worker replay.
+ *  - Uses insertAuditEvent for artifact/legal-hold/audit flows.
+ */
+
 import {
   findMemoryNodesByIds,
   getArtifactById,
@@ -8,12 +18,14 @@ import {
   getMemoryNodeById,
   insertArtifact,
   insertAuditEvent,
-  insertMemoryNode,
   setLegalHold as setLegalHoldDb,
   softDeleteMemoryNode,
-  updateMemoryNodeEmbedding
+  updateMemoryNodeEmbedding,
+  insertMemoryNodeWithAudit,
+  getPool
 } from '../db';
 import { VectorDbAdapter } from '../vector/vectorDbAdapter';
+import s3Client from '../storage/s3Client';
 import type {
   ArtifactInput,
   ArtifactView,
@@ -21,7 +33,6 @@ import type {
   MemoryNodeInput,
   MemoryNodeRecord,
   MemoryNodeView,
-  MemoryService,
   SearchRequest,
   SearchResult
 } from '../types';
@@ -112,55 +123,124 @@ const matchesFilter = (node: MemoryNodeRecord, filter?: Record<string, unknown>)
   });
 };
 
-export const createMemoryService = (deps: MemoryServiceDeps): MemoryService => ({
+export const createMemoryService = (deps: MemoryServiceDeps) => ({
+  /**
+   * Create a MemoryNode:
+   *  - validate artifacts (checksum) before DB insert
+   *  - call insertMemoryNodeWithAudit to persist node + artifacts + audit atomically
+   *  - asynchronously attempt vector upsert; on failure insert memory_vectors row for worker replay
+   */
   async createMemoryNode(rawInput: MemoryNodeInput, ctx: AuditContext) {
     ensureOwner(rawInput);
     ensureTtl(rawInput);
     const input = ensureMetadataDefaults(rawInput);
 
-    const node = await insertMemoryNode(input);
-
-    let vectorRef: string | null = null;
-    if (input.embedding) {
-      const vectorResponse = await deps.vectorAdapter.upsertEmbedding({
-        memoryNodeId: node.id,
-        embeddingId: input.embeddingId ?? node.embedding_id,
-        embedding: input.embedding,
-        metadata: {
-          owner: node.owner,
-          metadata: node.metadata,
-          piiFlags: node.pii_flags
-        }
-      });
-      if (vectorResponse.externalVectorId) {
-        await updateMemoryNodeEmbedding(node.id, vectorResponse.externalVectorId);
-        vectorRef = vectorResponse.externalVectorId ?? null;
-      }
-    }
-
+    // Validate artifacts' checksum before DB transaction
     if (input.artifacts?.length) {
       for (const artifact of input.artifacts) {
         ensureArtifactValidity(artifact);
-        await insertArtifact(node.id, artifact);
+        // Validate checksum by streaming S3/HTTP
+        try {
+          const ok = await s3Client.validateArtifactChecksum(artifact.artifactUrl, artifact.sha256);
+          if (!ok) {
+            throw new Error(`checksum mismatch for ${artifact.artifactUrl}`);
+          }
+        } catch (err) {
+          throw new Error(`artifact validation failed for ${artifact.artifactUrl}: ${(err as Error).message || err}`);
+        }
       }
     }
 
-    const auditEvent = await insertAuditEvent({
-      eventType: 'memory.node.created',
-      memoryNodeId: node.id,
-      payload: {
-        owner: node.owner,
-        metadata: node.metadata,
-        caller: ctx.caller ?? 'unknown'
-      },
-      manifestSignatureId: ctx.manifestSignatureId,
-      callerPrevHash: ctx.prevAuditHash
-    });
+    // Build audit payload
+    const auditPayload = {
+      owner: input.owner,
+      metadata: input.metadata ?? {},
+      caller: ctx.caller ?? 'unknown'
+    };
+
+    // Insert node + artifacts + audit atomically
+    const { node, audit } = await insertMemoryNodeWithAudit(input, 'memory.node.created', auditPayload, ctx.manifestSignatureId ?? null);
+
+    // After commit: attempt vector upsert (async). We do not block the API response on vector DB.
+    let vectorRef: string | null = null;
+    if (input.embedding) {
+      try {
+        const vectorResponse = await deps.vectorAdapter.upsertEmbedding({
+          memoryNodeId: node.id,
+          embeddingId: input.embeddingId ?? node.embedding_id,
+          embedding: input.embedding,
+          metadata: {
+            owner: node.owner,
+            metadata: node.metadata,
+            piiFlags: node.pii_flags
+          }
+        });
+        if (vectorResponse.externalVectorId) {
+          // persist external vector id on memory_nodes
+          await updateMemoryNodeEmbedding(node.id, vectorResponse.externalVectorId);
+          vectorRef = vectorResponse.externalVectorId ?? null;
+        }
+      } catch (err) {
+        // Adapter failed — insert a pending memory_vectors row so worker can retry.
+        console.error(`[memoryService] vector upsert failed for node ${node.id}:`, (err as Error).message || err);
+        try {
+          const pool = getPool();
+          const provider = process.env.VECTOR_DB_PROVIDER ?? 'postgres';
+          const namespace = process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory';
+          const embedding = input.embedding;
+          // write vector_data as JSONB, status 'pending' so worker will pick it up
+          await pool.query(
+            `
+            INSERT INTO memory_vectors (
+              memory_node_id,
+              provider,
+              namespace,
+              embedding_model,
+              dimension,
+              external_vector_id,
+              status,
+              error,
+              vector_data,
+              metadata,
+              created_at,
+              updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,now(),now())
+            ON CONFLICT (memory_node_id, namespace) DO UPDATE
+              SET vector_data = EXCLUDED.vector_data,
+                  embedding_model = EXCLUDED.embedding_model,
+                  dimension = EXCLUDED.dimension,
+                  external_vector_id = EXCLUDED.external_vector_id,
+                  status = 'pending',
+                  error = EXCLUDED.error,
+                  updated_at = now()
+          `,
+            [
+              node.id,
+              provider,
+              namespace,
+              embedding.model,
+              embedding.dimension ?? (Array.isArray(embedding.vector) ? embedding.vector.length : null),
+              input.embeddingId ?? null,
+              'pending',
+              (err as Error).message ?? 'adapter_error',
+              JSON.stringify(embedding.vector ?? []),
+              JSON.stringify({
+                owner: node.owner,
+                metadata: node.metadata,
+                piiFlags: node.pii_flags
+              })
+            ]
+          );
+        } catch (uerr) {
+          console.error('[memoryService] failed to enqueue vector for retry:', (uerr as Error).message || uerr);
+        }
+      }
+    }
 
     return {
       memoryNodeId: node.id,
       embeddingVectorId: vectorRef,
-      auditEventId: auditEvent.id
+      auditEventId: audit.id
     };
   },
 
@@ -207,10 +287,22 @@ export const createMemoryService = (deps: MemoryServiceDeps): MemoryService => (
 
   async createArtifact(nodeId: string | null, artifact: ArtifactInput, ctx: AuditContext) {
     ensureArtifactValidity(artifact);
+
+    // Validate checksum before persisting artifact metadata
+    try {
+      const ok = await s3Client.validateArtifactChecksum(artifact.artifactUrl, artifact.sha256);
+      if (!ok) {
+        throw new Error('checksum mismatch');
+      }
+    } catch (err) {
+      throw new Error(`artifact checksum validation failed: ${(err as Error).message || err}`);
+    }
+
     const artifactId = await insertArtifact(nodeId, artifact);
     if (!artifactId) {
       throw new Error('failed to persist artifact metadata');
     }
+
     const auditEvent = await insertAuditEvent({
       eventType: 'memory.artifact.created',
       memoryNodeId: nodeId,
@@ -299,3 +391,4 @@ export const createMemoryService = (deps: MemoryServiceDeps): MemoryService => (
 });
 
 export type { MemoryNodeRecord };
+

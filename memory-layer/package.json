@@ -1,0 +1,37 @@
+{
+  "scripts": {
+    "memory-layer:build": "tsc -p tsconfig.json",
+    "memory-layer:start": "node dist/memory-layer/service/server.js",
+    "memory-layer:migrate": "npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations",
+    "memory-layer:vector-worker": "node -e \"require('ts-node/register'); require('./memory-layer/service/worker/vectorWorker').startPolling(require('./memory-layer/service/vector/vectorDbAdapter').VectorDbAdapter ? new (require('./memory-layer/service/vector/vectorDbAdapter').VectorDbAdapter)({ provider: process.env.VECTOR_DB_PROVIDER, endpoint: process.env.VECTOR_DB_ENDPOINT, apiKey: process.env.VECTOR_DB_API_KEY, namespace: process.env.VECTOR_DB_NAMESPACE, pool: null }) : null)\"",
+    "memory-layer:ttl-cleaner": "npx ts-node memory-layer/service/jobs/ttlCleaner.ts",
+    "memory-layer:audit-verify": "npx ts-node memory-layer/service/audit/verifyTool.ts",
+    "memory-layer:audit-replay": "npx ts-node memory-layer/tools/auditReplay.ts",
+    "memory-layer:test:integration": "jest memory-layer/test/integration --runInBand",
+    "finance:export": "ts-node --transpile-only finance/exports/canonical_exporter.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-kms": "^3.927.0",
+    "@aws-sdk/client-s3": "^3.927.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.0.0",
+    "express-openapi-validator": "^5.6.0",
+    "jose": "^4.15.9",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.16.3",
+    "stripe": "^14.19.0",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.0",
+    "@types/pg": "^8.11.10",
+    "jest": "^30.2.0",
+    "pg-mem": "^3.0.5",
+    "ts-jest": "^29.4.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
+

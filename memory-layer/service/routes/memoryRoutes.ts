@@ -3,16 +3,26 @@ import type { MemoryService, MemoryNodeInput, SearchRequest, ArtifactInput } fro
 import { requireScopes, MemoryScopes } from '../middleware/auth';
 import { piiRedactionMiddleware } from '../middleware/piiRedaction';
 
+/**
+ * Small async wrapper to avoid repeating try/catch in every route.
+ */
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 };
 
+/**
+ * Build audit context from headers.
+ * Accepts:
+ *  - X-Manifest-Signature-Id
+ *  - X-Prev-Audit-Hash
+ *  - X-Service-Id (caller)
+ */
 const buildAuditContext = (req: Request) => ({
-  manifestSignatureId: req.header('x-manifest-signature-id') ?? undefined,
-  prevAuditHash: req.header('x-prev-audit-hash') ?? undefined,
-  caller: req.header('x-service-id') ?? 'unknown'
+  manifestSignatureId: (req.header('x-manifest-signature-id') ?? undefined) as string | undefined,
+  prevAuditHash: (req.header('x-prev-audit-hash') ?? undefined) as string | undefined,
+  caller: (req.header('x-service-id') ?? req.header('x-service') ?? 'unknown') as string
 });
 
 export const memoryRoutes = (memoryService: MemoryService): Router => {
@@ -23,7 +33,27 @@ export const memoryRoutes = (memoryService: MemoryService): Router => {
     requireScopes(MemoryScopes.WRITE),
     asyncHandler(async (req, res) => {
       const payload = req.body as MemoryNodeInput;
-      const result = await memoryService.createMemoryNode(payload, buildAuditContext(req));
+
+      // If artifacts are present and some lack manifestSignatureId, allow a global x-manifest-signature-id header
+      const ctx = buildAuditContext(req);
+      if (payload.artifacts && payload.artifacts.some((a) => !a.manifestSignatureId)) {
+        if (!ctx.manifestSignatureId) {
+          res.status(400).json({
+            error: {
+              message:
+                'artifact entries missing manifestSignatureId; provide per-artifact manifestSignatureId or X-Manifest-Signature-Id header'
+            }
+          });
+          return;
+        }
+        // apply header manifestSignatureId as default for artifacts lacking it
+        payload.artifacts = payload.artifacts.map((a) => ({
+          ...a,
+          manifestSignatureId: a.manifestSignatureId ?? ctx.manifestSignatureId
+        }));
+      }
+
+      const result = await memoryService.createMemoryNode(payload, ctx);
       res.status(201).json(result);
     })
   );
@@ -47,7 +77,21 @@ export const memoryRoutes = (memoryService: MemoryService): Router => {
     requireScopes(MemoryScopes.WRITE),
     asyncHandler(async (req, res) => {
       const payload = req.body as ArtifactInput & { memoryNodeId?: string | null };
-      const result = await memoryService.createArtifact(payload.memoryNodeId ?? null, payload, buildAuditContext(req));
+      const ctx = buildAuditContext(req);
+
+      // If artifact payload does not include manifestSignatureId, try header fallback
+      if (!payload.manifestSignatureId) {
+        if (ctx.manifestSignatureId) {
+          payload.manifestSignatureId = ctx.manifestSignatureId;
+        } else {
+          res.status(400).json({
+            error: { message: 'manifestSignatureId is required for artifact writes (body.manifestSignatureId or X-Manifest-Signature-Id)' }
+          });
+          return;
+        }
+      }
+
+      const result = await memoryService.createArtifact(payload.memoryNodeId ?? null, payload, ctx);
       res.status(201).json(result);
     })
   );
@@ -71,7 +115,8 @@ export const memoryRoutes = (memoryService: MemoryService): Router => {
         res.status(400).json({ error: { message: 'legalHold boolean is required' } });
         return;
       }
-      await memoryService.setLegalHold(req.params.id, legalHold, reason, buildAuditContext(req));
+      const ctx = buildAuditContext(req);
+      await memoryService.setLegalHold(req.params.id, legalHold, reason, ctx);
       res.status(204).send();
     })
   );
@@ -103,3 +148,4 @@ export const memoryRoutes = (memoryService: MemoryService): Router => {
 };
 
 export default memoryRoutes;
+

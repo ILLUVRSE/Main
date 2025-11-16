@@ -1,4 +1,3 @@
-# devops/docker-compose.ci.yml
 version: '3.8'
 
 services:
@@ -7,9 +6,9 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: kernel
+      POSTGRES_DB: illuvrse
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-kernel} || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-illuvrse} || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -26,15 +25,12 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:-admin}"
     command: ["start-dev", "--http-port=8080"]
     healthcheck:
-      # Application-level healthcheck using curl against Quarkus readiness endpoint.
-      # Requires curl to be present in the Keycloak image (devops/keycloak/Dockerfile installs it).
       test: ["CMD-SHELL", "curl -f http://localhost:8080/q/health/ready || exit 1"]
       interval: 5s
       timeout: 3s
-      # Give a longer retry window for Keycloak startup in CI
       retries: 36
     ports:
-      - "8080:8080"   # optional for debug; CI doesn't require external mapping
+      - "8080:8080"
 
   mock-kms:
     build:
@@ -46,8 +42,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    # Expose only on the compose network; CI should use internal service name `mock-kms:8080`
-    networks: [ default ]
+    ports:
+      - "8080:8080"
 
   kernel:
     build:
@@ -61,47 +57,70 @@ services:
       mock-kms:
         condition: service_healthy
     environment:
-      # DB
-      POSTGRES_URL: "postgresql://postgres:postgres@postgres:5432/kernel"
-
-      # Cert dir injected by CI (mount below)
+      POSTGRES_URL: "postgresql://postgres:postgres@postgres:5432/illuvrse"
       ILLUVRSE_CERT_DIR: "/etc/illuvrse/certs"
-
-      # OIDC (Keycloak realm created by devops/scripts/prepare_oidc.sh in CI)
       OIDC_ISSUER: "${OIDC_ISSUER:-http://keycloak:8080/realms/testrealm}"
       OIDC_AUDIENCE: "${OIDC_AUDIENCE:-kernel-client}"
-
-      # Kernel mTLS keys inside container (pointed to mounted certs)
       MTLS_CERT: "/etc/illuvrse/certs/kernel-server.crt"
       MTLS_KEY: "/etc/illuvrse/certs/kernel-server.key"
       MTLS_CLIENT_CA: "/etc/illuvrse/certs/kernel-ca.crt"
       MTLS_REQUIRE_CLIENT_CERT: "${MTLS_REQUIRE_CLIENT_CERT:-false}"
-
-      # Node should trust the injected CA for internal test processes
       NODE_EXTRA_CA_CERTS: "/etc/illuvrse/certs/kernel-ca.crt"
-
-      # Test endpoints must be enabled in CI for integration tests
       ENABLE_TEST_ENDPOINTS: "${ENABLE_TEST_ENDPOINTS:-true}"
-
-      # KMS & sentinel
       KMS_ENDPOINT: "${KMS_ENDPOINT:-http://mock-kms:8080}"
       REQUIRE_KMS: "${REQUIRE_KMS:-false}"
-      SENTINEL_URL: "${SENTINEL_URL:-}"
-
-      # Other env (CI may inject secrets)
       SIGNER_ID: "${SIGNER_ID:-kernel-signer-local}"
     ports:
       - "3000:3000"
-    # Mount the CI-provided certs dir into the container (read-only)
     volumes:
       - "${ILLUVRSE_CERT_DIR:-../devops/certs}:/etc/illuvrse/certs:ro"
     healthcheck:
-      # Portable port-listen healthcheck for port 3000 (avoids curl inside container)
       test: ["CMD-SHELL", "sh -c \"cat /proc/net/tcp | grep -q ':0*BB8\\\\b' || exit 1\""]
       interval: 5s
       timeout: 5s
-      # Give a longer retry window for Kernel startup in CI
       retries: 36
+
+  memory-layer:
+    build:
+      context: ../
+      dockerfile: ./memory-layer/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-kms:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      # DB
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/illuvrse"
+      # runtime
+      NODE_ENV: "${NODE_ENV:-test}"
+      PORT: "${PORT:-4300}"
+      # signing - point at mock-kms running on host (docker-compose network)
+      SIGNING_PROXY_URL: "http://mock-kms:8080"
+      REQUIRE_KMS: "${REQUIRE_KMS:-true}"
+      # OIDC (if tests require auth)
+      OIDC_ISSUER: "${OIDC_ISSUER:-http://keycloak:8080/realms/testrealm}"
+      OIDC_AUDIENCE: "${OIDC_AUDIENCE:-memory-layer-client}"
+      # Vector (local dev uses postgres provider)
+      VECTOR_DB_PROVIDER: "${VECTOR_DB_PROVIDER:-postgres}"
+      VECTOR_DB_NAMESPACE: "${VECTOR_DB_NAMESPACE:-kernel-memory}"
+      # Optional
+      VECTOR_WRITE_QUEUE: "${VECTOR_WRITE_QUEUE:-true}"
+      VECTOR_WORKER_POLL: "${VECTOR_WORKER_POLL:-true}"
+      # Make sure OpenAPI spec is present in image runtime
+      OPENAPI_SPEC_PATH: "/app/dist/memory-layer/api/openapi.yaml"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4300/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "4300:4300"
+    # Bind mount for local dev - optional
+    volumes:
+      - ../memory-layer:/app/dist/memory-layer:ro
 
 networks:
   default:

@@ -1,0 +1,157 @@
+name: CI — Memory Layer
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  memory-layer-ci:
+    name: Memory Layer — Build, Migrate, Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: illuvrse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-illuvrse}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      # Postgres connection string used by migration runner and service
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/illuvrse
+      NODE_ENV: test
+      PORT: 4300
+      # Tell the memory-layer to require a signer; the mock-kms below will be used
+      REQUIRE_KMS: 'true'
+      # Signing proxy URL will point at the mock-kms started in a job step
+      SIGNING_PROXY_URL: http://localhost:8080
+      # Default vector provider for tests (postgres is supported for dev)
+      VECTOR_DB_PROVIDER: postgres
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build mock-kms image
+        run: |
+          docker build -t illuvrse/mock-kms:ci -f devops/mock-kms/Dockerfile devops/mock-kms
+
+      - name: Run mock-kms (signing proxy) in background
+        run: |
+          docker run -d --name mock-kms -p 8080:8080 illuvrse/mock-kms:ci
+          echo "Waiting for mock-kms to be ready..."
+          for i in {1..30}; do
+            if curl -sS http://localhost:8080/ready >/dev/null 2>&1; then
+              echo "mock-kms ready"
+              break
+            fi
+            sleep 2
+          done
+        # keep the container alive across steps
+        continue-on-error: false
+
+      - name: Wait for Postgres
+        run: |
+          echo "Waiting for Postgres to be ready..."
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U postgres -d illuvrse && { echo "Postgres ready"; exit 0; }
+            sleep 2
+          done
+          echo "Postgres not ready" && exit 1
+        env:
+          PGPASSWORD: postgres
+
+      - name: Install memory-layer deps
+        working-directory: memory-layer
+        run: npm ci
+
+      - name: Build memory-layer TypeScript
+        working-directory: memory-layer
+        run: npm run memory-layer:build
+
+      - name: Run DB migrations for memory-layer
+        working-directory: memory-layer
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: |
+          # Use ts-node from local node_modules to run the migration runner script in-place
+          ./node_modules/.bin/ts-node ./scripts/runMigrations.ts ./sql/migrations
+
+      - name: Start memory-layer server (background)
+        working-directory: memory-layer
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          PORT: ${{ env.PORT }}
+          NODE_ENV: ${{ env.NODE_ENV }}
+          REQUIRE_KMS: ${{ env.REQUIRE_KMS }}
+          SIGNING_PROXY_URL: ${{ env.SIGNING_PROXY_URL }}
+          VECTOR_DB_PROVIDER: ${{ env.VECTOR_DB_PROVIDER }}
+        run: |
+          # Start the compiled server in background and write logs to file
+          node ./dist/memory-layer/service/server.js > memory-layer-server.log 2>&1 &
+          echo $! > memory-layer-server.pid
+          # Wait for /healthz to respond
+          echo "Waiting for memory-layer /healthz..."
+          for i in {1..30}; do
+            if curl -sS http://localhost:${PORT}/healthz | grep -q '"status": "ok"'; then
+              echo "memory-layer server healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server did not become healthy in time"
+          tail -n 200 memory-layer-server.log || true
+          exit 1
+
+      - name: Run memory-layer integration tests
+        working-directory: memory-layer
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          PORT: ${{ env.PORT }}
+          NODE_ENV: ${{ env.NODE_ENV }}
+          SIGNING_PROXY_URL: ${{ env.SIGNING_PROXY_URL }}
+          REQUIRE_KMS: ${{ env.REQUIRE_KMS }}
+        run: |
+          # Run jest integration tests in-band to avoid concurrency issues with shared DB
+          ./node_modules/.bin/jest test/integration --runInBand --reporters=default
+
+      - name: Upload memory-layer server logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-layer-server-log
+          path: memory-layer/memory-layer-server.log
+
+      - name: Stop mock-kms container
+        if: always()
+        run: |
+          docker ps -a
+          docker stop mock-kms || true
+          docker rm mock-kms || true
+
+      - name: Cleanup memory-layer server
+        if: always()
+        run: |
+          if [ -f memory-layer/memory-layer-server.pid ]; then
+            kill $(cat memory-layer/memory-layer-server.pid) || true
+            rm -f memory-layer/memory-layer-server.pid
+          fi
+

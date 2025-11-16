@@ -3,31 +3,31 @@
  *
  * Worker that replays / processes entries in memory_vectors with status != 'completed'.
  *
- * Behavior:
- *  - Grabs a small batch via SELECT ... FOR UPDATE SKIP LOCKED inside a transaction.
- *  - For each row, attempts to call VectorDbAdapter.upsertEmbedding(...) using the stored vector_data.
- *  - On success: sets status='completed', updates external_vector_id (if provided) and updated_at.
- *  - On failure: sets status='error', writes error text and updated_at (so humans can inspect).
+ * Enhancements:
+ *  - Emits metrics (processed, errors)
+ *  - Adds tracing spans around adapter calls and updates
+ *  - Updates vector queue depth metric after processing a batch
  *
- * Exports:
- *  - processBatch(vectorAdapter, limit)
- *  - startPolling(vectorAdapter, { intervalMs, batchSize })
- *
- * CLI:
- *   VECTOR_DB_PROVIDER=postgres npx ts-node memory-layer/service/worker/vectorWorker.ts
+ * Usage:
+ *   import { processBatch, startPolling } from './worker/vectorWorker';
  */
 
-import { Readable } from 'stream';
+import { PoolClient } from 'pg';
 import { getPool } from '../db';
 import { VectorDbAdapter } from '../vector/vectorDbAdapter';
+import type { VectorWriteResult } from '../vector/vectorDbAdapter';
+
+// Observability
+import metricsModule from '../observability/metrics';
+import tracing from '../observability/tracing';
 
 type MemoryVectorRow = {
   id: string;
   memory_node_id: string;
   provider: string;
   namespace: string;
-  embedding_model: string | null;
-  dimension: number | null;
+  embedding_model: string;
+  dimension: number;
   external_vector_id: string | null;
   status: string;
   error: string | null;
@@ -49,6 +49,7 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
   try {
     await client.query('BEGIN');
 
+    // Select rows that are not completed, lock them so other workers skip them.
     const selectRes = await client.query<MemoryVectorRow>(
       `
       SELECT id, memory_node_id, provider, namespace, embedding_model, dimension,
@@ -65,71 +66,141 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
     const rows = selectRes.rows;
     if (!rows.length) {
       await client.query('COMMIT');
+      // Ensure queue depth metric is updated (zero for this namespace slice won't be exact but helps)
+      try {
+        const qRes = await client.query<{ count: string }>('SELECT namespace, count(1) AS count FROM memory_vectors WHERE status = \'pending\' GROUP BY namespace');
+        for (const r of qRes.rows) {
+          try {
+            metricsModule.metrics.vectorQueue.setDepth(Number(r.count), { provider: 'postgres', namespace: (r as any).namespace });
+          } catch {}
+        }
+      } catch {
+        // ignore queue depth errors
+      }
       return 0;
     }
 
     for (const row of rows) {
       const id = row.id;
       try {
+        // Validate vector_data
         if (!Array.isArray(row.vector_data) || !row.vector_data.length) {
           const msg = 'missing or invalid vector_data';
-          await client.query(
-            `UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`,
-            [id, msg]
-          );
+          await client.query(`UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`, [id, msg]);
           console.warn(`[vectorWorker] row ${id} has invalid vector_data; marked error`);
+          try {
+            metricsModule.metrics.vectorWorker.workerError(msg);
+            metricsModule.metrics.vectorQueue.workerError(msg);
+          } catch {}
           continue;
         }
 
-        // Prepare embedding payload
+        // Build embedding payload
         const embedding = {
-          model: row.embedding_model ?? 'unknown',
+          model: row.embedding_model,
           dimension: row.dimension ?? row.vector_data.length,
           vector: row.vector_data,
           namespace: row.namespace
         };
 
-        // Attempt upsert via adapter
-        let writeResult;
-        try {
-          writeResult = await vectorAdapter.upsertEmbedding({
-            memoryNodeId: row.memory_node_id,
-            embeddingId: row.external_vector_id ?? undefined,
-            embedding,
-            metadata: row.metadata ?? {}
-          });
-        } catch (err) {
-          const msg = (err as Error).message || String(err);
-          await client.query(
-            `UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`,
-            [id, `adapter_error: ${msg}`]
-          );
-          console.error(`[vectorWorker] adapter upsert failed for ${id}: ${msg}`);
-          continue;
-        }
+        // Create a span for this upsert attempt
+        await tracing.withSpan(`vectorWorker.upsert:${id}`, async (span) => {
+          try {
+            // Attach memory node id to span
+            tracing.attachMemoryNodeToSpan(row.memory_node_id);
+            span.setAttribute('vector.namespace', row.namespace);
+            span.setAttribute('vector.provider', row.provider);
+            span.setAttribute('vector.memory_node_id', row.memory_node_id);
 
-        // On success, update memory_vectors status and external_vector_id if present
-        const externalRef = (writeResult && writeResult.externalVectorId) ? writeResult.externalVectorId : row.external_vector_id;
-        await client.query(
-          `UPDATE memory_vectors SET status = 'completed', external_vector_id = $2, error = NULL, updated_at = now() WHERE id = $1`,
-          [id, externalRef]
-        );
-        console.info(`[vectorWorker] processed ${id} -> externalRef=${externalRef}`);
+            // Attempt upsert via adapter. Inject trace context into any outgoing HTTP calls the adapter makes.
+            // If adapter supports a headers param, it should accept tracing.injectTraceToCarrier.
+            let writeResult: VectorWriteResult;
+            try {
+              // Some adapters may accept a trace carrier in metadata — attempt to inject
+              const carrier: Record<string, unknown> = {};
+              tracing.injectTraceToCarrier(carrier);
+
+              // If adapter supports carrying headers via metadata param, we add it
+              const metadata = {
+                ...(row.metadata ?? {}),
+                traceCarrier: carrier
+              };
+
+              writeResult = await vectorAdapter.upsertEmbedding({
+                memoryNodeId: row.memory_node_id,
+                embeddingId: row.external_vector_id ?? undefined,
+                embedding,
+                metadata
+              });
+            } catch (err) {
+              // Adapter-level failure: mark as error with message and continue to next row.
+              const msg = (err as Error).message || String(err);
+              await client.query(`UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`, [id, `adapter_error: ${msg}`]);
+              console.error(`[vectorWorker] adapter upsert failed for ${id}: ${msg}`);
+              try {
+                metricsModule.metrics.vectorWorker.workerError(msg);
+                metricsModule.metrics.vectorWrite.failure({ provider: row.provider, namespace: row.namespace, error: msg });
+              } catch {}
+              return;
+            }
+
+            // On success, update status and external_vector_id (if provided)
+            const externalRef = writeResult.externalVectorId ?? null;
+            await client.query(
+              `UPDATE memory_vectors SET status = 'completed', external_vector_id = $2, error = NULL, updated_at = now() WHERE id = $1`,
+              [id, externalRef]
+            );
+            console.info(`[vectorWorker] processed ${id} -> externalRef=${externalRef}`);
+            try {
+              metricsModule.metrics.vectorQueue.workerProcessed({ result: 'completed' });
+              metricsModule.metrics.vectorWrite.success({ provider: row.provider, namespace: row.namespace });
+            } catch {}
+          } catch (rowErr) {
+            // Per-row unexpected error: set status=error and continue
+            const msg = (rowErr as Error).message || String(rowErr);
+            try {
+              await client.query(`UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`, [id, `worker_error: ${msg}`]);
+            } catch (uerr) {
+              console.error(`[vectorWorker] failed to mark row ${id} as error:`, (uerr as Error).message || uerr);
+            }
+            try {
+              metricsModule.metrics.vectorWorker.workerError(msg);
+            } catch {}
+            console.error(`[vectorWorker] unexpected error processing ${id}: ${msg}`);
+          }
+        }, { attributes: { 'memory_vector_id': id, 'memory_node_id': row.memory_node_id } });
       } catch (rowErr) {
+        // Outer-catch: if updating the DB or metrics failed unexpectedly, mark as error and continue
         const msg = (rowErr as Error).message || String(rowErr);
         try {
-          await client.query(
-            `UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`,
-            [id, `worker_error: ${msg}`]
-          );
-        } catch (uerr) {
-          console.error(`[vectorWorker] failed to mark row ${id} as error:`, (uerr as Error).message || uerr);
+          await client.query(`UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`, [id, `worker_error: ${msg}`]);
+        } catch {
+          // If even marking failed, log and continue
+          console.error(`[vectorWorker] fatal failed to mark ${id} as error: ${msg}`);
         }
-        console.error(`[vectorWorker] unexpected error processing ${id}: ${msg}`);
+        try {
+          metricsModule.metrics.vectorWorker.workerError(msg);
+        } catch {}
+        console.error(`[vectorWorker] unexpected outer error for ${id}: ${msg}`);
       }
     }
 
     await client.query('COMMIT');
+
+    // Update queue depth metrics for namespaces we know about (simple snapshot)
+    try {
+      const qRes = await getPool().query<{ namespace: string; count: string }>(
+        `SELECT namespace, count(1) AS count FROM memory_vectors WHERE status = 'pending' GROUP BY namespace`
+      );
+      for (const r of qRes.rows) {
+        try {
+          metricsModule.metrics.vectorQueue.setDepth(Number(r.count), { provider: 'postgres', namespace: r.namespace });
+        } catch {}
+      }
+    } catch {
+      // ignore queue depth errors
+    }
+
     return rows.length;
   } catch (err) {
     await client.query('ROLLBACK');
@@ -142,7 +213,7 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
 
 /**
  * Start polling loop that runs processBatch periodically.
- * Returns a controller with stop().
+ * Returns a stop function that will clear the interval.
  */
 export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs?: number; batchSize?: number }) {
   const intervalMs = opts?.intervalMs ?? Number(process.env.VECTOR_WORKER_INTERVAL_MS ?? '5000');
@@ -157,7 +228,10 @@ export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs
     isProcessing = true;
     try {
       const count = await processBatch(vectorAdapter, batchSize);
-      if (count > 0) console.info(`[vectorWorker] processed ${count} rows`);
+      // If no rows processed, this is quiet; otherwise log.
+      if (count > 0) {
+        console.info(`[vectorWorker] processed ${count} rows`);
+      }
     } catch (err) {
       console.error('[vectorWorker] poll error:', (err as Error).message || err);
     } finally {
@@ -166,7 +240,7 @@ export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs
   };
 
   const handle = setInterval(tick, intervalMs);
-  // run immediately
+  // run immediately once
   void tick();
 
   console.info(`[vectorWorker] started polling every ${intervalMs}ms (batchSize=${batchSize})`);
@@ -181,7 +255,7 @@ export function startPolling(vectorAdapter: VectorDbAdapter, opts?: { intervalMs
 }
 
 /**
- * CLI entry: one-shot or polling depending on VECTOR_WORKER_POLL (default true)
+ * CLI entry: one-shot or polling mode depending on VECTOR_WORKER_POLL env.
  */
 if (require.main === module) {
   (async () => {
@@ -197,6 +271,7 @@ if (require.main === module) {
       const poll = String(process.env.VECTOR_WORKER_POLL ?? 'true').toLowerCase() === 'true';
       if (poll) {
         const controller = startPolling(adapter, {});
+        // graceful shutdown
         process.on('SIGINT', () => {
           controller.stop();
           process.exit(0);

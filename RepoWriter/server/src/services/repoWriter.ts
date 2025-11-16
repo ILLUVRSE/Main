@@ -30,4 +30,4 @@ class RepoWriter {
   }
 }
 
-module.exports = RepoWriter;
+export default RepoWriter;

@@ -133,7 +133,7 @@ async function uploadToS3(key: string, body: Buffer, opts: { bucket: string; leg
       Key: key,
       Retention: {
         Mode: 'COMPLIANCE',
-        RetainUntilDate: until.toISOString()
+        RetainUntilDate: until
       }
     });
     await client.send(retentionCmd);

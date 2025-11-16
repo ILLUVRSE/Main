@@ -1,0 +1,57 @@
+name: RepoWriter Acceptance
+
+# Trigger manually or on pushes to main touching RepoWriter files
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'RepoWriter/**'
+      - '.github/workflows/repowriter-acceptance.yml'
+
+jobs:
+  acceptance:
+    name: Acceptance (e2e smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install jq (used by acceptance script)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Make acceptance script executable
+        run: chmod +x RepoWriter/ci/acceptance.sh
+
+      - name: Run acceptance script
+        env:
+          # optional overrides; acceptance script uses local mocks so no secrets needed
+          PORT: 7071
+          SIGNER_PORT: 18080
+          OPENAI_PORT: 9876
+        run: |
+          set -x
+          ./RepoWriter/ci/acceptance.sh
+
+      - name: Upload acceptance logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repowriter-acceptance-logs
+          path: |
+            /tmp/repowriter-server.log
+            /tmp/signing-proxy.log
+            /tmp/openai-mock.log
+

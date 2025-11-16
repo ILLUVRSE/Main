@@ -73,7 +73,15 @@ export async function checkSigningProxyHealth(): Promise<Health> {
   try {
     // Try a simple GET to the base URL. Some proxies expose /health but we don't assume it.
     const url = base.endsWith('/') ? base : base + '/';
-    const resp = await fetch(url, { method: 'GET', timeout: 5000 });
+    const controller = new AbortController();
+const timeoutId = setTimeout(() => controller.abort(), 5000);
+let resp;
+try {
+  resp = await fetch(url, { method: 'GET', signal: controller.signal });
+} finally {
+  clearTimeout(timeoutId);
+}
+
     return {
       healthy: true,
       details: {

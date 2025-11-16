@@ -1,7 +1,7 @@
 // checkout.route.ts
 
 import express from 'express';
-import { checkout, secureDelivery } from '../services/checkout';
+import { checkout, secureDelivery } from '../services/checkout.ts';
 
 const router = express.Router();
 

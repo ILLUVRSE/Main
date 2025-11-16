@@ -220,7 +220,7 @@ export const createMemoryService = (deps: MemoryServiceDeps) => ({
         const vectorResponse = await deps.vectorAdapter.upsertEmbedding({
           memoryNodeId: node.id,
           embeddingId: input.embeddingId ?? node.embedding_id,
-          embedding: input.embedding,
+          embedding: { model: input.embedding.model, dimension: input.embedding.dimension ?? undefined, vector: input.embedding.vector, namespace: process.env.VECTOR_DB_NAMESPACE ?? "kernel-memory" },
           metadata: {
             owner: node.owner,
             metadata: node.metadata,
@@ -310,7 +310,7 @@ export const createMemoryService = (deps: MemoryServiceDeps) => ({
         } catch (uerr) {
           console.error('[memoryService] failed to enqueue vector for retry:', (uerr as Error).message || uerr);
           try {
-            metricsModule.metrics.vectorWorker.workerError((uerr as Error).message ?? 'enqueue_failed');
+            metricsModule.metrics.vectorQueue.workerError((uerr as Error).message ?? 'enqueue_failed');
           } catch {}
         }
       }
@@ -353,15 +353,15 @@ export const createMemoryService = (deps: MemoryServiceDeps) => ({
     if (!artifact) return null;
     const latestAudit = await getLatestAuditForArtifact(id);
     return {
-      ...artifact,
-      latestAudit: latestAudit
-        ? {
-            auditEventId: latestAudit.id,
-            hash: latestAudit.hash,
-            createdAt: latestAudit.created_at
-          }
-        : undefined
-    } as ArtifactView;
+  artifactId: artifact.id,
+  artifactUrl: artifact.artifact_url,
+  sha256: artifact.sha256,
+  manifestSignatureId: artifact.manifest_signature_id ?? null,
+  sizeBytes: artifact.size_bytes ?? null,
+  createdAt: artifact.created_at,
+  metadata: artifact.metadata,
+  latestAudit: latestAudit ? { auditEventId: latestAudit.id, hash: latestAudit.hash, createdAt: latestAudit.created_at } : undefined
+} as ArtifactView;
   },
 
   async createArtifact(nodeId: string | null, artifact: ArtifactInput, ctx: AuditContext) {
@@ -419,7 +419,7 @@ export const createMemoryService = (deps: MemoryServiceDeps) => ({
 
   async searchMemoryNodes(request: SearchRequest): Promise<SearchResult[]> {
     const start = Date.now();
-    const vectorResults = await deps.vectorAdapter.search(request);
+    const vectorResults = await deps.vectorAdapter.search({ queryEmbedding: request.queryEmbedding, topK: request.topK, namespace: request.namespace, scoreThreshold: request.scoreThreshold ?? undefined });
     const elapsed = (Date.now() - start) / 1000.0;
     try {
       metricsModule.metrics.search.observe({ namespace: request.namespace ?? process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory' }, elapsed);
@@ -434,7 +434,7 @@ export const createMemoryService = (deps: MemoryServiceDeps) => ({
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const filteredResults = vectorResults.filter((result) => {
       const node = nodeMap.get(result.memoryNodeId);
-      return node ? matchesFilter(node, request.filter) : false;
+      return node ? matchesFilter(node, request.filter ?? undefined) : false;
     });
     if (!filteredResults.length) return [];
 

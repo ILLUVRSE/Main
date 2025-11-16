@@ -1,3 +1,5 @@
+import express from "express";
+const app = express();
 // auth.ts
 
 // OIDC/SSO Implementation
@@ -6,8 +8,8 @@ import { OidcProvider } from 'oidc-provider';
 const oidc = new OidcProvider('http://localhost:3000', { /* OIDC configuration */ });
 
 // mTLS Implementation
-const https = require('https');
-const fs = require('fs');
+import https from 'https';
+import fs from 'fs';
 
 const server = https.createServer({
   key: fs.readFileSync('path/to/server-key.pem'),

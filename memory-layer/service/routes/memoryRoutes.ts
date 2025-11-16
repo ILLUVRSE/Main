@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import type { MemoryService, MemoryNodeInput, SearchRequest, ArtifactInput } from '../types';
+import type { MemoryNodeInput, SearchRequest, ArtifactInput } from '../types';
 import { requireScopes, MemoryScopes } from '../middleware/auth';
 import { piiRedactionMiddleware } from '../middleware/piiRedaction';
 
@@ -25,7 +25,7 @@ const buildAuditContext = (req: Request) => ({
   caller: (req.header('x-service-id') ?? req.header('x-service') ?? 'unknown') as string
 });
 
-export const memoryRoutes = (memoryService: MemoryService): Router => {
+export const memoryRoutes = (memoryService: any): Router => {
   const router = Router();
 
   router.post(

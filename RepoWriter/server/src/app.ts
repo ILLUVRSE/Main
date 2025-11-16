@@ -2,8 +2,8 @@ import express from "express";
 import cors from "cors";
 import health from "./routes/health";
 import repo from "./routes/repo";
-// Use codex router (streaming / plan / apply / validate)
-import codex from "./routes/codex";
+// Use OpenAI router (plan / apply / stream)
+import openaiRoutes from "./routes/openaiRoutes";
 import git from "./routes/git";
 import memory from "./routes/memory";
 import usage from "./routes/usage";
@@ -17,7 +17,7 @@ app.use(express.json({ limit: "2mb" }));
 
 app.use("/api/health", health);
 app.use("/api/repo", repo);
-app.use("/api/openai", codex);   // codex implements stream/plan/apply/validate
+app.use("/api/openai", openaiRoutes);   // openaiRoutes implements plan/apply/stream
 app.use("/api/git", git);
 app.use("/api/memory", memory);
 app.use("/api/usage", usage);
@@ -26,3 +26,4 @@ app.use("/", kernelApi);
 
 app.use(errorHandler);
 export default app;
+

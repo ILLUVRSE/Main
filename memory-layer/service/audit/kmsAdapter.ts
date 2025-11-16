@@ -74,7 +74,7 @@ export async function signAuditHash(digestBuf: Buffer): Promise<{ kid: string; a
     const cmd = new GenerateMacCommand({
       KeyId: keyId,
       Message: digestBuf,
-      MacAlgorithm: macAlg
+      MacAlgorithm: macAlg as any
     });
     const resp = await client.send(cmd);
     if (!resp || !resp.Mac) throw new Error('KMS GenerateMac returned no Mac');
@@ -129,7 +129,7 @@ export async function verifySignature(signatureBase64: string, digestBuf: Buffer
       KeyId: keyId,
       Message: digestBuf,
       Mac: sigBuf,
-      MacAlgorithm: macAlg
+      MacAlgorithm: macAlg as any
     } as any);
     const resp = await client.send(cmd);
     // VerifyMac returns MacValid in some SDK versions

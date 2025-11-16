@@ -1,0 +1,139 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: repowriter-alerts
+  namespace: repowriter
+  labels:
+    role: alert-rules
+spec:
+  groups:
+    - name: repowriter.rules
+      rules:
+
+        # 1) Signing failures: any signing failure within 5m (warning -> critical escalation)
+        - alert: RepoWriterSigningFailures
+          expr: increase(repowriter_signing_failures_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "RepoWriter signing failures detected"
+            description: |
+              RepoWriter has recorded signing failures in the last 5 minutes.
+              VALUE = {{ $value }}
+              - Check signing-proxy connectivity and logs.
+              - If REQUIRE_SIGNING_PROXY=1 in production, this is critical.
+            runbook: |
+              1. Check signing proxy health & logs (SIGNING_PROXY_URL).
+              2. Check RepoWriter logs for "Signing proxy error".
+              3. If proxy is healthy, examine proxy auth and signer rotation.
+              4. If continuing, consider failover or pause traffic until resolved.
+
+        - alert: RepoWriterSigningFailuresCritical
+          expr: increase(repowriter_signing_failures_total[15m]) > 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High rate of RepoWriter signing failures"
+            description: |
+              High number of signing failures in the last 15 minutes.
+              ACTION: treat as production incident. Verify signing-proxy availability and KMS health.
+            runbook: |
+              1. Escalate to SRE + Security. 2. Verify signing-proxy and KMS/HSM. 3. Check network ACLs and token expiry.
+
+        # 2) Signing latency (p95) - warn if > 500ms, critical if > 2s
+        - alert: RepoWriterSigningLatencyHigh
+          expr: |
+            histogram_quantile(0.95, sum(rate(repowriter_signing_latency_seconds_bucket[5m])) by (le))
+            > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "RepoWriter signing latency high (p95 > 0.5s)"
+            description: |
+              95th percentile signing latency for the last 5m is above 0.5s.
+              Check signing-proxy latency and network conditions.
+            runbook: |
+              1. Inspect signing-proxy latency metrics.
+              2. Check network path, proxies, or TLS overhead.
+              3. Consider increasing signing-proxy capacity or colocating it.
+
+        - alert: RepoWriterSigningLatencyCritical
+          expr: |
+            histogram_quantile(0.95, sum(rate(repowriter_signing_latency_seconds_bucket[5m])) by (le))
+            > 2
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "RepoWriter signing latency critical (p95 > 2s)"
+            description: |
+              Critical signing latency — can impact production operations and block promotions.
+              Immediate SRE attention required.
+            runbook: |
+              1. Failover signing-proxy if available. 2. Check KMS quotas/timeouts. 3. Consider pausing high-volume operations.
+
+        # 3) Service down / readiness - critical
+        - alert: RepoWriterServiceDown
+          expr: up{job="repowriter"} == 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "RepoWriter service down"
+            description: |
+              The Prometheus 'up' metric for job=repowriter reports instance is down.
+              - Check pods / systemd service and logs.
+            runbook: |
+              1. kubectl get pods -n repowriter
+              2. kubectl logs <repowriter-pod> -n repowriter
+              3. Check systemd journal if running as a VM.
+
+        # 4) High error rate (5xx) across requests -> warning / critical
+        - alert: RepoWriterHighErrorRate
+          expr: |
+            sum(rate(repowriter_request_errors_total[10m])) /
+            sum(rate(repowriter_request_total[10m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "RepoWriter high error rate (>5% 5xx)"
+            description: |
+              More than 5% of requests are failing with server errors over the last 10 minutes.
+              - Check recent deploys and logs for errors.
+            runbook: |
+              1. Identify erroring endpoints (use labels by route/status).
+              2. Correlate with recent deploys and logs.
+
+        - alert: RepoWriterHighErrorRateCritical
+          expr: |
+            sum(rate(repowriter_request_errors_total[10m])) /
+            sum(rate(repowriter_request_total[10m])) > 0.2
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "RepoWriter critical error rate (>20% 5xx)"
+            description: |
+              Very high error rate. Consider rollback or blocking traffic to reduce impact.
+            runbook: |
+              1. Mitigate by reducing traffic or rolling back. 2. Investigate root cause urgently.
+
+        # 5) Alert if signing proxy is unavailable (proxy-specific metric)
+        - alert: SigningProxyUnavailable
+          expr: increase(signing_proxy_requests_total{result="error"}[5m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Signing proxy returning errors"
+            description: |
+              The signing proxy reported errors for signing requests in the last 5 minutes.
+              Confirm signing-proxy availability and KMS errors.
+            runbook: |
+              1. Check signing-proxy health endpoint. 2. Check KMS/HSM status.
+
+

@@ -1,40 +1,63 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="$HOME/ILLUVRSE/Main"
-PIDS_DIR="$REPO/.repowriter_pids"
+# Stops services started by start_repowriter.sh
+# Usage:
+#   ./stop_repowriter.sh
 
-stop_one() {
-  name="$1"
-  pidfile="$PIDS_DIR/${name}.pid"
+REPO="${HOME}/ILLUVRSE/Main"
+PIDS_DIR="$REPO/.repowriter_pids"
+LOGDIR="$REPO/RepoWriter/server"
+
+function stop_pidfile() {
+  local name="$1"
+  local pidfile="$PIDS_DIR/${name}.pid"
   if [ -f "$pidfile" ]; then
-    pid=$(cat "$pidfile")
-    if kill "$pid" >/dev/null 2>&1; then
-      echo "Sent TERM to $name ($pid)"
-      sleep 1
-      if kill -0 "$pid" >/dev/null 2>&1; then
-        echo "$name still alive, forcing kill..."
-        kill -9 "$pid" >/dev/null 2>&1 || true
+    pid="$(cat "$pidfile" 2>/dev/null || echo "")"
+    if [ -n "$pid" ]; then
+      if kill -0 "$pid" 2>/dev/null; then
+        echo "Stopping $name (pid $pid)..."
+        kill "$pid" || true
+        # wait up to 10s for process to exit
+        for i in $(seq 1 10); do
+          if kill -0 "$pid" 2>/dev/null; then
+            sleep 1
+          else
+            break
+          fi
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+          echo "$name did not exit gracefully; sending SIGKILL"
+          kill -9 "$pid" || true
+        fi
+      else
+        echo "$name pid $pid not running"
       fi
-    else
-      echo "$name pid $pid not running"
     fi
     rm -f "$pidfile"
+    echo "Removed pidfile $pidfile"
   else
-    echo "$name not running (no pid file)"
+    echo "No pidfile for $name at $pidfile"
   fi
 }
 
 echo "Stopping RepoWriter services..."
 
-stop_one "web"
-stop_one "server"
-stop_one "openai"
+# stop web preview
+stop_pidfile "web"
 
-# As fallback, try to kill lingering processes by pattern (safe for local dev)
-pkill -f "openaiMock.js" || true
-pkill -f "nodemon --watch src --ext ts --exec node --loader ts-node/esm src/index.ts" || true
-pkill -f "vite preview" || true
+# stop server
+stop_pidfile "server"
 
-echo "Stopped. You can inspect logs in RepoWriter/server/server.log and RepoWriter/test/openaiMock.log"
+# stop openai mock
+stop_pidfile "openai"
+
+echo "All requested services signaled to stop."
+
+# optional: tail server log for last few lines for quick debugging
+if [ -f "$LOGDIR/server.log" ]; then
+  echo "----- last 80 lines of server log -----"
+  tail -n 80 "$LOGDIR/server.log" || true
+  echo "--------------------------------------"
+fi
 

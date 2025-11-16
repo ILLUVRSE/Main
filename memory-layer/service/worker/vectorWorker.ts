@@ -89,7 +89,7 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
           await client.query(`UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`, [id, msg]);
           console.warn(`[vectorWorker] row ${id} has invalid vector_data; marked error`);
           try {
-            metricsModule.metrics.vectorWorker.workerError(msg);
+            metricsModule.metrics.vectorQueue.workerError(msg);
             metricsModule.metrics.vectorQueue.workerError(msg);
           } catch {}
           continue;
@@ -138,7 +138,7 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
               await client.query(`UPDATE memory_vectors SET status = 'error', error = $2, updated_at = now() WHERE id = $1`, [id, `adapter_error: ${msg}`]);
               console.error(`[vectorWorker] adapter upsert failed for ${id}: ${msg}`);
               try {
-                metricsModule.metrics.vectorWorker.workerError(msg);
+                metricsModule.metrics.vectorQueue.workerError(msg);
                 metricsModule.metrics.vectorWrite.failure({ provider: row.provider, namespace: row.namespace, error: msg });
               } catch {}
               return;
@@ -164,7 +164,7 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
               console.error(`[vectorWorker] failed to mark row ${id} as error:`, (uerr as Error).message || uerr);
             }
             try {
-              metricsModule.metrics.vectorWorker.workerError(msg);
+              metricsModule.metrics.vectorQueue.workerError(msg);
             } catch {}
             console.error(`[vectorWorker] unexpected error processing ${id}: ${msg}`);
           }
@@ -179,7 +179,7 @@ export async function processBatch(vectorAdapter: VectorDbAdapter, limit = DEFAU
           console.error(`[vectorWorker] fatal failed to mark ${id} as error: ${msg}`);
         }
         try {
-          metricsModule.metrics.vectorWorker.workerError(msg);
+          metricsModule.metrics.vectorQueue.workerError(msg);
         } catch {}
         console.error(`[vectorWorker] unexpected outer error for ${id}: ${msg}`);
       }

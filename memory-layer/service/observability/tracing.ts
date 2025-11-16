@@ -121,7 +121,7 @@ export function expressMiddleware(req: Request, res: Response, next: NextFunctio
       currentSpan.setAttribute('http.method', req.method);
       currentSpan.setAttribute('http.route', req.path);
       currentSpan.setAttribute('http.url', req.originalUrl || req.url);
-      currentSpan.setAttribute('http.client_ip', req.ip);
+      currentSpan.setAttribute('http.client_ip', String(req.ip ?? ''));
 
       // Set trace headers on response for visibility (X-Trace-Id)
       const sc = currentSpan.spanContext?.();

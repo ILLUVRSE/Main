@@ -19,14 +19,14 @@ import {
   canonicalizePayload,
   computeAuditDigest,
   signAuditDigest
-} from '../audit/auditChain';
+} from './audit/auditChain';
 import type {
   ArtifactInput,
   ArtifactRecord,
   AuditEventRecord,
   MemoryNodeInput,
   MemoryNodeRecord
-} from '../types';
+} from './types';
 
 let pool: Pool | null = null;
 

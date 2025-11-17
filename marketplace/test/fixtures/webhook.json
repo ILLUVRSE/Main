@@ -1,0 +1,10 @@
+{
+  "order_id": "order-e2e-0001",
+  "status": "paid",
+  "amount": 1000,
+  "currency": "USD",
+  "provider": "mock",
+  "reference": "payref-123456",
+  "received_at": "2025-11-17T12:00:00Z"
+}
+

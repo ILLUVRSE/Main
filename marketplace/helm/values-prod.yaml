@@ -1,0 +1,160 @@
+# marketplace/helm/values-prod.yaml
+# Helm values for Marketplace production deployment (example/template).
+# Replace placeholders with real values (do NOT commit real secrets).
+
+replicaCount: 3
+
+image:
+  repository: registry.example.com/illuvrse/marketplace
+  tag: "{{ .Values.image.tag | default \"latest\" }}"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: marketplace.example.com
+      paths:
+        - path: /
+  tls:
+    - secretName: marketplace-tls
+      hosts:
+        - marketplace.example.com
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "1"
+    memory: "2Gi"
+
+# Horizontal Pod Autoscaler
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 20
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+affinity: {}
+nodeSelector: {}
+tolerations: []
+
+env:
+  NODE_ENV: production
+  PORT: "3000"
+
+  # Storage / S3
+  S3_ENDPOINT: "https://s3.amazonaws.com"
+  S3_BUCKET: "illuvrse-marketplace-prod"
+  S3_AUDIT_BUCKET: "illuvrse-audit-archive-prod"
+  S3_REGION: "us-east-1"
+
+  # Kernel (mTLS recommended)
+  KERNEL_API_URL: "https://kernel.internal.svc.cluster.local"
+  KERNEL_CONTROL_PANEL_TOKEN: "" # Use Kubernetes secret to populate
+  # For mTLS, mount certs and set KERNEL_CLIENT_CERT / KERNEL_CLIENT_KEY via secretVolumeMounts
+  KERNEL_CLIENT_CERT: "" 
+  KERNEL_CLIENT_KEY: ""
+
+  # Finance
+  FINANCE_API_URL: "https://finance.internal.svc.cluster.local"
+  FINANCE_SERVICE_TOKEN: "" # inject from secret
+
+  # Signing / KMS
+  REQUIRE_KMS: "true"              # enforce KMS usage in prod
+  REQUIRE_SIGNING_PROXY: "false"
+  AUDIT_SIGNING_KMS_KEY_ID: ""      # e.g., arn:aws:kms:... (use secret)
+  AUDIT_SIGNING_ALG: "RSA_PKCS1_SHA_256"
+  AUDIT_SIGNING_SIGNER_KID: ""      # optional override
+
+  # Artifact publisher
+  ARTIFACT_PUBLISHER_API_URL: "https://artifact-publisher.internal.svc.cluster.local"
+  ARTIFACT_PUBLISHER_TOKEN: ""      # inject from secret
+
+  # Payment provider (stripe)
+  PAYMENT_PROVIDER_TYPE: "stripe"
+  PAYMENT_PROVIDER_STRIPE_WEBHOOK_SECRET: "" # secret
+
+  # Observability
+  PROM_ENDPOINT: "http://prometheus.monitoring.svc.cluster.local:9090"
+  SENTRY_DSN: ""
+  OTEL_COLLECTOR_URL: "http://otel-collector.monitoring.svc.cluster.local:4317"
+
+  # Preview sandbox
+  PREVIEW_SANDBOX_POOL_CONFIG: '{"poolSize":10,"cpuLimitMillis":500,"memoryMb":2048}'
+
+# Secrets mounted (use Kubernetes Secrets, do not store values here)
+secrets:
+  kernelControlTokenSecret: kernel-control-token-secret   # contains key: KERNEL_CONTROL_PANEL_TOKEN
+  financeServiceTokenSecret: finance-service-token-secret # contains key: FINANCE_SERVICE_TOKEN
+  artifactPublisherTokenSecret: artifact-publisher-token-secret
+  signingKmsKeySecret: audit-signing-kms-secret           # optional metadata if required
+  stripeWebhookSecret: stripe-webhook-secret
+
+# Volume mounts for mTLS or private keys (use Kubernetes secrets)
+extraVolumes:
+  - name: kernel-mtls
+    secret:
+      secretName: kernel-mtls-secret
+      optional: true
+
+extraVolumeMounts:
+  - name: kernel-mtls
+    mountPath: /etc/illuvrse/kernel-mtls
+    readOnly: true
+
+# PodSecurity and RBAC hints
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+
+# Liveness / readiness thresholds and SLO targets for SRE dashboards
+slo:
+  checkout_p95_latency_ms: 500
+  finalize_p95_latency_ms: 10000
+
+# Logging / Sidecars
+sidecars:
+  fluentd:
+    enabled: true
+    image: "fluent/fluentd:latest"
+    # config omitted: inject as needed
+
+# Notes:
+# - Inject secrets via Kubernetes Secret objects (referenced under `secrets`).
+# - For mTLS, create a secret `kernel-mtls-secret` with client cert & key, and mount them using extraVolumes/extraVolumeMounts, then set KERNEL_CLIENT_CERT/KERNEL_CLIENT_KEY to the mounted file paths.
+# - Ensure S3_AUDIT_BUCKET has Object Lock enabled and the service account has least privilege to write and read objects.
+# - Enforce REQUIRE_KMS=true in your CI/CD pipeline for protected branches.
+

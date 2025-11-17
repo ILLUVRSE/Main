@@ -1,6 +1,6 @@
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
+/// <reference types="next/navigation-types/compat/navigation" />
 
-// NOTE: This file is required by Next.js for TypeScript support.
-// Do not remove; you can add other global type references here if needed.
-
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/basic-features/typescript for more information.

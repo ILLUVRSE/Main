@@ -16,7 +16,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import signerRegistry from '../../lib/signerRegistry';
+import signerRegistry from '../lib/signerRegistry';
 
 const router = Router();
 

@@ -1,0 +1,103 @@
+name: Control-Panel E2E
+
+on:
+  pull_request:
+    paths:
+      - 'control-panel/**'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: Playwright E2E (Control-Panel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_ENV: test
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+      PLAYWRIGHT_TEST_MODE: mock
+      PLAYWRIGHT_MOCK_KERNEL: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: control-panel/package-lock.json
+
+      - name: Install dependencies
+        working-directory: control-panel
+        run: npm ci
+
+      - name: Install Playwright browsers & dependencies
+        working-directory: control-panel
+        run: |
+          npx playwright install --with-deps
+
+      - name: Build (optional / if your app needs a build step)
+        working-directory: control-panel
+        run: |
+          npm run build || true
+
+      - name: Start Control-Panel (dev mode)
+        working-directory: control-panel
+        run: |
+          # Start dev server in background; write logs for later debugging
+          # Ensure the server exposes test-friendly endpoints when PLAYWRIGHT_MOCK_KERNEL=true
+          nohup npm run dev > /tmp/control-panel.log 2>&1 & echo $! > /tmp/control-panel.pid
+          # Give the server time to boot (tune as necessary)
+          sleep 4
+          # Show a short health probe (for debugging)
+          curl --retry 5 --retry-delay 1 --fail ${PLAYWRIGHT_BASE_URL}/health || true
+        env:
+          PLAYWRIGHT_MOCK_KERNEL: ${{ env.PLAYWRIGHT_MOCK_KERNEL }}
+          PLAYWRIGHT_BASE_URL: ${{ env.PLAYWRIGHT_BASE_URL }}
+
+      - name: Wait for server readiness
+        working-directory: control-panel
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS ${PLAYWRIGHT_BASE_URL}/health >/dev/null 2>&1; then
+              echo "server ready"
+              exit 0
+            fi
+            echo "waiting for server..."
+            sleep 1
+          done
+          echo "server did not become ready" && exit 1
+
+      - name: Run Playwright tests
+        working-directory: control-panel
+        # Use HTML reporter for readable artifacts; run single worker to reduce flakiness
+        run: npx playwright test --project=chromium --reporter=html --workers=1
+        continue-on-error: false
+
+      - name: Upload Playwright HTML report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-panel-playwright-report
+          path: control-panel/playwright-report
+
+      - name: Upload Playwright artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-panel-playwright-artifacts
+          path: |
+            control-panel/test-results/**
+            control-panel/playwright-report/**
+            /tmp/control-panel.log
+
+      - name: Teardown server
+        if: always()
+        working-directory: control-panel
+        run: |
+          if [ -f /tmp/control-panel.pid ]; then
+            kill "$(cat /tmp/control-panel.pid)" || true
+            rm -f /tmp/control-panel.pid
+          fi
+

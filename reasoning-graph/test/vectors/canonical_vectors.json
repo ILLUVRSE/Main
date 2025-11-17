@@ -1,0 +1,63 @@
+{
+  "version": "2025-11-17-v1",
+  "description": "Canonicalization vectors for Reasoning Graph parity tests. Keys are sorted lexicographically; output uses compact JSON with no extra whitespace.",
+  "vectors": [
+    {
+      "name": "simple-node",
+      "input": {
+        "id": "node-1",
+        "type": "Decision",
+        "actor": "service:eval",
+        "ts": "2025-11-17T12:00:00Z",
+        "payload": {
+          "score": 0.95,
+          "reason": "improved",
+          "details": {
+            "a": 1,
+            "b": 2
+          }
+        },
+        "metadata": {
+          "foo": "bar",
+          "z": "last"
+        }
+      },
+      "canonical": "{\"actor\":\"service:eval\",\"id\":\"node-1\",\"metadata\":{\"foo\":\"bar\",\"z\":\"last\"},\"payload\":{\"details\":{\"a\":1,\"b\":2},\"reason\":\"improved\",\"score\":0.95},\"ts\":\"2025-11-17T12:00:00Z\",\"type\":\"Decision\"}"
+    },
+    {
+      "name": "array-and-nested",
+      "input": {
+        "id": "node-2",
+        "type": "Recommendation",
+        "payload": {
+          "items": [
+            { "name": "x", "value": 10 },
+            { "value": 5, "name": "y" }
+          ],
+          "meta": {
+            "z": [3, 2, 1],
+            "a": { "k2": "v2", "k1": "v1" }
+          }
+        },
+        "ts": "2025-11-17T12:05:00Z"
+      },
+      "canonical": "{\"id\":\"node-2\",\"payload\":{\"items\":[{\"name\":\"x\",\"value\":10},{\"name\":\"y\",\"value\":5}],\"meta\":{\"a\":{\"k1\":\"v1\",\"k2\":\"v2\"},\"z\":[3,2,1]}},\"ts\":\"2025-11-17T12:05:00Z\",\"type\":\"Recommendation\"}"
+    },
+    {
+      "name": "annotation-with-null-and-bool",
+      "input": {
+        "id": "ann-1",
+        "type": "Annotation",
+        "author": null,
+        "payload": {
+          "note": "Checked",
+          "flag": true,
+          "extra": null
+        },
+        "ts": "2025-11-17T12:10:00Z"
+      },
+      "canonical": "{\"id\":\"ann-1\",\"payload\":{\"extra\":null,\"flag\":true,\"note\":\"Checked\"},\"ts\":\"2025-11-17T12:10:00Z\",\"type\":\"Annotation\"}"
+    }
+  ]
+}
+

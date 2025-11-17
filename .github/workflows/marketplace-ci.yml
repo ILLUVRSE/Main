@@ -1,0 +1,254 @@
+name: Marketplace CI
+
+# Run for changes to marketplace files and on workflow_dispatch
+on:
+  push:
+    paths:
+      - 'marketplace/**'
+  pull_request:
+    paths:
+      - 'marketplace/**'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  # Default behavior in PRs: do not require KMS (maintain speed for forks).
+  # For protected branches / main you can set REQUIRE_SIGNING_PROXY or REQUIRE_KMS
+  # via repo/organization secrets or branch protections.
+  REQUIRE_SIGNING_PROXY: ${{ secrets.REQUIRE_SIGNING_PROXY || 'false' }}
+  REQUIRE_KMS: ${{ secrets.REQUIRE_KMS || 'false' }}
+
+jobs:
+  build-and-unit:
+    name: Build & Unit / Contract Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: marketplace/package-lock.json
+
+      - name: Install deps
+        working-directory: marketplace
+        run: npm ci
+
+      - name: Lint / Typecheck (if configured)
+        working-directory: marketplace
+        run: |
+          if [ -f package.json ] && jq -e '.scripts | has("lint")' package.json >/dev/null 2>&1; then
+            npm run lint || true
+          fi
+
+      - name: Run unit tests
+        working-directory: marketplace
+        run: |
+          # Run unit suites first
+          if [ -f package.json ] && jq -e '.scripts | has("test")' package.json >/dev/null 2>&1; then
+            npm test --silent || (cat ./npm-debug.log || true; exit 1)
+          else
+            echo "No 'test' script found in package.json - skipping"
+          fi
+
+      - name: Run contract tests
+        working-directory: marketplace
+        run: |
+          # Contract tests should be under test/contract or similar
+          if [ -d test/contract ]; then
+            npx vitest run test/contract --runInBand || (echo "Contract tests failed" && exit 1)
+          else
+            echo "No contract tests found - skipping"
+          fi
+
+      - name: Check for accidental private keys
+        working-directory: .
+        run: |
+          if [ -x marketplace/scripts/ci/check-no-private-keys.sh ]; then
+            ./marketplace/scripts/ci/check-no-private-keys.sh
+          else
+            # Basic fallback grep
+            if git grep -n -- '*-----BEGIN PRIVATE KEY-----' || git grep -n -- '*.pem'; then
+              echo "Possible private key material found in repo" && exit 1 || true
+            else
+              echo "No obvious private keys found by quick grep"
+            fi
+          fi
+
+      - name: Build (optional)
+        working-directory: marketplace
+        run: |
+          if npm run -s build --silent; then
+            echo "Build succeeded"
+          else
+            echo "No build script or build step failed; continuing (adjust if you want to fail here)"
+            true
+          fi
+
+      - name: Upload unit test results (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-unit-results
+          path: |
+            marketplace/vitest-report.html
+            marketplace/coverage || true
+
+  e2e:
+    name: E2E (checkout & signed proof)
+    runs-on: ubuntu-latest
+    needs: build-and-unit
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: marketplace/package-lock.json
+
+      - name: Install deps
+        working-directory: marketplace
+        run: npm ci
+
+      - name: Start local orchestration for E2E (run-local.sh)
+        working-directory: marketplace
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/marketplace_test
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minio
+          S3_SECRET: minio123
+          # Optional: enable signing proxy mock if available
+          MOCK_SIGNING_PROXY: 'true'
+        run: |
+          # If your repo has a run-local orchestration script, run it in background.
+          # The run-local.sh should start DB, MinIO, Kernel/Finance mocks and the service.
+          if [ -x ./run-local.sh ]; then
+            ./run-local.sh &
+            echo $! > /tmp/marketplace-run-local.pid
+            # Wait for health endpoint
+            for i in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1; then
+                echo "marketplace local started"
+                break
+              fi
+              echo "waiting for local services..."
+              sleep 2
+            done
+          else
+            echo "run-local.sh not found — ensure orchestration exists for E2E" && exit 1
+          fi
+
+      - name: Run E2E tests (Vitest)
+        working-directory: marketplace
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+        run: |
+          # Run deterministic e2e tests: checkout + signedProofs
+          npx vitest run test/e2e/checkout.e2e.test.ts --runInBand || (echo "E2E checkout failed" && exit 1)
+          npx vitest run test/e2e/signedProofs.e2e.test.ts --runInBand || (echo "E2E signedProofs failed" && exit 1)
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-e2e-artifacts
+          path: |
+            marketplace/test-results/**
+            marketplace/vitest-report.html
+            /tmp/marketplace-run-local.pid
+            /tmp/marketplace-run-local.log || true
+
+      - name: Teardown local orchestration
+        if: always()
+        run: |
+          if [ -f /tmp/marketplace-run-local.pid ]; then
+            kill $(cat /tmp/marketplace-run-local.pid) || true
+            rm -f /tmp/marketplace-run-local.pid
+          fi
+
+  audit-verify:
+    name: Audit Verification (best-effort)
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install deps (kernel required for audit-verify)
+        run: |
+          # Kernel tools (audit-verify) are referenced across the monorepo.
+          # Install node deps at repo root if needed.
+          if [ -f kernel/package.json ]; then
+            (cd kernel && npm ci)
+          fi
+
+      - name: Run audit-verify (best-effort)
+        env:
+          # For CI you should set a test DATABASE_URL and SIGNERS file via secrets or artifacts.
+          DATABASE_URL: ${{ secrets.MARKETPLACE_TEST_DATABASE_URL || '' }}
+          SIGNERS_PATH: kernel/tools/signers.json
+        run: |
+          if [ -f kernel/tools/audit-verify.js ]; then
+            # best-effort run; do not fail the entire workflow if verification cannot run
+            node kernel/tools/audit-verify.js -d "${DATABASE_URL}" -s "${SIGNERS_PATH}" || echo "audit-verify failed (best-effort)"
+          else
+            echo "audit-verify.js not found in kernel tooling — skipping"
+          fi
+
+      - name: Upload audit-verify log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-audit-verify
+          path: |
+            kernel/jest-output.json || true
+
+  require-signing-check:
+    name: Signing Path Guard (protected branches)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require signing proxy / KMS check
+        env:
+          REQUIRE_SIGNING_PROXY: ${{ secrets.REQUIRE_SIGNING_PROXY || 'false' }}
+          REQUIRE_KMS: ${{ secrets.REQUIRE_KMS || 'false' }}
+          SIGNING_PROXY_URL: ${{ secrets.SIGNING_PROXY_URL || '' }}
+          KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT || '' }}
+        run: |
+          # If REQUIRE_SIGNING_PROXY or REQUIRE_KMS is set to true for protected branches,
+          # verify the corresponding endpoint is reachable; fail otherwise.
+          if [ "${REQUIRE_SIGNING_PROXY}" = "true" ]; then
+            if [ -z "${SIGNING_PROXY_URL}" ]; then
+              echo "REQUIRE_SIGNING_PROXY=true but SIGNING_PROXY_URL not provided in secrets" && exit 2
+            fi
+            if ! curl -fsS -m 5 ${SIGNING_PROXY_URL}/health >/dev/null 2>&1; then
+              echo "Signing proxy unreachable at ${SIGNING_PROXY_URL}" && exit 3
+            fi
+            echo "Signing proxy reachable"
+          fi
+          if [ "${REQUIRE_KMS}" = "true" ]; then
+            if [ -z "${KMS_ENDPOINT}" ]; then
+              echo "REQUIRE_KMS=true but KMS_ENDPOINT not provided in secrets" && exit 2
+            fi
+            if ! curl -fsS -m 5 ${KMS_ENDPOINT}/health >/dev/null 2>&1; then
+              echo "KMS endpoint unreachable at ${KMS_ENDPOINT}" && exit 3
+            fi
+            echo "KMS endpoint reachable"
+          fi
+

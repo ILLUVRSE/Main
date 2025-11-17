@@ -1,119 +1,269 @@
-# Reasoning Graph — Acceptance Criteria
+# Reasoning Graph — Acceptance Criteria (Final)
 
-Purpose: short, verifiable checks proving the Reasoning Graph is correct, secure, and production-ready. Each item is actionable and testable.
-
----
-
-## # 1) Minimal API surface
-- **Endpoints implemented:** `POST /reason/node`, `POST /reason/edge`, `GET /reason/node/{id}`, `GET /reason/trace/{id}`, `POST /reason/snapshot`, `GET /reason/snapshot/{id}`, `GET /health`.
-- **Auth enforced:** All write endpoints require Kernel credentials (mTLS in prod, development token accepted only when `ALLOW_DEBUG_TOKEN=true`). Read endpoints enforce RBAC hooks and redact flagged payloads.
-
-**How to verify:** Run contract tests that cover all endpoints, attempt unauthenticated writes (must be rejected), and confirm `GET /health` stays green.
+**Purpose:** precise, testable acceptance gates proving the Reasoning Graph accepts Kernel-authorized writes, produces explainable ordered traces, creates signed snapshots for auditors, integrates with Eval Engine / SentinelNet / Agent Manager, and is auditable. Final approver: **Ryan (SuperAdmin)**. Security & Kernel teams must review signing and PII policies. (See `reasoning-graph/README.md`.) 
 
 ---
 
-## # 2) Node & edge creation → audit
-- **Audit linkage:** Every created node/edge emits an AuditEvent linking the node/edge id, payload hash, signerId (when applicable), and `manifestSignatureId`.
-- **Append-only behavior:** Nodes and edges are append-only; corrections are created as new nodes linked to originals.
+## How to run verification (quick)
 
-**How to verify:** Create nodes and edges; verify corresponding AuditEvents in the audit sink and run hash/signature verification.
+Run these locally or in CI against a test Kernel (or the Kernel mock) and dependent service mocks:
 
----
+```bash
+# from repo root (adjust for your language/toolchain)
+cd reasoning-graph
+npm ci        # or go build / make build, depending on implementation
+# unit tests
+npm test
+# run integration/acceptance tests
+# for Go: go test ./internal/acceptance -run TracePromotion
+# for Node: npx jest --runInBand reasoning-graph/test/integration
+# optional: ./run-local.sh to spin up Kernel mock + Reasoning Graph + Eval Engine mocks
+```
 
-## # 3) Trace queries & traversal correctness
-- **Trace retrieval works:** `GET /reason/trace/{id}` returns ordered, annotated traces with ancestors/descendants per requested direction and depth.
-- **Cycle handling:** Traversal detects cycles and avoids infinite loops; cycles are annotated in the returned trace.
-- **Performance:** Small-to-medium traces return within SLO (e.g., p95 < 200ms).
-
-**How to verify:** Create a synthetic graph with known causal chains and cycles; run trace queries and confirm ordering, annotations, and performance.
-
----
-
-## # 4) Snapshot creation, canonicalization & signing
-- **Canonicalization defined & stable:** Canonical JSON algorithm is documented and deterministic across runtimes.
-- **Snapshot hashing & signing:** Snapshot process computes SHA-256, obtains an Ed25519 signature via KMS/HSM, stores snapshot in S3, and emits an audit event linking hash + signature.
-- **Verification tool:** A verification utility validates snapshot hash/signature and confirms stored snapshot matches canonical form.
-
-**How to verify:** Create snapshot, verify hash/signature using the tool, and confirm S3 stored snapshot and audit event exist.
+All acceptance tests must pass in CI for signoff.
 
 ---
 
-## # 5) Provenance & integration
-- **Provenance links:** Nodes/edges referencing decisions, evaluations, or policies include `manifestSignatureId` or `auditEventId` proving authorization.
-- **Integration tested:** Eval Engine, Agent Manager, and SentinelNet can produce/consume nodes and edges: scores → recommendations → decisions → policyChecks flow recorded in graph.
+## Files that must exist
 
-**How to verify:** Simulate or run full flow: Eval writes score → recommendation → decision → SentinelNet policyCheck; verify nodes/edges and provenance links.
+A PR is incomplete if any of these files are missing.
 
----
+* `reasoning-graph/acceptance-criteria.md` *(this file)*
+* `reasoning-graph/README.md` *(exists — quick reference)*. 
+* `reasoning-graph/reasoning-graph-spec.md` — canonical models (ReasonNode, ReasonEdge, ReasonTrace, Snapshot)
+* `reasoning-graph/api.md` — API surface for node/edge writes, trace queries, snapshot creation & verification
+* `reasoning-graph/deployment.md` — topology, signing requirements, RBAC, storage & snapshot export guidance
+* `reasoning-graph/acceptance-tests/` — integration/acceptance test suite (see tests below)
+* `reasoning-graph/test/vectors/canonical_vectors.json` — canonicalization vectors for canonical Marshal tests
+* `reasoning-graph/run-local.sh` — local orchestration (Kernel mock, migrations, run tests)
+* `reasoning-graph/.gitignore` — local runtime ignore for generated files & local secrets
 
-## # 6) PII handling & SentinelNet enforcement
-- **PII redaction:** Traces returned to unauthorized viewers are redacted according to SentinelNet policies.
-- **Pre-write checks:** SentinelNet rejects nodes containing prohibited content; such rejections produce `policyCheck` nodes.
-
-**How to verify:** Insert a node with flagged PII and confirm SentinelNet denial or redaction behavior and `policyCheck` audit event.
-
----
-
-## # 7) Snapshot export & auditor workflows
-- **Canonical fetch:** `GET /reason/snapshot/{id}` returns canonical JSON plus signer metadata suitable for verification tools.
-- **Human-friendly view:** Passing `format=human` produces a readable trace (uses the same stored snapshot data).
-
-**How to verify:** Create snapshot, call both formats, ensure canonical JSON hashes to stored value and human view renders annotations.
+If any item above is missing, add it before requesting final sign-off.
 
 ---
 
-## # 8) Durability, backup & restore
-- **Durable storage:** Snapshots and exports stored in S3 with versioning and object lock for audit buckets.
-- **Restore & replay:** Ability to rebuild graph metadata from audit events and snapshots verified in a restore drill.
+## Acceptance criteria (blocking items first)
 
-**How to verify:** Run restore drill: restore DB from backup or replay audit events, rebuild graph, run sample trace queries and verify snapshots/hashes.
+### 1) Kernel-authenticated writes only (blocking)
 
----
+**Acceptance**
 
-## # 9) Observability & SLOs
-- **Metrics:** request rate, trace latency (p50/p95/p99), snapshot creation latency, signature latency, error rate, and queue/backlog metrics exported.
-- **Tracing:** end-to-end traces propagated and visible (canonicalization, hash, signature, S3 write spans).
-- **Alerts:** set for snapshot/signature failures, trace latency, and graph DB connectivity.
+* All write APIs (`POST /nodes`, `POST /edges`, `POST /traces`) must accept only Kernel-authenticated requests (mTLS or Kernel-signed bearer tokens).
+* Requests from non-Kernel principals must be rejected (`401/403`).
 
-**How to verify:** Check Prometheus/Grafana dashboards and simulate error conditions to validate alerts.
+**How to verify**
 
----
+* Unit tests for RBAC middleware asserting write routes reject unauthenticated requests.
+* Integration test: start a Kernel mock that issues a valid server token; assert writes succeed only from the Kernel mock.
 
-## # 10) Tests & automation
-- **Unit tests:** canonicalization, hash/signature verification, cycle detection.
-- **Integration tests:** create node/edge → trace → snapshot → sign → export.
-- **Property/determinism tests:** canonicalization must produce identical output across language runtimes and repeated runs.
-- **Security tests:** mTLS auth tests, SentinelNet policy enforcement tests, KMS access control tests.
+**Files / tests**
 
-**How to verify:** Run the full test suite in CI and validate results.
+* `reasoning-graph/test/integration/auth.test.*` — tests for mTLS/token flows.
 
 ---
 
-## # 11) Performance & scale
-- **Small-trace SLO:** trace queries for traces under configured depth return under p95 threshold (e.g., <200ms).
-- **Snapshot capability:** snapshot process for small-to-medium subgraphs completes within defined median time (documented).
-- **Scaling plan:** sharding or caching strategy documented for large graphs.
+### 2) Trace model correctness & ordered causal paths (blocking)
 
-**How to verify:** Run performance tests and review scaling documentation and test results.
+**Acceptance**
 
----
+* ReasonTrace queries must return an ordered, annotated causal path for a given root node or event. The API must handle cycles safely (detect and break cycles for representation).
+* Each returned trace node must include: node id, type, timestamp(s), rationale, references to audit events (hash/signature), and any annotations.
 
-## # 12) Security & governance
-- **mTLS + RBAC:** Kernel-only writes; ControlPanel reads require RBAC decisions from Kernel.
-- **Signer/key handling:** Snapshot signing uses configured Ed25519 key material sourced from KMS/HSM; private keys are not persisted to disk (only loaded at boot).
-- **Audit events:** Node/edge creation and snapshot creation emit AuditEvents referencing `manifestSignatureId` or `auditEventId`.
+**How to verify**
 
-**How to verify:** Attempt unauthorized writes; confirm rejection. Verify signature flow and audit events.
+* Unit tests using synthetic traces assert ordering & cycle-safety.
+* Integration test: ingest a sequence of nodes/edges that represent a decision chain and assert the queried `GET /traces/{id}` returns the expected ordered path with annotations.
 
----
+**Files / tests**
 
-## # 13) Documentation & sign-off
-- **Docs present:** `reasoning-graph-spec.md`, `deployment.md`, `README.md`, and this acceptance criteria file exist.
-- **Sign-off:** Security Engineer and Ryan sign off; record sign-off as an audit event.
-
-**How to verify:** Confirm docs present and obtain written sign-off recorded in audit log.
+* `reasoning-graph/test/integration/trace_ordering.test.*`
 
 ---
 
-## # Final acceptance statement
-The Reasoning Graph is accepted when all above criteria pass in staging (or prod-equivalent) environment, the test suite is green, canonicalization and signature verification succeed, integrations work end-to-end, and formal sign-off by Ryan and the Security Engineer is recorded.
+### 3) Snapshot signing & canonicalization (blocking)
+
+**Acceptance**
+
+* The service must produce signed snapshots (a canonicalized JSON representation of a trace or graph range) and attach a signature + signer KID + timestamp.
+* Canonicalizer must match Kernel canonicalization rules (byte-for-byte parity). Provide canonicalization vectors and a parity test (Node ↔ Go if multi-language implementation exists).
+
+**How to verify**
+
+* Provide `test/vectors/canonical_vectors.json` and parity test similar to `kernel/test/node_canonical_parity.test.js`. Run parity test:
+
+  ```bash
+  # Node parity test (example)
+  npx jest reasoning-graph/test/node_canonical_parity.test.js --runInBand
+  ```
+* Snapshot generation test: call `POST /snapshots` → returns `{ snapshot_id, hash, signer_kid, signature }` and verify signature with public key exported from KMS / signing proxy.
+
+**Files / tests**
+
+* `reasoning-graph/test/node_canonical_parity.test.js` (or go equivalent)
+* `reasoning-graph/test/integration/snapshot_signing.test.*`
+
+**Notes**
+
+* The Kernel canonicalization rules are the canonical reference. Use the same canonicalization logic as Kernel (or ensure parity). 
+
+---
+
+### 4) Audit linkage & verifiability (blocking)
+
+**Acceptance**
+
+* Every write or snapshot must produce an AuditEvent (sha256, prevHash, signature, signer_kid) or reference a kernel-signed manifest that is stored in the audit stream.
+* Reasoning Graph must include references to the audit events it depends on, so an auditor can replay or verify the causal chain.
+
+**How to verify**
+
+* After test flows, run `kernel/tools/audit-verify.js` against audit events referenced by Reasoning Graph to ensure chain integrity. Example:
+
+  ```bash
+  node kernel/tools/audit-verify.js -d "postgres://postgres:postgres@localhost:5432/illuvrse" -s kernel/tools/signers.json
+  ```
+* Tests should create nodes, edges, and snapshots, then run audit verification. 
+
+---
+
+### 5) Explainability & annotations (blocking)
+
+**Acceptance**
+
+* API must expose `GET /node/{id}/explain` or `GET /trace/{id}/explain` which returns human-readable rationale alongside causal structure and evidence refs.
+* Operators must be able to annotate nodes (persisted corrections) and annotations must themselves be append-only and auditable.
+
+**How to verify**
+
+* Integration tests: add annotations via UI/API and assert they appear in explain view and generate audit events.
+
+---
+
+### 6) Multiservice integration (blocking)
+
+**Acceptance**
+
+* Reasoning Graph must integrate with:
+
+  * **Kernel** for RBAC, audit emission, and manifest references.
+  * **Eval Engine / Agent Manager** for recording recommendations and runtime actions.
+  * **SentinelNet** for policy evaluation references.
+* End-to-end test: produce a PromotionEvent (via Eval Engine mock), Reasoning Graph must record nodes/edges and produce a signed snapshot and audit events.
+
+**How to verify**
+
+* Integration acceptance test: start Kernel mock + Eval Engine mock + SentinelNet mock → trigger a promotion → assert Reasoning Graph records reason nodes, emits snapshot, and that Kernel audit contains links to the snapshot.
+
+**Files / tests**
+
+* `reasoning-graph/test/integration/promotion_integration.test.*`
+
+---
+
+### 7) PII protection & redaction (blocking)
+
+**Acceptance**
+
+* Reasoning Graph must implement PII redaction policies: traces returned to non-authorized principals must have PII redacted per SentinelNet policies. PII must not leak into signed snapshots for auditors unless the auditor is authorized and the snapshot is designated for that audience.
+
+**How to verify**
+
+* Unit tests for `piiRedaction` middleware.
+* Integration tests that fetch traces with/without `read:pii` capability and assert differences.
+
+---
+
+### 8) Storage, snapshot export & retention (P1)
+
+**Acceptance**
+
+* Snapshots and audit references must be exportable to S3 (object-lockable) for auditor storage. Provide `reasoning-graph/tools/export_snapshots.ts` or script.
+* Retention & TTL must be configurable.
+
+**How to verify**
+
+* Run export tool to S3 dev/minio and verify object-lock metadata and replay ability.
+
+---
+
+### 9) Observability & performance SLOs (P1)
+
+**Acceptance**
+
+* Endpoints to expose metrics:
+
+  * `reasoning_graph.trace_query_latency_seconds` (histogram)
+  * `reasoning_graph.snapshot_generation_seconds` (histogram)
+  * `reasoning_graph.snapshots_total` (counter)
+* Provide a local load test to measure p95 (< 200ms dev; target <50ms production per README).
+
+**How to verify**
+
+* Unit smoke test for `/metrics` and a load harness that measures p95 (see `sentinelnet` SLO notes for analogous test). 
+
+---
+
+### 10) Tests & automation (blocking)
+
+* **Unit tests:** canonicalization, storage, PII redaction, RBAC.
+* **Node↔Go canonical parity test** (if multi-language) — must pass or skip if Go not installed. (Mirror Kernel parity test approach.) 
+* **Integration tests:** promotion → reason node creation → snapshot signing → audit verify.
+* **CI job:** `.github/workflows/reasoning-graph-ci.yml` runs unit + integration + audit verification.
+
+---
+
+## Documentation required (blocking)
+
+* `reasoning-graph/api.md` — endpoints, schemas, examples.
+* `reasoning-graph/deployment.md` — topology, mTLS/RBAC requirements, signer & KMS guidance, snapshot export.
+* `reasoning-graph/.gitignore` — local runtime excludes for generated snapshots and local secrets.
+* `reasoning-graph/docs/PII_POLICY.md` — PII classification & redaction rules.
+
+---
+
+## Final acceptance checklist (copy into PR)
+
+Mark items **PASS** only when tests pass and docs exist.
+
+* [ ] `reasoning-graph/README.md` up-to-date. 
+* [ ] `reasoning-graph/api.md` present and accurate.
+* [ ] Canonicalization parity test present & passing (or skipped with reason).
+* [ ] Snapshot signing implemented and proofs verifiable with public keys registered in Kernel verifier registry.
+* [ ] Every write produces audit references and audit chain verifies.
+* [ ] Trace explainability and annotations working with tests.
+* [ ] PII redaction enforced and tested.
+* [ ] Integration test with Eval Engine / SentinelNet passes.
+* [ ] Metrics exposed and p95 measured (dev load harness).
+* [ ] `.gitignore` present.
+* [ ] Security review for signing & PII completed and signed.
+* [ ] Final sign-off: **Ryan (SuperAdmin)**.
+
+---
+
+## Minimal reviewer commands
+
+```bash
+# run unit & parity tests
+cd reasoning-graph
+npm ci && npm test
+
+# run parity test (if provided)
+npx jest test/node_canonical_parity.test.js --runInBand
+
+# run integration acceptance
+# (example for Go: go test ./internal/acceptance -run Promotion)
+# for Node:
+npx jest test/integration --runInBand
+
+# verify audit chain for events referenced by reasoning-graph
+node ../kernel/tools/audit-verify.js -d "postgres://postgres:postgres@localhost:5432/illuvrse" -s ../kernel/tools/signers.json
+```
+
+---
+
+## Notes & references
+
+* Reasoning Graph must align with Kernel canonicalization and audit model. Use Kernel canonicalization tests as a template for parity. 
+* Signing and proof formats must match Kernel verifier expectations: `kernel/tools/signers.json` and `kernel/tools/audit-verify.js` are the canonical references.  
+
+---

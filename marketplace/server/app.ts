@@ -1,0 +1,164 @@
+import express, { Request, Response, NextFunction } from 'express';
+import cookieParser from 'cookie-parser';
+import { v4 as uuidv4 } from 'uuid';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const app = express();
+
+// Extend Express Request to carry a small context object
+declare global {
+  namespace Express {
+    interface Request {
+      context?: {
+        requestId: string;
+        actorId?: string;
+        idempotencyKey?: string;
+      };
+    }
+  }
+}
+
+/**
+ * Basic middleware
+ */
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+/**
+ * Request ID middleware
+ */
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const requestId = req.header('X-Request-Id') || uuidv4();
+  req.context = { requestId };
+  // Propagate a minimal log-friendly header
+  resSetHeaderSafe(_res, 'X-Request-Id', requestId);
+  next();
+});
+
+/**
+ * Idempotency-key middleware (records header on request.context)
+ * NOTE: Proper idempotency storage should be backed by DB or redis.
+ */
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const idempotencyKey = req.header('Idempotency-Key') || undefined;
+  req.context = { ...(req.context || {}), idempotencyKey };
+  next();
+});
+
+/**
+ * Lightweight auth placeholder
+ * - For buyer-facing calls, controllers should validate JWT/OIDC.
+ * - This middleware extracts a Bearer token and sets actorId for audit purposes.
+ */
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const auth = req.header('Authorization') || '';
+  if (auth.startsWith('Bearer ')) {
+    const token = auth.slice('Bearer '.length).trim();
+    // In dev mode we do not validate tokens here. Real validation should occur in route handlers.
+    // For audit/trace we attach a best-effort actor id.
+    req.context = { ...(req.context || {}), actorId: `actor:${token.substring(0, 16)}` };
+  }
+  next();
+});
+
+/**
+ * Simple health endpoints (run-local.sh and CI check /health and /ready)
+ *
+ * These return a minimal JSON envelope compatible with marketplace/api.md.
+ * Implementations can be made richer later (mTLS/kms checks).
+ */
+app.get('/health', (_req: Request, res: Response) => {
+  // Compute best-effort flags from env
+  const requireKms = String(process.env.REQUIRE_KMS || 'false') === 'true';
+  const requireSigningProxy = String(process.env.REQUIRE_SIGNING_PROXY || 'false') === 'true';
+  const signingConfigured = Boolean(process.env.SIGNING_PROXY_URL || process.env.AUDIT_SIGNING_KMS_KEY_ID) || requireKms || requireSigningProxy;
+
+  const kernelConfigured = Boolean(process.env.KERNEL_API_URL);
+  // mTLS detection: if client cert/key provided then mTLS considered configured (best-effort)
+  const mTLSConfigured = Boolean(process.env.KERNEL_CLIENT_CERT && process.env.KERNEL_CLIENT_KEY);
+
+  return res.json({
+    ok: true,
+    mTLS: mTLSConfigured,
+    kernelConfigured,
+    signingConfigured,
+  });
+});
+
+app.get('/ready', async (_req: Request, res: Response) => {
+  // Readiness: basic checks. In production should probe DB, S3 and Kernel.
+  // For now report ready if PORT/DATABASE_URL present (best-effort).
+  const db = Boolean(process.env.DATABASE_URL);
+  const s3 = Boolean(process.env.S3_ENDPOINT && process.env.S3_BUCKET);
+  const kernel = Boolean(process.env.KERNEL_API_URL);
+
+  if (db && s3) {
+    return res.json({ ok: true, db: true, s3: true, kernel });
+  }
+  return res.status(500).json({ ok: false, error: { code: 'NOT_READY', message: 'Missing runtime dependencies' } });
+});
+
+/**
+ * Mount service routers (these files will be created in subsequent steps)
+ * Example: app.use('/', checkoutRouter) expects routes at /checkout etc.
+ *
+ * Keep these guarded with try/catch so the app can still start if route files
+ * are not yet implemented during early scaffolding.
+ */
+function tryMount(path: string, importPath: string) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const router = require(importPath);
+    if (router && router.default) {
+      app.use(path, router.default);
+    } else if (router) {
+      app.use(path, router);
+    }
+  } catch (err) {
+    // route not present yet — log and continue (useful during incremental file creation)
+    // console.debug left intentionally minimal so devs notice missing routes but app still starts.
+    // Replace with proper logging as the service matures.
+    // eslint-disable-next-line no-console
+    console.debug(`Router ${importPath} not mounted (file may not exist yet):`, (err as Error).message);
+  }
+}
+
+/* Mount expected route modules (they will be created next) */
+tryMount('/', './routes/checkout.route');
+tryMount('/', './routes/order.route');
+tryMount('/', './routes/proofs.route');
+tryMount('/', './routes/license.route');
+tryMount('/', './routes/preview.route');
+tryMount('/', './routes/sku.route');
+tryMount('/', './routes/catalog.route');
+tryMount('/admin', './routes/admin.route');
+// You can add more mount points later (metrics, debug, etc.)
+
+/**
+ * Error handler — JSON envelope `{ ok: false, error: { code, message, details } }`
+ */
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  // eslint-disable-next-line no-console
+  console.error('Unhandled error in request handling:', err && err.stack ? err.stack : err);
+  const code = err?.code || 'INTERNAL_ERROR';
+  const message = err?.message || 'Internal server error';
+  const details = err?.details || undefined;
+  res.status(err?.status || 500).json({ ok: false, error: { code, message, details } });
+});
+
+/**
+ * Helper to avoid TypeScript type issues when setting headers on Response inside middleware
+ */
+function resSetHeaderSafe(res: Response, name: string, value: string) {
+  try {
+    res.setHeader(name, value);
+  } catch {
+    // ignore
+  }
+}
+
+export default app;
+

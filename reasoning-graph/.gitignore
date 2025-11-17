@@ -1,0 +1,100 @@
+# Node / JS
+node_modules/
+dist/
+build/
+.npm/
+.pnp.*
+.vscode/
+.vscode-test/
+
+# TypeScript
+*.tsbuildinfo
+
+# Local env / secrets
+.env
+.env.local
+.env.*.local
+.secrets/
+secrets.json
+*.pem
+*.key
+*.p12
+*.der
+
+# Editor / OS
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.log
+.DS_Store
+Thumbs.db
+
+# Test output / coverage
+coverage/
+jest-output.json
+.vitest/
+.vitest-cache/
+
+# Temp / runtime
+tmp/
+temp/
+*.tmp
+*.pid
+*.seed
+*.cache
+
+# Build artifacts for Go (if present)
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Database / local stores
+*.sqlite
+*.db
+*.db-journal
+/.data/
+pgdata/
+
+# Snapshot exports / auditor artifacts (do NOT commit)
+snapshots/
+exports/
+snapshots-*.jsonl.gz
+exports-*.jsonl.gz
+snapshots_tmp/
+archive_exports/
+
+# Generated code & helpers
+generated/
+gen/
+
+# Docker
+docker-compose.override.yml
+docker-compose.*.yml
+.docker/
+
+# Kubernetes local configs
+.kube/
+.kubeconfig
+
+# CI artifacts & reports
+reports/
+reports-*
+artifacts/
+tmp_e2e/
+playwright-report/
+
+# IDE / language specifics
+*.iml
+
+# Secret keys accidentally created by tests
+test-keys/
+*.pem.enc
+
+# Misc
+*.bak
+*.orig
+

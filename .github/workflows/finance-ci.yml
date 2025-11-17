@@ -1,0 +1,230 @@
+name: Finance CI
+
+on:
+  push:
+    paths:
+      - 'finance/**'
+  pull_request:
+    paths:
+      - 'finance/**'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  REQUIRE_KMS: ${{ secrets.REQUIRE_KMS || 'false' }}
+  REQUIRE_SIGNING_PROXY: ${{ secrets.REQUIRE_SIGNING_PROXY || 'false' }}
+
+jobs:
+  build-and-unit:
+    name: Build & Unit / Ledger Tests
+    runs-on: ubuntu-latest
+    outputs:
+      unit-result: ${{ steps.unit.outputs.result || 'ok' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: finance/package-lock.json
+
+      - name: Install deps
+        working-directory: finance
+        run: npm ci
+
+      - name: Lint (if configured)
+        working-directory: finance
+        run: |
+          if jq -e '.scripts | has("lint")' finance/package.json >/dev/null 2>&1; then
+            npm run lint || true
+          fi
+
+      - name: Run unit tests (ledger balance / idempotency)
+        id: unit
+        working-directory: finance
+        run: |
+          if jq -e '.scripts | has("test")' finance/package.json >/dev/null 2>&1; then
+            npm test --silent
+          else
+            echo "No test script found - skipping"
+          fi
+
+      - name: Check for private keys
+        working-directory: .
+        run: |
+          if [ -x finance/scripts/ci/check-no-private-keys.sh ]; then
+            finance/scripts/ci/check-no-private-keys.sh
+          else
+            # Basic grep fallback (best-effort)
+            if git grep -n -- '*-----BEGIN PRIVATE KEY-----' || git grep -n -- '*.pem' || git grep -n -- 'AKIA'; then
+              echo "Possible private key or secret found" && exit 1 || true
+            else
+              echo "No obvious private keys found by quick grep"
+            fi
+          fi
+
+      - name: Upload unit test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-unit-results
+          path: |
+            finance/vitest-report.html || true
+            finance/coverage || true
+
+  e2e:
+    name: E2E Acceptance (checkout-ledger)
+    runs-on: ubuntu-latest
+    needs: build-and-unit
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: finance/package-lock.json
+
+      - name: Install deps
+        working-directory: finance
+        run: npm ci
+
+      - name: Start local orchestration for E2E (DB + signing-proxy mock)
+        working-directory: finance
+        env:
+          POSTGRES_DB: finance_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minio
+          S3_SECRET: minio123
+          MOCK_SIGNING_PROXY: 'true'
+        run: |
+          # This expects a run-local.sh or docker-compose.dev.yml in finance/
+          if [ -x ./run-local.sh ]; then
+            ./run-local.sh &
+            echo $! > /tmp/finance-run-local.pid
+            # Wait for health probe
+            for i in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:4000/health >/dev/null 2>&1; then
+                echo "finance local started"
+                break
+              fi
+              echo "waiting for local services..."
+              sleep 2
+            done
+          else
+            echo "run-local.sh not found in finance/ - please provide orchestration for E2E" && exit 1
+          fi
+
+      - name: Run E2E tests (checkout-ledger)
+        working-directory: finance
+        env:
+          FINANCE_BASE_URL: http://127.0.0.1:4000
+        run: |
+          # Example: execute vitest or node e2e script
+          if [ -f package.json ] && jq -e '.scripts | has("test:e2e")' package.json >/dev/null 2>&1; then
+            npm run test:e2e --silent || (echo "E2E tests failed" && exit 1)
+          elif [ -d test/e2e ]; then
+            npx vitest run test/e2e/checkout-ledger.e2e.test.ts --runInBand || (echo "E2E checkout-ledger failed" && exit 1)
+          else
+            echo "No E2E tests found - skipping" && exit 0
+          fi
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-e2e-artifacts
+          path: |
+            finance/test-results/**
+            finance/vitest-report.html || true
+            /tmp/finance-run-local.pid || true
+
+      - name: Teardown local orchestration
+        if: always()
+        run: |
+          if [ -f /tmp/finance-run-local.pid ]; then
+            kill $(cat /tmp/finance-run-local.pid) || true
+            rm -f /tmp/finance-run-local.pid
+          fi
+
+  audit-verify:
+    name: Audit Verification (best-effort)
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install kernel tools (audit-verify)
+        run: |
+          if [ -f kernel/package.json ]; then
+            (cd kernel && npm ci)
+          fi
+
+      - name: Run audit-verify (best-effort)
+        env:
+          DATABASE_URL: ${{ secrets.FINANCE_TEST_DATABASE_URL || '' }}
+          SIGNERS_PATH: kernel/tools/signers.json
+        run: |
+          if [ -f kernel/tools/audit-verify.js ]; then
+            node kernel/tools/audit-verify.js -d "${DATABASE_URL}" -s "${SIGNERS_PATH}" || echo "audit-verify failed (best-effort)"
+          else
+            echo "audit-verify.js not present - skipping"
+          fi
+
+      - name: Upload audit-verify logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-audit-verify
+          path: |
+            kernel/jest-output.json || true
+
+  require-signing-check:
+    name: Signing Path Guard (protected branches)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Signing / KMS check
+        env:
+          REQUIRE_KMS: ${{ env.REQUIRE_KMS }}
+          REQUIRE_SIGNING_PROXY: ${{ env.REQUIRE_SIGNING_PROXY }}
+          SIGNING_PROXY_URL: ${{ secrets.SIGNING_PROXY_URL || '' }}
+          KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT || '' }}
+        run: |
+          if [ "${REQUIRE_SIGNING_PROXY}" = "true" ]; then
+            if [ -z "${SIGNING_PROXY_URL}" ]; then
+              echo "REQUIRE_SIGNING_PROXY=true but SIGNING_PROXY_URL not provided" && exit 2
+            fi
+            if ! curl -fsS -m 5 ${SIGNING_PROXY_URL}/health >/dev/null 2>&1; then
+              echo "Signing proxy unreachable at ${SIGNING_PROXY_URL}" && exit 3
+            fi
+            echo "Signing proxy reachable"
+          fi
+          if [ "${REQUIRE_KMS}" = "true" ]; then
+            if [ -z "${KMS_ENDPOINT}" ]; then
+              echo "REQUIRE_KMS=true but KMS_ENDPOINT not provided" && exit 2
+            fi
+            if ! curl -fsS -m 5 ${KMS_ENDPOINT}/health >/dev/null 2>&1; then
+              echo "KMS endpoint unreachable at ${KMS_ENDPOINT}" && exit 3
+            fi
+            echo "KMS endpoint reachable"
+          fi
+

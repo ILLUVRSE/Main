@@ -1,70 +1,65 @@
-# Node / TypeScript
+# Node
 node_modules/
-dist/
-build/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log
-
-# TypeScript
-*.tsbuildinfo
-
-# Environment / secrets (do not commit real secrets)
-.env
-.env.*.local
-.env.local
-.env.*.secret
-*.pem
-*.key
-*.p12
-*.pfx
-*.crt
-*.der
-*.jks
-secrets/
-vault/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDEs / editors
-.vscode/
+pnpm-debug.log*
+.cache/
 .idea/
-*.sublime-workspace
-*.sublime-project
+.vscode/
+
+# Build outputs
+dist/
+.next/
+.out/
+.build/
+
+# Local environment / secrets
+.env
+.env.local
+.env.*.local
+.env.test
+
+# Runtime data (server)
+server/data/
+server/data/**/*
+!server/data/.gitkeep
+
+# Docker
+docker-compose.override.yml
+**/docker-compose.override.yml
+*.env.local
 
 # Logs
 logs/
 *.log
-/tmp/
-*.tmp
+marketplace/server/*.log
 
-# Test / coverage
-coverage/
-.vitest/
-.vscode-test/
+# OS generated
+.DS_Store
+Thumbs.db
 
-# Local data used by run-local / MinIO
-.minio-data/
-marketplace/.minio-data/
-marketplace/.minio-data/
+# Test result artifacts
+test-results/
+marketplace/test-results/
+marketplace/ui/test-results/
 
-# Docker
-docker-compose.override.yml
-.docker/
-
-# Playwright artifacts
-playwright-report/
-playwright-results/
-
-# Misc
-*.bak
+# Editor/temp
 *.swp
-*.local
-*.orig
+*.swo
 
-# Allowlist: keep README and scripts visible (no-op)
-!README.md
+# Playwright
+playwright-report/
+playwright-report-*/
+
+# Mac-specific
+.AppleDouble
+.LSOverride
+
+# Ignore local IDE settings
+*.sublime-workspace
+*.sublime-project
+
+# Ignore npm lock in workspaces (use root lockfile)
+ui/package-lock.json
 

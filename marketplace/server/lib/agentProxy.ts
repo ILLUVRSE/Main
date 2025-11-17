@@ -1,194 +1,289 @@
 /**
- * marketplace/server/lib/agentProxy.ts
+ * agentProxy.ts
  *
- * Small server-side agent proxy used by `routes/agent.route.ts`.
+ * Small disk-backed agent registry and proxy helper used by admin APIs.
+ * This provides a simple implementation for listing/creating/updating/revoking
+ * agents, rotating credentials, and triggering a "redeploy" action.
  *
- * Responsibilities:
- * - Accepts a prompt + context + actorId and returns a normalized agent response:
- *     { reply?: string, actions?: any[], meta?: any }
- * - If `AGENT_BACKEND_URL` is configured, forwards the request to that service.
- * - Otherwise, if `OPENAI_API_KEY` is configured, uses OpenAI Chat completions (basic).
- * - Otherwise falls back to a harmless mock reply (useful for local dev).
- *
- * Security:
- * - This module **must** be the place you enforce (or expect) server-side policy,
- *   action authorization, and auditing. The caller (route) should also emit audit events.
- *
- * Configuration (env):
- *  - AGENT_BACKEND_URL  — prefer this: full URL of an internal Agent Builder service, e.g. https://agent.internal/api/query
- *  - OPENAI_API_KEY     — if AGENT_BACKEND_URL not present, use OpenAI Chat completions
- *  - OPENAI_API_HOST    — optional override for OpenAI-like host (default: https://api.openai.com)
- *  - AGENT_PROXY_MODE   — 'mock' to force a canned response
- *
- * Note: adapt the HTTP shapes below to match the agent backend you deploy.
+ * Notes:
+ *  - This is intentionally simple for dev/testing. In production, agents would
+ *    be managed by a control plane and keys would live in a KMS/HSM.
  */
 
-import fetch from 'node-fetch'; // Node 18+ has global fetch, but using node-fetch import works in many environments
-// If your runtime already has global fetch, you can remove the import above.
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
+import logger from './logger';
+import auditWriter from './auditWriter';
+import signerRegistry from './signerRegistry';
 
-type QueryOpts = {
-  prompt: string;
-  context?: Record<string, any>;
-  actorId?: string | null;
-  // optional allowed actions for this agent invocation (server-side enforcement)
-  allowedActions?: string[];
-  // free-form metadata
-  meta?: Record<string, any>;
-};
+type AgentStatus = 'active' | 'revoked' | 'pending';
 
-type AgentReply = {
-  reply?: string;
-  actions?: any[];
-  meta?: any;
-};
-
-const AGENT_BACKEND_URL = process.env.AGENT_BACKEND_URL || process.env.MARKETPLACE_AGENT_BACKEND_URL || '';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_API_HOST = process.env.OPENAI_API_HOST || 'https://api.openai.com';
-const AGENT_PROXY_MODE = (process.env.AGENT_PROXY_MODE || '').toLowerCase(); // 'mock' possible
-
-async function callAgentBackend(opts: QueryOpts): Promise<AgentReply> {
-  // Expect the agent backend to accept { prompt, context, actorId, allowedActions, meta }
-  // and return JSON { reply, actions, meta }.
-  const target = AGENT_BACKEND_URL;
-  if (!target) throw new Error('AGENT_BACKEND_URL not configured');
-
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  // If the agent backend needs internal service auth, set AGENT_BACKEND_API_KEY in environment and forward it.
-  if (process.env.AGENT_BACKEND_API_KEY) {
-    headers['Authorization'] = `Bearer ${process.env.AGENT_BACKEND_API_KEY}`;
-  }
-
-  const res = await fetch(target, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      prompt: opts.prompt,
-      context: opts.context || {},
-      actorId: opts.actorId || null,
-      allowedActions: opts.allowedActions || [],
-      meta: opts.meta || {},
-    }),
-    // set a reasonable timeout by using AbortController from caller if needed
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Agent backend error ${res.status}: ${txt}`);
-  }
-
-  const json = await res.json().catch(() => ({}));
-  // Normalize shape
-  return {
-    reply: json.reply || json.text || json.result || '',
-    actions: json.actions || json.actions || [],
-    meta: json.meta || json,
-  };
+interface AgentRecord {
+  id: string;
+  name: string;
+  config?: Record<string, any>;
+  signerId?: string | null;
+  status: AgentStatus;
+  keys?: {
+    publicKey?: string | null;
+    secretKey?: string | null; // note: in a real system secretKey wouldn't be stored in plaintext
+    createdAt?: string;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
 }
 
-async function callOpenAIChat(opts: QueryOpts): Promise<AgentReply> {
-  if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not configured');
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const AGENTS_FILE = path.join(DATA_DIR, 'agents.json');
 
-  // Basic chat completion usage: single user message with a brief system prompt for safety.
-  // For production, replace with the Agent Builder / Actions API and define tool bindings.
-  const url = `${OPENAI_API_HOST.replace(/\/$/, '')}/v1/chat/completions`;
-  const systemPrompt =
-    'You are a helpful assistant for the Illuvrse Marketplace. Keep answers concise and actionable. When appropriate, produce JSON "actions" describing suggested backend operations (createCheckout, validateManifest, verifyProof) with fields required. Do not perform any sensitive operations yourself.';
-
-  const body: any = {
-    model: 'gpt-4o-mini', // change to appropriate model in prod
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: String(opts.prompt) },
-    ],
-    max_tokens: 800,
-    temperature: 0.2,
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`OpenAI error ${res.status}: ${txt}`);
-  }
-
-  const json = await res.json();
-  // Extract assistant text
-  const choice = (json.choices && json.choices[0]) || null;
-  const replyText = (choice && (choice.message?.content || choice.text)) || '';
-
-  // Attempt to parse an "actions" block if present in assistant text (JSON codeblock heuristic)
-  let actions: any[] = [];
+async function ensureDataDir() {
   try {
-    // Look for a JSON object in the reply
-    const firstJsonMatch = replyText.match(/```json\s*([\s\S]*?)\s*```/i) || replyText.match(/({[\s\S]*})/);
-    if (firstJsonMatch && firstJsonMatch[1]) {
-      const parsed = JSON.parse(firstJsonMatch[1]);
-      if (Array.isArray(parsed.actions)) actions = parsed.actions;
-      else if (parsed.actions) actions = [parsed.actions];
-    }
-  } catch {
-    // ignore parse errors - actions remain empty
+    await fs.promises.mkdir(DATA_DIR, { recursive: true });
+  } catch (err) {
+    logger.warn('agentProxy.ensureDataDir.failed', { err });
   }
+}
 
-  return { reply: String(replyText), actions, meta: { raw: json } };
+async function readJsonFile<T>(file: string, fallback: T): Promise<T> {
+  try {
+    const raw = await fs.promises.readFile(file, { encoding: 'utf-8' });
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeJsonFile(file: string, data: any) {
+  try {
+    await ensureDataDir();
+    const tmp = `${file}.tmp`;
+    await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf-8' });
+    await fs.promises.rename(tmp, file);
+  } catch (err) {
+    logger.error('agentProxy.writeJsonFile.failed', { err, file });
+    throw err;
+  }
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 /**
- * Main exported function.
+ * Generate a simple key pair (not real asymmetric pair) for dev/testing.
+ * In production, this should call KMS/HSM or create proper crypto keypairs.
  */
-export async function queryAgent(opts: QueryOpts): Promise<AgentReply> {
-  if (!opts || !opts.prompt) throw new Error('prompt is required');
-
-  // Mock mode for local development/testing
-  if (AGENT_PROXY_MODE === 'mock') {
-    return {
-      reply: `Mock reply (AGENT_PROXY_MODE=mock) — you asked: ${String(opts.prompt).slice(0, 240)}`,
-      actions: [],
-      meta: { mode: 'mock' },
-    };
-  }
-
-  // Prefer calling an internal agent backend if configured
-  if (AGENT_BACKEND_URL) {
-    try {
-      return await callAgentBackend(opts);
-    } catch (err) {
-      // Log and fall through to other strategies
-      // eslint-disable-next-line no-console
-      console.error('agentProxy: callAgentBackend failed:', (err as Error).message || err);
-      throw err; // prefer failing fast so admins notice misconfiguration
-    }
-  }
-
-  // Fall back to OpenAI chat if API key present
-  if (OPENAI_API_KEY) {
-    try {
-      return await callOpenAIChat(opts);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('agentProxy: callOpenAIChat failed:', (err as Error).message || err);
-      throw err;
-    }
-  }
-
-  // Final fallback: harmless canned response
-  return {
-    reply:
-      'Agent is not configured. To enable agent functionality, configure AGENT_BACKEND_URL or OPENAI_API_KEY. (This is a fallback response.)',
-    actions: [],
-    meta: { configured: false },
-  };
+function generateKeys() {
+  const secret = crypto.randomBytes(32).toString('hex');
+  const pub = crypto.createHash('sha256').update(secret).digest('hex');
+  return { publicKey: pub, secretKey: secret, createdAt: nowIso() };
 }
 
-export default {
-  queryAgent,
+/**
+ * Load / Save helpers
+ */
+async function loadAgents(): Promise<AgentRecord[]> {
+  return await readJsonFile<AgentRecord[]>(AGENTS_FILE, []);
+}
+
+async function saveAgents(items: AgentRecord[]) {
+  await writeJsonFile(AGENTS_FILE, items);
+}
+
+const agentProxy = {
+  /**
+   * List agents (simple pagination and filter)
+   */
+  async listAgents(opts: { q?: string; page?: number; limit?: number } = {}) {
+    const page = Math.max(1, Number(opts.page ?? 1));
+    const limit = Math.max(1, Math.min(1000, Number(opts.limit ?? 50)));
+    const q = opts.q ? String(opts.q).toLowerCase() : undefined;
+
+    const items = await loadAgents();
+    let filtered = items.slice();
+
+    if (q) {
+      filtered = filtered.filter((a) => a.name.toLowerCase().includes(q) || (a.id || '').toLowerCase().includes(q));
+    }
+
+    const total = filtered.length;
+    const start = (page - 1) * limit;
+    const pageItems = filtered.slice(start, start + limit);
+
+    return { total, items: pageItems };
+  },
+
+  /**
+   * Create a new agent record. signerId is optional.
+   */
+  async createAgent(payload: {
+    id?: string;
+    name: string;
+    config?: Record<string, any>;
+    signerId?: string | null;
+    createdBy?: string;
+  }) {
+    const items = await loadAgents();
+
+    // If signerId specified validate it exists
+    if (typeof payload.signerId === 'string' && payload.signerId) {
+      const signer = await signerRegistry.getSignerById(payload.signerId);
+      if (!signer) {
+        throw new Error(`signer ${payload.signerId} not found`);
+      }
+    }
+
+    const id = payload.id || uuidv4();
+    const now = nowIso();
+    const keys = generateKeys();
+
+    const rec: AgentRecord = {
+      id,
+      name: payload.name,
+      config: payload.config || {},
+      signerId: payload.signerId ?? null,
+      status: 'active',
+      keys: {
+        publicKey: keys.publicKey,
+        secretKey: keys.secretKey,
+        createdAt: keys.createdAt,
+      },
+      createdAt: now,
+      updatedAt: now,
+      createdBy: payload.createdBy,
+    };
+
+    items.push(rec);
+    await saveAgents(items);
+
+    await auditWriter.write({
+      actor: payload.createdBy || 'system',
+      action: 'agent.create',
+      details: { agentId: id, name: payload.name },
+    });
+
+    // Do not return secretKey in production APIs, but admin routes may use it for provisioning.
+    return rec;
+  },
+
+  async getAgent(id: string) {
+    const items = await loadAgents();
+    return items.find((a) => a.id === id) || null;
+  },
+
+  async updateAgent(id: string, changes: Partial<Omit<AgentRecord, 'id' | 'createdAt'>>) {
+    const items = await loadAgents();
+    const idx = items.findIndex((a) => a.id === id);
+    if (idx === -1) return null;
+
+    const rec = items[idx];
+
+    if (typeof changes.name === 'string') rec.name = changes.name;
+    if (typeof changes.config === 'object') rec.config = { ...(rec.config || {}), ...(changes.config || {}) };
+    if (typeof (changes as any).signerId !== 'undefined') {
+      // allow null to detach signer
+      const signerIdCandidate = (changes as any).signerId;
+      if (signerIdCandidate) {
+        const signer = await signerRegistry.getSignerById(String(signerIdCandidate));
+        if (!signer) throw new Error(`signer ${signerIdCandidate} not found`);
+        rec.signerId = String(signerIdCandidate);
+      } else {
+        rec.signerId = null;
+      }
+    }
+
+    rec.updatedAt = nowIso();
+    items[idx] = rec;
+    await saveAgents(items);
+
+    await auditWriter.write({
+      actor: (changes as any).updatedBy || 'system',
+      action: 'agent.update',
+      details: { agentId: id, changes: Object.keys(changes) },
+    });
+
+    return rec;
+  },
+
+  async revokeAgent(id: string) {
+    const items = await loadAgents();
+    const idx = items.findIndex((a) => a.id === id && a.status !== 'revoked');
+    if (idx === -1) return null;
+
+    items[idx].status = 'revoked';
+    items[idx].updatedAt = nowIso();
+    // Clear keys to prevent reuse
+    items[idx].keys = null;
+    await saveAgents(items);
+
+    await auditWriter.write({
+      actor: 'admin',
+      action: 'agent.revoke',
+      details: { agentId: id },
+    });
+
+    return true;
+  },
+
+  /**
+   * Rotate agent keys. Returns new key pair (public and secret) but does not persist secret in logs.
+   */
+  async rotateAgentKeys(id: string) {
+    const items = await loadAgents();
+    const idx = items.findIndex((a) => a.id === id && a.status === 'active');
+    if (idx === -1) return null;
+
+    const keys = generateKeys();
+    items[idx].keys = {
+      publicKey: keys.publicKey,
+      secretKey: keys.secretKey,
+      createdAt: keys.createdAt,
+    };
+    items[idx].updatedAt = nowIso();
+    await saveAgents(items);
+
+    await auditWriter.write({
+      actor: 'admin',
+      action: 'agent.rotateKeys',
+      details: { agentId: id, keyCreatedAt: keys.createdAt },
+    });
+
+    // Return keys to caller for provisioning. Caller must ensure secret is handled safely.
+    return { publicKey: keys.publicKey, secretKey: keys.secretKey, createdAt: keys.createdAt };
+  },
+
+  /**
+   * Redeploy agent configuration. This simulates notifying the agent or control plane.
+   * Returns a result object describing the action outcome.
+   */
+  async redeployAgent(id: string) {
+    const items = await loadAgents();
+    const idx = items.findIndex((a) => a.id === id && a.status === 'active');
+    if (idx === -1) return null;
+
+    const rec = items[idx];
+    // Simulate redeploy latency and response
+    const result = {
+      ok: true,
+      agentId: id,
+      message: `redeploy triggered for agent ${rec.name}`,
+      timestamp: nowIso(),
+    };
+
+    await auditWriter.write({
+      actor: 'admin',
+      action: 'agent.redeploy',
+      details: { agentId: id },
+    });
+
+    // In a real system we'd call a remote API or produce an event. Here we simply return success.
+    return result;
+  },
 };
+
+export default agentProxy;
 

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "lib": ["ES2020", "DOM"],
+    "declaration": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "inlineSourceMap": true,
+    "types": ["node"]
+  },
+  "include": ["server/**/*", "server/*.ts", "server/**/*.ts", "server/**/*.tsx", "lib/**/*", "**/*.d.ts"],
+  "exclude": ["node_modules", "dist", "ui/node_modules", "**/*.test.ts", "**/*.spec.ts"]
+}
+

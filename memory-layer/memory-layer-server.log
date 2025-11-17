@@ -1,4 +1,0 @@
-[metrics] Prometheus metrics initialized and default metrics collected.
-[tracing] OpenTelemetry NodeSDK started for service="memory-layer"
-[startup] failed to install OpenAPI validator: OpenApiValidator is not a constructor
-Memory Layer service listening on port 4300 (env=test)

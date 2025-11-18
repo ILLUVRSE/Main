@@ -1,316 +1,247 @@
-# Control-Panel — Deployment & Production Runbook
+# Control-Panel — Deployment, Security & Runbook
 
-**Purpose**
-Deployment guide for the Control-Panel operator UI (Next.js App Router). Covers topology, transport security (mTLS), SSO, signing proxy, secrets, scaling, SLOs, canary rollout and key rotation. Follow this exactly for production deployment.
+## Purpose
 
-**Audience:** SRE / Ops / Security / Release Engineer
-
----
-
-## 1. Architecture / topology (high-level)
-
-```
-Users (browser) -> CDN / WAF -> Control-Panel (Next.js server(s) behind LB) -> 
-  ├─ Kernel (server-to-server mTLS / KERNEL_API_URL)
-  ├─ Signing Proxy (SIGNING_PROXY_URL) or KMS
-  ├─ SentinelNet (optional read-only)
-  └─ Reasoning Graph (read / annotate via Kernel)
-```
-
-**Key principles**
-
-* All Kernel interactions are proxied server-side; browsers never receive Kernel tokens.
-* Operator secrets (KERNEL_CONTROL_PANEL_TOKEN, SIGNING_PROXY_API_KEY, session secret) live only in the server environment / secret manager.
-* Production requires mTLS or private network for all service-to-service traffic. Demo/dev may run without mTLS but must be blocked in production. 
+Control-Panel is the operator-facing UI and server proxy that performs multisig approvals, supervises upgrades, exposes an audit explorer and trace viewer, and allows operators to perform high-privilege actions safely. This document defines the required production configuration, security constraints, observability, and acceptance checks.
 
 ---
 
-## 2. Required environment variables
+## 0 — One-line intent
 
-Provide these in production from your secret manager (Vault / AWS Secrets Manager / Kubernetes Secret). Do **not** commit them.
-
-**Server runtime**
-
-* `NODE_ENV=production`
-* `PORT` (container/host port)
-* `KERNEL_API_URL` — Kernel endpoint ([https://kernel.prod.internal](https://kernel.prod.internal))
-* `KERNEL_CONTROL_PANEL_TOKEN` — server-side bearer token (or omitted if using mTLS)
-* `SIGNING_PROXY_URL` — optional signing proxy for operator actions
-* `SIGNING_PROXY_API_KEY` — api key for signing-proxy (if used)
-* `CONTROL_PANEL_SESSION_SECRET` — secure random 32+ byte string for cookie signing
-* `REASONING_GRAPH_URL` — optional
-* `SENTINEL_URL` — optional
-* `OIDC_ISSUER` — OIDC provider issuer URL
-* `OIDC_CLIENT_ID` — Control-Panel client id
-* `OIDC_CLIENT_SECRET` — secret stored in vault
-* `OIDC_CALLBACK_URL` — production callback URL
-* `SESSION_COOKIE_SECURE=true`
-* `CSP_POLICY` — content security policy string (if you apply CSP)
-
-**Feature toggles / production guard**
-
-* `DEV_SKIP_MTLS=false` (must be false in production)
-* `REQUIRE_SIGNING_PROXY=true` — enforce signing proxy usage (or `REQUIRE_KMS=true` if KMS required)
-
-**Observability**
-
-* `PROM_PUSH_GATEWAY` or `PROM_ENDPOINT`
-* `SENTRY_DSN` or equivalent
+Run Control-Panel as a hardened, server-proxied operator UI that never exposes secrets to the browser, proxies state-changing Kernel calls server-side, enforces multisig for high-risk actions and emits audit events for all operator actions.
 
 ---
 
-## 3. Transport security (mTLS / bearer tokens)
+## 1 — Topology & components
 
-**Production must use one of:**
+* **Control-Panel frontend** — React/Next or similar UI served via CDN or behind LB; no secrets in the browser.
+* **Control-Panel server** — server-side proxy and orchestration service that:
 
-* **mTLS** between Control-Panel ↔ Kernel (recommended). Provision server cert & key via Vault and configure TLS client cert on the Control-Panel side. Kernel must trust CA.
-* **Server-side bearer token** only when mTLS is not available — keep token vault-only and rotate regularly.
-
-**mTLS recommendation**
-
-* Use short-lived certs issued by internal CA (via Vault PKI or ACM PCA). Mount certs into pods (K8s secrets from Vault).
-* Health endpoints should report whether mTLS is configured (`/health` shows mTLS=true/false).
-
-**CI / Staging**
-
-* Allow `DEV_SKIP_MTLS=true` in staging only if `NODE_ENV != production`. Startup must fatal if `NODE_ENV=production` and `DEV_SKIP_MTLS=true`. (Enforce in server startup.)
-
----
-
-## 4. OIDC / Authentication
-
-**Requirements**
-
-* Use OIDC with enforced roles mapping (`kernel-admin`, `kernel-approver`, `operator`). Map claims to UI roles server-side.
-* Sessions stored in HTTP-only secure cookies signed with `CONTROL_PANEL_SESSION_SECRET`. No tokens in localStorage.
-* Admin password fallback allowed only for local dev; **disabled in production**.
-
-**Config checklist**
-
-* Register Control-Panel client with OIDC provider (redirect URIs).
-* Validate `id_token` server-side (`/api/session`) and map roles to UI capabilities.
-* Implement 2FA enforcement at IdP (SSO-level) for operator accounts.
+  * validates operator auth (OIDC),
+  * performs Kernel mTLS calls on behalf of users,
+  * coordinates multisig flows, upgrades, and audit replay commands,
+  * stores minimal operational caches and read-only indices,
+  * emits AuditEvents for operator actions.
+* **Kernel** — authoritative control plane; Control-Panel proxies state changes to Kernel via mTLS and Kernel verifies multisig constraints.
+* **Audit indexer/Search** — Postgres/Elastic index of audit events and S3 archive for raw events.
+* **Signing/KMS** — used by Kernel and Control-Panel only as required for operator signing flows (Control-Panel must **not** hold private keys).
+* **Playwright CI** — E2E tests that run in CI (headless or headed) validating flows: multisig, upgrade apply, audit exploration.
 
 ---
 
-## 5. Signing / Ratification (SIGNING_PROXY / KMS)
+## 2 — Required cloud components & env vars
 
-**Production signing model**
+* Kubernetes (EKS/GKE/AKS) or managed app platform for server.
+* **Secrets manager** (Vault / Secret Manager) for mTLS certs, OIDC client secret.
+* **KMS** / signing proxy (if Control-Panel needs to generate signed pointers — documented usage below).
+* **Kernel API URL & client certs**:
 
-* Operator ratification and any signing required by Kernel should be done either via:
+  * `KERNEL_API_URL`
+  * `KERNEL_CLIENT_CERT_PATH` / `KERNEL_CLIENT_KEY_PATH` or mounted mTLS secret
+* **OIDC config**:
 
-  * **Signing Proxy:** Control-Panel calls `SIGNING_PROXY_URL` over mTLS / private network with `SIGNING_PROXY_API_KEY`, or
-  * **KMS:** Control-Panel triggers server-side KMS flow (Cloud KMS/HSM) via a signing service (recommended instead of embedding keys in app).
+  * `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
+* **Prometheus / OTEL / Sentry**:
 
-**Config**
+  * `PROM_ENDPOINT`, `OTEL_COLLECTOR_URL`, `SENTRY_DSN`
+* **Audit index**:
 
-* `REQUIRE_SIGNING_PROXY=true` or `REQUIRE_KMS=true` for production. If neither is set, server must refuse to boot in production.
+  * `AUDIT_INDEX_URL` or Postgres connection for fast search
+* **Playwright**:
 
-**Audit**
-
-* Every signing action must produce an audit event (signed by Kernel or signing proxy) and record signer ID. UI must show signer metadata in confirmation modal.
-
-**Key rotation**
-
-* Rotate signing proxy API key or KMS key according to runbook (see Key Rotation section). Publish public keys to Kernel verifier registry before disabling previous keys.
-
----
-
-## 6. Secrets & Vault integration
-
-**Do not put secrets in repo.** Use Vault or your secret manager.
-
-**Recommended approach**
-
-* Store session secret, OIDC client secret, signing-proxy key, and Kernel token in Vault. Use a sidecar or init container to pull secrets into ephemeral k8s secrets or use CSI driver for Vault.
-
-**Example: Kubernetes (Helm)**
-
-* Create `values-production.yaml` referencing secrets:
-
-```yaml
-env:
-  - name: KERNEL_API_URL
-    value: https://kernel.prod.internal
-  - name: CONTROL_PANEL_SESSION_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: control-panel-secrets
-        key: session_secret
-```
+  * CI runner must have access to ephemeral test service accounts and be able to seed Kernel mocks.
 
 ---
 
-## 7. Deployment: Kubernetes / containers
+## 3 — Security & auth model (MUST)
 
-**Pod spec**
+* **Human auth**: OIDC/SSO for operators. Map OIDC claims to roles: `SuperAdmin`, `DivisionLead`, `Operator`, `Auditor`.
+* **Server-side proxy only**: All state-changing operations (kernel.applyUpgrade, kernel.signUpgrade, kernel.applyMultisig, manifest apply operations) must be executed server-side by Control-Panel using mTLS to Kernel. The browser must never directly call Kernel or hold private keys.
+* **mTLS**: Control-Panel → Kernel communication uses mTLS. Control-Panel presents a short-lived client cert provisioned from Vault PKI or an internal CA.
+* **Least privilege**: Control-Panel must restrict which roles can start multisig approval flows vs. emergency approvals. Emergency actions require post-hoc ratification.
+* **Multisig enforcement**: Control-Panel MUST support:
 
-* Run Next.js server in Node 20 image.
-* Use readiness/liveness probes: `/ready` should check DB (if any), Kernel probe, and mTLS readiness. `/health` returns transport info.
-* Run in at least 2 replicas behind a Load Balancer. Use PodDisruptionBudget minAvailable=1.
-
-**Ingress**
-
-* Put Control-Panel behind CDN & WAF. Enforce TLS at edge and use mutual TLS for upstream traffic where required.
-
-**Scaling**
-
-* Horizontal Pod Autoscaler based on CPU & request latency (p95). Set target CPU and scale limits per traffic profile.
-
-**Config maps / secrets**
-
-* Keep env in sealed secrets; do not print them in logs.
+  * Creating an upgrade manifest draft that includes `preconditions` and `test results` links.
+  * Collecting approvals (via UI action that triggers an audit-signed approval or KMS sign request).
+  * Submitting approval records to Kernel (Kernel enforces 3-of-5 quorum).
+  * Displaying approval status and audit trail.
+* **No secrets in browser**: Do not embed API keys, certificates, or private keys in frontend bundles or environment. The server supplies only ephemeral presentation data.
 
 ---
 
-## 8. Observability, SLOs & alerts
+## 4 — Multisig upgrade UI & actions (MUST)
 
-**Metrics to export**
+* **Prepare upgrade**: UI allows an operator to upload manifest + rationale + tests + impact. The server writes a draft upgrade event to Kernel (or draft in local DB).
+* **Review & Approve**:
 
-* `control_panel.requests_total` (labels: route, status)
-* `control_panel.request_latency_seconds` (histogram: route)
-* `control_panel.operator_actions_total{action=...}`
-* `control_panel.sentinel_verdict_latency_seconds`
+  * Approver identity is derived from OIDC subject.
+  * Approval action MUST generate an audit event and either:
 
-**SLOs**
+    * Call KMS-signing flow (if approver uses KMS-backed signing), or
+    * Provide a signed Approval Record created by Kernel's signer endpoint.
+  * Prevent self-approval for the same user (approver must be distinct).
+* **Apply**:
 
-* `p95` request latency for critical UI routes < 300ms for operator flows.
-* Error rate < 1% for operator actions.
+  * After quorum, Control-Panel invokes Kernel's apply endpoint over mTLS and records audit events pre/post apply.
+  * Post-apply: server runs canary automation or calls CI to run smoke tests and records results.
+* **Emergency**:
 
-**Alerts**
+  * Support an Emergency Apply flow with explicit reasons and set `emergency=true` in manifest. Emergency apply must be subject to retroactive ratification within configured window.
+* **UI Evidence**:
 
-* High error rate (>1% 5m), high latency (p95 > 600ms), failed signings, inability to reach Kernel.
+  * Show diffs, test results, signer ids, and a link to the kernel audit chain for each upgrade.
+
+---
+
+## 5 — Audit explorer & trace viewer (MUST)
+
+* Provide an operator UI to:
+
+  * Search audit events (by actor, eventType, time range).
+  * Display audit event details (payload, prevHash, hash, signature, signerId).
+  * Link audit events to Reasoning Graph traces and artifacts (click-through).
+  * Show policy decisions and multisig approval artifacts.
+* **Security**:
+
+  * Only `Auditor` and above can view PII. Non-privileged roles see redacted fields per PII policy.
+* **Performance**:
+
+  * Provide paginated search and filter; use Postgres/Elastic index for fast queries; raw event payloads read from S3 on demand.
+
+---
+
+## 6 — Playwright E2E & CI (MUST)
+
+* **Tests**:
+
+  * Full Playwright tests exercising:
+
+    * Login (OIDC mock), list upgrades, create upgrade draft, review, approve, apply flows.
+    * Emergency apply and retroactive ratification flow.
+    * Audit explorer search and trace linking.
+    * Control-Panel role-based access tests for operator vs. auditor.
+  * Use stable test accounts and a Kernel mock or staging Kernel.
+* **CI job**:
+
+  * `control-panel-e2e.yml` runs Playwright tests in CI (headless). It must:
+
+    * Deploy a test stack (Kernel mock + Control-Panel) or reuse a staging environment.
+    * Ensure `REQUIRE_MTLS` and `REQUIRE_KMS` guard behaviors are respected / simulated.
+    * Report artifacts: Playwright traces, video, and logs in `progress/` or CI artifacts.
+* **Acceptance**:
+
+  * Playwright E2E must pass in CI for sign-off. Control-Panel acceptance criteria require Playwright coverage.
+
+---
+
+## 7 — Deployment patterns & infra
+
+* **Kubernetes** recommended:
+
+  * Deploy server as Deployment (replicas ≥ 2), HPA, PodDisruptionBudget, network policy to allow only Kernel and SRE subnets.
+  * Frontend served via CDN or ingress with Web Application Firewall (WAF).
+* **Readiness & liveness**:
+
+  * `/health` and `/ready` must check:
+
+    * DB connectivity
+    * Kernel connectivity (mTLS handshake)
+    * Audit indexer reachable
+    * Signer availability (if server relies on signer)
+  * Startup fails if `NODE_ENV=production` and `DEV_SKIP_MTLS=true`, or `REQUIRE_KMS=true` and no signer configured.
+* **Secrets**:
+
+  * Use Vault/secret manager and avoid environment injection of private keys. Use CSI driver or K8s Secrets with strict RBAC.
+* **CI/CD**:
+
+  * PR gates: lint, unit tests, contract checks, Playwright smoke (optional), security scans.
+
+---
+
+## 8 — Runbooks (MUST)
+
+Provide these runbooks inside `control-panel/runbooks/`:
+
+* `multisig.md` — how to investigate multisig failures, re-send approval requests, and manual approval reconciliation.
+* `emergency-apply.md` — steps to perform emergency apply and post-hoc ratification.
+* `audit-explorer.md` — how to investigate an audit event, verify chain, and export an audit bundle to S3.
+* `drill.md` — tabletop on upgrading and rollback drills including canary simulations.
+
+**Examples (short)**
+
+* **If Kernel unreachable**:
+
+  1. Set instance to read-only (UI shows degraded state).
+  2. Notify Kernel on-call, retry mTLS cert checks.
+  3. Keep audit logs locally and flush once connectivity restored.
+* **If approvals are not being recorded**:
+
+  1. Check Control-Panel server logs for sign/submit errors.
+  2. Verify Kernel API reachability and signer registry.
+  3. If approvals exist locally, re-submit Approval Records to Kernel with retry/backoff.
+
+---
+
+## 9 — Observability & SLOs
+
+**Metrics**
+
+* `control_panel.ui.page_load_seconds`
+* `control_panel.upgrade_create_latency_seconds`
+* `control_panel.approval_submit_latency_seconds`
+* `control_panel.apply_upgrade_latency_seconds`
+* `control_panel.audit_search_latency_seconds`
+
+**SLO examples**
+
+* UI page load p95 < 1s (internal network)
+* Approval submit p95 < 300ms
+* Apply upgrade latency p95 < 5s (plus canary run time)
 
 **Tracing**
 
-* Inject trace IDs into audit payloads so traces can be linked to audit events.
+* Trace end-to-end action: operator login → draft creation → approval submission → Kernel apply.
 
 ---
 
-## 9. Canary & rollout strategy
+## 10 — Acceptance & checks (MUST)
 
-**Canary steps**
+Before final sign-off:
 
-1. Deploy to a canary namespace with 5–10% traffic (DNS split / Load Balancer).
-2. Run automated smoke tests (Playwright) against canary.
-3. Monitor metrics and SentinelNet-related behavior. If canary fails, auto-rollback via deployment pipeline.
-
-**Multisig upgrade gating**
-
-* Upgrades to policy-sensitive parts require multisig via Kernel. Control-Panel must display SentinelNet verdicts and prevent apply until Kernel marks upgrade as approved.
-
----
-
-## 10. Backup, restore & DR
-
-* Back up Control-Panel persistent data (sessions or DB if used) with rotation.
-* Restore procedure: deploy previous container image, restore config & secrets, validate `/ready` checks.
+* Playwright E2E coverage exists and passes in CI for critical flows.
+* Control-Panel server proxies all state-changing Kernel calls (verify no direct browser-to-Kernel calls).
+* Multisig upgrade flows demonstrated end-to-end with Kernel (including emergency apply and retroactive ratification).
+* Audit explorer can search `policy.decision`, `upgrade.applied`, and show trace links to Reasoning Graph snapshots.
+* PII redaction enforced: non-auditor roles cannot see PII in audit explorer.
+* `control-panel/signoffs/security_engineer.sig` and `control-panel/signoffs/ryan.sig` present.
 
 ---
 
-## 11. Key rotation runbook (signing & session keys)
-
-**Signing proxy / KMS key rotation**
-
-1. Create new key in KMS / signing proxy.
-2. Export / register public key to Kernel verifier registry (`kernel/tools/signers.json`). 
-3. Deploy Control-Panel referencing new key or signing proxy endpoint.
-4. Verify signatures against new key across services (run audit verify).
-5. Decommission old key after overlap period.
-
-**Session secret rotation**
-
-* Rotate `CONTROL_PANEL_SESSION_SECRET` in two-step rolling manner:
-
-  1. Accept both old and new session secret for a transition window (server supports signature verification with old secret).
-  2. After window, remove old secret and enforce new secret only.
-
----
-
-## 12. CI & release pipeline
-
-**CI checks**
-
-* Lint / type-check / unit tests.
-* Playwright e2e run against staging / mocks.
-* `./scripts/ci/check-no-private-keys.sh` must run in pipeline to ensure no private key committed.
-* Guard: For `refs/heads/main` deploys, enforce `REQUIRE_SIGNING_PROXY` / `REQUIRE_KMS` and fail if unset.
-
-**Release steps**
-
-1. Create PR with docs & code changes.
-2. CI runs unit tests and Playwright e2e against a mocked stack.
-3. Merge → CI builds image, pushes to registry.
-4. Deploy to canary; run canary smoke tests.
-5. After success & manual checks, promote to production.
-
----
-
-## 13. Emergency procedures
-
-**If Kernel becomes unreachable**
-
-* UI should surface degraded mode warning and disable state-modifying controls.
-* SRE: revert to last known-good Control-Panel version, and follow Kernel recovery runbook.
-
-**If signing proxy fails**
-
-* Block all signing-requiring actions in UI. SRE: run failover signing proxy or enable emergency signing (requires Security sign-off).
-
-**If secrets leaked**
-
-* Rotate offending secret immediately, revoke tokens, and audit accesses. Notify Security and log audit events.
-
----
-
-## 14. Example health probe output (recommended)
-
-`GET /health`
-
-```json
-{
-  "ok": true,
-  "mTLS": true,
-  "kernelConfigured": true,
-  "signingProxyConfigured": true,
-  "uptime": 12345
-}
-```
-
----
-
-## 15. Checklist before promoting to production
-
-* [ ] `NODE_ENV=production` guarded startup (`DEV_SKIP_MTLS` false)
-* [ ] mTLS or server-side bearer token to Kernel configured and tested
-* [ ] Signing proxy or KMS configured and verified with audit signoffs
-* [ ] OIDC client configured and integration validated (roles mapping)
-* [ ] All secrets injected via Vault/Secrets Manager (no secrets in repo)
-* [ ] Playwright e2e passed in staging canary deployment
-* [ ] Metrics & alerts configured and validated
-* [ ] Runbook tabletop drill executed (emergency ratification + rollback)
-* [ ] Security Engineer review completed and signed
-
----
-
-## 16. Useful commands & diagnostics
+## 11 — Reviewer quick commands
 
 ```bash
-# Validate env and readiness locally
-NODE_ENV=production DEV_SKIP_MTLS=false node dist/server.js
+# local dev
+npm ci --prefix control-panel
+npm start --prefix control-panel           # run server (dev)
+# run Playwright locally
+npx playwright test --config=control-panel/playwright.config.ts
 
-# Probe health
-curl -sS https://control-panel.prod.internal/health | jq
+# run server tests
+npm test --prefix control-panel
 
-# Verify signing proxy reachability
-curl -fsS -H "Authorization: Bearer $SIGNING_PROXY_API_KEY" $SIGNING_PROXY_URL/health
+# check proxy behaviour (example)
+curl -X POST https://control-panel.local/api/upgrade -H "Authorization: Bearer <token>" -d @manifest.json
 ```
 
 ---
 
-### Notes & references
+## 12 — Signoffs
 
-* Control-Panel implements server-side Kernel proxy routes and demo mode; playbook and runbooks should align with `control-panel/README.md`. 
-* Signing & audit expectations align with Kernel’s signing & audit model — ensure public keys are registered in Kernel verifier registry prior to key swap. 
+* Security Engineer: `control-panel/signoffs/security_engineer.sig`
+* Final Approver: `control-panel/signoffs/ryan.sig`
+
+---
+
+End of `control-panel/deployment.md`.
 
 ---

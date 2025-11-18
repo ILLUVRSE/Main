@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS marketplace_journal (
 CREATE INDEX IF NOT EXISTS idx_journal_batch ON marketplace_journal (batch_id);
 
 -- Convenience view: order_with_license_delivery (optional)
-CREATE VIEW IF NOT EXISTS order_with_license_delivery AS
+CREATE VIEW order_with_license_delivery AS
 SELECT
   o.order_id,
   o.sku_id,

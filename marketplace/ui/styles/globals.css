@@ -102,7 +102,7 @@ h1, h2, h3, h4 {
   padding-right: 1rem;
 }
 
-/* SKU grid */
+/* SKU grid: tuned for responsive breakpoints. On very large screens use 4 columns */
 .sku-grid {
   display: grid;
   gap: 1.25rem;
@@ -114,6 +114,10 @@ h1, h2, h3, h4 {
 }
 @media (min-width: 1024px) {
   .sku-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  /* extra-large screens: 4 columns for denser catalog */
+  .sku-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* Footer */
@@ -162,5 +166,4 @@ h1, h2, h3, h4 {
 .mt-6 { margin-top: 1.5rem; }
 .mb-6 { margin-bottom: 1.5rem; }
 .p-6  { padding: 1.5rem; }
-
 

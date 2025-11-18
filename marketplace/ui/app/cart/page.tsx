@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import api from '@/lib/api';
+import * as api from '@/lib/api';
 import type { SkuSummary } from '@/types';
 import { formatCurrency } from '@/lib/utils/formatCurrency';
 

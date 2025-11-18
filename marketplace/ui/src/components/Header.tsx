@@ -1,4 +1,5 @@
-"use client"
+'use client';
+
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -29,7 +30,8 @@ export default function Header() {
         <div className="flex items-center gap-4">
           <Link href="/" className="flex items-center gap-3">
             <div className="w-10 h-10 relative">
-              <Image src="/brand/logo-icon-64.png" alt="Illuvrse" fill style={{ objectFit: 'contain' }} />
+              {/* Use SVG logo so Next serves correct content type */}
+              <Image src="/brand/logo-icon-64.svg" alt="Illuvrse" fill style={{ objectFit: 'contain' }} />
             </div>
             <div className="hidden md:block">
               <h1 className="text-xl font-heading">illuvrse</h1>

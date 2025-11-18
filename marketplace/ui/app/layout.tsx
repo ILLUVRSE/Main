@@ -2,6 +2,7 @@ import React from 'react';
 import '../src/styles/globals.css';
 import Header from '../src/components/Header';
 import { AuthProvider } from '../src/lib/auth';
+import Image from 'next/image';
 
 /**
  * Root layout for Next.js App Router.
@@ -30,7 +31,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="container flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <img src="/brand/logo-icon-64.png" alt="Illuvrse" width={40} height={40} />
+                  <div style={{ width: 40, height: 40, position: 'relative' }}>
+                    <Image src="/brand/logo-icon-64.svg" alt="Illuvrse" width={40} height={40} />
+                  </div>
                   <div>
                     <div className="font-heading text-lg">illuvrse</div>
                     <div className="text-muted text-sm">© {new Date().getFullYear()} Illuvrse</div>

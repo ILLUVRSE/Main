@@ -1,316 +1,300 @@
-# Eval Engine — API & Contract
+# Eval Engine & Resource Allocator — API Reference
 
-**Base URL (examples)**
+This document describes the minimal ingestion, promotion, and allocation APIs implemented in this repo. All endpoints are HTTP+JSON and expect Kernel-authenticated calls (mTLS in production; bearer token debug mode optional).
 
-* Local dev: `http://localhost:8050`
-* Staging/prod: `https://eval-engine.{env}.illuvrse.internal`
+---
 
-**Security**
+## Base URLs
+- **Eval ingestion service:** `http://localhost:8051`
+- **Resource Allocator service:** `http://localhost:8052`
 
-* Kernel-only write operations: **mTLS** preferred; alternatives: kernel-signed bearer token (must be validated server-side).
-* Human/operator endpoints: OIDC (SSO) and must map claims -> roles (e.g., `eval-admin`, `operator`).
-* All state-changing requests must include `X-Request-Id` and optionally `Idempotency-Key` for safe retries.
+Both addresses are configurable via `EVAL_ENGINE_ADDR` and `RESOURCE_ALLOCATOR_ADDR`.
 
-**Error format (canonical)**
-All responses on error MUST follow:
+---
 
+## Shared conventions
+- `Content-Type: application/json` required for POST bodies.
+- `Idempotency-Key` header reserved for future use (no-op for now).
+- Errors return `{ "error": "message" }` with appropriate HTTP status.
+
+---
+
+## Eval ingestion endpoints
+
+### `POST /eval/submit`
+Ingests an EvalReport, recomputes the agent score, and (if score ≥ threshold) creates a PromotionEvent and allocation request.
+
+**Request**
 ```json
 {
-  "ok": false,
-  "error": {
-    "code": "SOME_CODE",
-    "message": "Human readable explanation",
-    "details": { /* optional: structured details */ }
-  }
+  "agentId": "agent-123",
+  "metrics": { "successRate": 0.93, "latencyScore": 0.9 },
+  "source": "agent-manager",
+  "timestamp": "2025-01-17T18:00:00Z",
+  "tags": { "window": "1h" }
 }
 ```
 
-**Success envelope**
-Write responses and many read responses use:
-
-```json
-{ "ok": true, ... }
-```
-
----
-
-## Top-level headers (recommended)
-
-* `X-Request-Id`: string (UUID) — for tracing/log correlation.
-* `Idempotency-Key`: string — for safe dedup of non-idempotent operations.
-* `Authorization`: `Bearer <token>` or mTLS client cert.
-
----
-
-## Endpoints
-
-### 1) POST `/eval/submit` — submit an EvalReport (Kernel → Eval Engine)
-
-**Purpose:** ingest evaluation reports from agents or evaluation pipelines. Must accept either camelCase or snake_case keys per Kernel contract.
-
-**Security:** Kernel-only (mTLS or Kernel-signed token).
-
-**Request body (JSON):**
-
+**Response `200`**
 ```json
 {
-  "id": "eval-uuid-1",           // optional; server may generate
-  "agentId": "agent-123",        // or agent_id (snake_case)
-  "metricSet": { "accuracy": 0.92, "latency_ms": 120 },
-  "timestamp": "2025-11-18T12:00:00Z",
-  "computedScore": 0.92,
-  "source": "runner:v1",
-  "window": "2025-11-17T00:00:00Z/2025-11-17T23:59:59Z",
-  "metadata": { "dataset": "v1", "jobId": "job-42" }
-}
-```
-
-**Responses**
-
-* `200` — accepted/processed:
-
-  ```json
-  { "ok": true, "eval_id": "eval-uuid-1" }
-  ```
-* `400` — invalid payload
-* `401/403` — unauthorized / not Kernel
-
-**Semantics**
-
-* Writes must be idempotent when client provides `Idempotency-Key`. If same `Idempotency-Key` seen, return same `eval_id` / outcome.
-* On successful ingestion emit an AuditEvent linking to Kernel manifestSignatureId where available and include `actor_id` = `service:eval-engine`.
-* Integration tests should cover both camelCase and snake_case payloads.
-
----
-
-### 2) POST `/eval/promote` — request a promotion/recommendation action (Eval Engine → Resource Allocator kernel mediated)
-
-**Purpose:** ask Eval Engine to create a PromotionEvent (recommend promotion of an ML artifact, model, or agent), which will be recorded to Reasoning Graph and sent for gating.
-
-**Security:** Kernel-authorized or Kernel-proxied — promotions must be validated by Kernel before applying.
-
-**Request body (JSON):**
-
-```json
-{
-  "requestId": "promo-20251118-01",
-  "artifactId": "model-artifact-abc",
-  "reason": "score_delta>0.02 for 24h",
-  "score": 0.93,
-  "confidence": 0.88,
-  "evidence": {
-    "eval_reports": ["eval-uuid-1","eval-uuid-2"],
-    "metrics_summary": { "prev_score": 0.90, "new_score": 0.93 }
+  "reportId": "b7f6a6f5-0e14-4b4c-bd9c-4b9bfdd58aec",
+  "score": {
+    "agentId": "agent-123",
+    "score": 0.92,
+    "confidence": 0.7,
+    "components": {
+      "components": [
+        { "metric": "successRate", "value": 0.93 },
+        { "metric": "latencyScore", "value": 0.9 }
+      ]
+    },
+    "window": "1h",
+    "computedAt": "2025-01-17T18:00:01Z"
   },
-  "target": { "env": "staging", "traffic_percent": 10 },
-  "audit_context": { "kernel_manifest_signature_id": "manifest-sig-xyz" },
-  "idempotency_key": "promo-20251118-01"
-}
-```
-
-**Responses**
-
-* `202` — Promotion accepted (queued / pending policy check)
-
-  ```json
-  { "ok": true, "promotion_id": "promo-20251118-01", "status": "pending" }
-  ```
-* `400` — invalid request
-* `403` — gated / denied by SentinelNet (if synchronous) or on enforcement
-* `409` — duplicate promotion (idempotency mismatch)
-
-**Semantics & Contracts**
-
-* Promotions must be recorded in Reasoning Graph as `Decision` nodes with `metadata` including `manifest_signature_id`, evidence references, and `audit_context`.
-* If SentinelNet gating is synchronous for this promotion type, Eval Engine must call SentinelNet policy check and abort with `403` if denied, including `policy_decision` in details.
-* Promotions must support multisig gating for critical environment promotions (3-of-5 approvals). If policy requires multisig, respond `202` with `status: pending_multisig` and the Kernel/Control-Panel will handle approvals.
-* On promotion acceptance, emit AuditEvent.
-
----
-
-### 3) POST `/alloc/request` — request resource/capital allocation (Resource Allocator)
-
-**Purpose:** request compute/capital resources for an entity (agent/model/canary). In many flows this is invoked by Kernel or Eval Engine after promotion.
-
-**Security:** Kernel-authenticated (mTLS or Kernel-signed token). For operator-initiated allocations allow OIDC with `alloc_admin` role.
-
-**Request body (JSON):**
-
-```json
-{
-  "id": "alloc-20251118-001",           // optional
-  "entity_id": "agent-123",
-  "division_id": "division-1",
-  "pool": "gpu",
-  "cpu": 4,
-  "gpu": 1,
-  "memoryMB": 8192,
-  "duration_seconds": 3600,
-  "reason": "canary rollout for model-artifact-abc",
-  "requested_by": "service:eval-engine",
-  "requested_at": "2025-11-18T12:10:00Z",
-  "idempotency_key": "alloc-20251118-001",
-  "audit_context": { "kernel_manifest_signature_id": "manifest-sig-xyz" }
-}
-```
-
-**Responses**
-
-* `200` — allocation assigned/accepted:
-
-  ```json
-  {
-    "ok": true,
-    "allocation_id": "alloc-20251118-001",
-    "status": "reserved",
-    "details": { "pool": "gpu", "allocated_cpu": 4, "allocated_gpu": 1 }
-  }
-  ```
-* `202` — allocation accepted but pending external approval (Finance or multisig)
-* `403` — denied by SentinelNet or RBAC
-* `409` — duplicate idempotency request
-* `400` — bad payload
-
-**Semantics**
-
-* Allocations must create ledger reservation via Finance (or call Finance to record reservation). If Finance returns failure, allocation finalization must fail.
-* Allocations must be idempotent and support retry/backoff for external failures.
-* When final allocation is applied, emit AuditEvent and link the ledger proof/ledger id.
-
----
-
-### 4) POST `/alloc/settle` — finalize settlement after allocation & finance confirmation
-
-**Purpose:** called when Finance confirms payment/ledger proof (for capital allocations) — this finalizes allocation and triggers actual resource issue.
-
-**Security:** Kernel-authenticated or internal service-to-service (mTLS).
-
-**Request body:**
-
-```json
-{
-  "allocation_id": "alloc-20251118-001",
-  "ledger_proof_id": "ledger-proof-20251118-01",
-  "settled_at": "2025-11-18T12:20:00Z",
-  "idempotency_key": "settle-alloc-20251118-001"
-}
-```
-
-**Responses**
-
-* `200` — settled and resources issued:
-
-  ```json
-  { "ok": true, "allocation_id": "alloc-20251118-001", "status": "settled" }
-  ```
-* `400/404` — invalid allocation or missing ledger proof
-* `409` — duplicate settlement (idempotent)
-
-**Semantics**
-
-* Settlement must validate ledger proof signature and balanced entries (Finance must ensure double-entry).
-* If ledger verification fails, settlement must reject and emit a reconciled error. Emit AuditEvent.
-
----
-
-### 5) GET `/alloc/{id}` — fetch allocation status
-
-**Purpose:** query allocation state, ledger/settlement linkage, assigned resources.
-
-**Response**
-
-```json
-{
-  "ok": true,
-  "allocation": {
-    "allocation_id": "alloc-20251118-001",
-    "entity_id": "agent-123",
-    "status": "reserved|allocated|settled|failed|released",
-    "resources": { "cpu": 4, "gpu": 1, "memoryMB": 8192 },
-    "ledger_proof_id": "ledger-proof-20251118-01",
-    "created_at": "...",
-    "updated_at": "..."
+  "promotion": {
+    "id": "e82f...",
+    "agentId": "agent-123",
+    "action": "promote",
+    "status": "pending",
+    "rationale": "score 0.92 >= threshold 0.85",
+    "confidence": 0.7,
+    "createdAt": "2025-01-17T18:00:01Z"
   }
 }
 ```
 
-**Errors:** `404` if not found.
+### `GET /eval/agent/{id}/score`
+Returns the latest computed score for an agent.
+
+**Response `200`**
+```json
+{
+  "agentId": "agent-123",
+  "score": 0.92,
+  "confidence": 0.7,
+  "components": { "components": [...] },
+  "window": "1h",
+  "computedAt": "2025-01-17T18:00:01Z"
+}
+```
+
+### `GET /eval/scoreboard`
+Returns a leaderboard for a division (or the entire fleet when `divisionId` is omitted). Supports `topK` (default `10`).
+
+**Example `GET /eval/scoreboard?divisionId=ops-eu&topK=5`**
+```json
+{
+  "scores": [
+    {
+      "agentId": "agent-1",
+      "divisionId": "ops-eu",
+      "score": 0.91,
+      "confidence": 0.8,
+      "computedAt": "2025-01-17T18:05:00Z"
+    }
+  ]
+}
+```
+
+### `POST /eval/promote`
+Creates a manual PromotionEvent and (optionally) triggers an allocation request.
+
+**Request**
+```json
+{
+  "agentId": "agent-123",
+  "rationale": "manual override",
+  "confidence": 0.9,
+  "requestedBy": "ops",
+  "pool": "gpus-us-east",
+  "delta": 1
+}
+```
+
+**Response `201`**
+```json
+{
+  "id": "f25c...",
+  "agentId": "agent-123",
+  "action": "promote",
+  "status": "pending",
+  "rationale": "manual override",
+  "confidence": 0.9,
+  "requestedBy": "ops",
+  "createdAt": "2025-01-17T18:10:00Z"
+}
+```
 
 ---
 
-### 6) GET `/metrics` — Prometheus metrics endpoint
+### `POST /eval/retrain`
+Creates a retrain job (optionally booking resources through the Resource Allocator).
 
-Expose metrics required by blueprint: `eval_engine.eval_submissions_total`, `eval_engine.promotion_latency_seconds`, `allocator.allocations_total`, `allocator.settlement_failures_total`, etc.
+**Request**
+```json
+{
+  "modelFamily": "alloc-llm",
+  "datasetRefs": ["dataset://gpu-logs-7d"],
+  "priority": "high",
+  "requestedBy": "mlops",
+  "resourcePool": "gpus-us-east",
+  "resourceUnits": 2
+}
+```
 
----
+**Response `201`**
+```json
+{
+  "id": "7d1d...",
+  "modelFamily": "alloc-llm",
+  "datasetRefs": ["dataset://gpu-logs-7d"],
+  "priority": "high",
+  "status": "queued",
+  "requestedBy": "mlops",
+  "allocationRequestId": "1c2e...",
+  "createdAt": "2025-01-17T18:20:00Z",
+  "updatedAt": "2025-01-17T18:20:00Z"
+}
+```
 
-### 7) Admin / operational endpoints (restricted)
+### `GET /eval/jobs/{id}`
+Fetches a retrain job and its allocation linkage/result metrics.
 
-* `GET /health`, `GET /ready` — must reflect Kernel connectivity, SentinelNet availability, Finance connectivity, DB health.
-* `POST /admin/reconcile` — admin-only; trigger reconciliation run between allocations and finance ledger. Must require `eval-admin` role + mTLS or multisig for dangerous ops.
-* `POST /admin/replay` — re-run promotion/allocation from audit logs for DR (needs strict auth).
-
----
-
-## Contract guarantees, idempotency, & audit
-
-**Idempotency**
-
-* All write endpoints accept `Idempotency-Key`. Clients may retry safely; server must deduplicate and return the original semantic result.
-
-**Audit**
-
-* Every write must create an AuditEvent with `prevHash`, `hash`, `signature` and reference Kernel manifest where applicable. AuditEvent must include `actor_id` and `request_id`.
-* Promotion / allocation flows must reference the kernel manifestSignatureId (in `audit_context`) so audit replay can link artifacts back to Kernel.
-
-**SentinelNet policy**
-
-* Promotion and allocation flows must call SentinelNet for policy decisions whenever policy scope includes the action:
-
-  * If `sentinel_decision == deny` → operation must abort with `403` and include `policy` details in `error.details`.
-  * If `policy == requires_multisig` → operation transitions to `pending_multisig` and must record the upgrade manifest submitted to Kernel.
-
-**Finance integration**
-
-* Allocation finalization depends on Finance signed ledger proof. `alloc/settle` must validate ledger proof signature (via KMS/public key registry) and require `balanced` verification. If Finance is unresponsive, allocation must remain pending and be safely retryable.
-
----
-
-## Examples of tests / acceptance checks
-
-* Contract tests asserting JSON shapes, `ok:true` semantics, and error format.
-* `POST /eval/submit` with both camelCase and snake_case payloads; assert `200`.
-* `POST /eval/promote` should create Reasoning Graph Decision node and record AuditEvent.
-* Promotion gated by SentinelNet: mock SentinelNet to deny/allow and assert `403` and `202` semantics respectively.
-* Allocation → Finance → Settlement end-to-end acceptance e2e: allocate, simulate payment, create ledger proof, call `alloc/settle`, assert `status: settled` and signed ledger proof link included.
-
----
-
-## Observability & metrics (P1)
-
-Expose counters/histograms:
-
-* `eval_engine.eval_submissions_total` (counter)
-* `eval_engine.eval_submission_latency_seconds` (histogram)
-* `eval_engine.promotions_total` (counter, labels: status/policy)
-* `allocator.allocations_total` (counter)
-* `allocator.allocation_latency_seconds` (histogram)
-* `allocator.settlement_failures_total` (counter)
-* `eval_engine.promotion_policy_denials_total` (counter)
+**Response `200`**
+```json
+{
+  "id": "7d1d...",
+  "modelFamily": "alloc-llm",
+  "datasetRefs": ["dataset://gpu-logs-7d"],
+  "priority": "high",
+  "status": "queued",
+  "allocationRequestId": "1c2e...",
+  "createdAt": "2025-01-17T18:20:00Z",
+  "updatedAt": "2025-01-17T18:20:10Z"
+}
+```
 
 ---
 
-## Notes & operational considerations
+## Resource Allocator endpoints
 
-* Use shared canonicalization library from Kernel for hash/signature parity.
-* For local dev, allow `DEV_SKIP_MTLS=true`, but server must refuse to start with `NODE_ENV=production` and `DEV_SKIP_MTLS=true`.
-* Provide retry/backoff and dead-letter for external dependency errors (Finance, SentinelNet, vector provider if used).
-* All admin endpoints must be auditable and guarded by roles + optional multisig for dangerous operations.
+### `POST /alloc/request`
+Creates an allocation request (status `pending`).
+
+**Request**
+```json
+{
+  "promotionId": "f25c...",
+  "agentId": "agent-123",
+  "pool": "gpus-us-east",
+  "delta": 1,
+  "reason": "promotion threshold met",
+  "requestedBy": "eval-engine"
+}
+```
+
+**Response `201`**
+```json
+{ "requestId": "a8c7...", "status": "pending" }
+```
+
+### `POST /alloc/approve`
+Runs SentinelNet policy checks and transitions a request to `applied` or `rejected`.
+
+**Request**
+```json
+{
+  "requestId": "a8c7...",
+  "approvedBy": "allocator-bot"
+}
+```
+
+**Response `200`**
+```json
+{
+  "id": "a8c7...",
+  "agentId": "agent-123",
+  "pool": "gpus-us-east",
+  "delta": 1,
+  "status": "applied",
+  "sentinelDecision": { "allowed": true, "policyId": "sentinel-allow", "reason": "approved" },
+  "appliedBy": "allocator-bot",
+  "appliedAt": "2025-01-17T18:15:00Z"
+}
+```
+
+If SentinelNet blocks, status becomes `rejected` and `sentinelDecision` includes the policy/reason.
+
+### `POST /alloc/reject`
+Allows humans/Finance to reject a pending allocation.
+
+**Request**
+```json
+{
+  "requestId": "a8c7...",
+  "rejectedBy": "finance-bot",
+  "reason": "budget exceeded",
+  "policyId": "finance-budget"
+}
+```
+
+**Response `200`** returns the updated allocation record with status `rejected`.
+
+### `GET /alloc/{id}`
+Fetches an allocation request with timestamps and SentinelNet decision payload.
+
+### `GET /alloc/pools`
+Lists configured pools and capacities.
+
+**Response `200`**
+```json
+{ "pools": [ { "name": "gpus-us-east", "capacity": 10 } ] }
+```
+
+### `POST /alloc/preempt`
+Creates a preemption record (negative delta) to reclaim resources. SentinelNet policy runs immediately and the record is transitioned to `applied`/`rejected`.
+
+**Request**
+```json
+{
+  "agentId": "agent-123",
+  "pool": "gpus-us-east",
+  "delta": 1,
+  "reason": "canary rollback",
+  "requestedBy": "allocator-bot"
+}
+```
+
+**Response `200`**
+```json
+{
+  "id": "preempt-id",
+  "agentId": "agent-123",
+  "pool": "gpus-us-east",
+  "delta": -1,
+  "status": "applied",
+  "sentinelDecision": { "allowed": true, "policyId": "sentinel-allow", "reason": "approved" }
+}
+```
 
 ---
 
-## Signoffs
+## SentinelNet policy behavior
+The scaffolded allocator uses `RESOURCE_ALLOCATOR_DENY_POOLS` (comma-delimited) and `RESOURCE_ALLOCATOR_MAX_DELTA` env vars to simulate SentinelNet policies:
+- If the requested `pool` matches a denied pool, approval fails with policy `sentinel-deny-pool`.
+- If `delta` exceeds `RESOURCE_ALLOCATOR_MAX_DELTA`, approval fails with policy `sentinel-max-delta`.
 
-* Required: `eval-engine/signoffs/security_engineer.sig` and `eval-engine/signoffs/ryan.sig` before final acceptance.
+The resulting decision is stored in `allocation_requests.sentinel_decision` and returned to callers.
 
 ---
+
+## Acceptance test
+Run `go test ./eval-engine/internal/acceptance -run PromotionAllocation` to exercise:
+1. Eval report ingestion
+2. Auto-promotion and allocation request creation
+3. Resource Allocator approval with SentinelNet allow + deny scenarios
+
+---
+
+End of file.

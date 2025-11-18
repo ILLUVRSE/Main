@@ -1,244 +1,200 @@
 /**
  * marketplace/server/lib/financeClient.ts
  *
- * Minimal Finance adapter used by Marketplace:
- *  - createLedgerForOrder({ orderId, amount, currency, buyerId })
- *  - verifyLedgerProof(ledgerProof)
+ * Small Finance integration client that:
+ *  - Calls a Finance service over HTTPS (supports optional mTLS)
+ *  - Provides `createLedgerForOrder` to create a ledger/journal entry for an order
+ *  - Provides `health()` for CI/runbook checks
  *
- * Behavior:
- *  - If FINANCE_API_URL is set, attempt to POST to a likely endpoint (tries a few fallback paths).
- *  - Use FINANCE_SERVICE_TOKEN (if present) for Authorization: Bearer <token>.
- *  - On failure or when FINANCE_API_URL is not set, synthesize a ledger proof for local/dev use.
+ * Configuration (env):
+ *  - FINANCE_API_URL           e.g. https://finance.internal.example
+ *  - FINANCE_API_TOKEN         optional Bearer token for auth
+ *  - FINANCE_MTLS_CERT_PATH    path to client cert PEM (optional)
+ *  - FINANCE_MTLS_KEY_PATH     path to client key PEM (optional)
+ *  - FINANCE_MTLS_CA_PATH      path to CA PEM to validate server cert (optional)
+ *
+ * For local/dev use, if FINANCE_API_URL is not provided the client will synthesize
+ * ledger proofs (non-production).
  */
 
-import fetch from 'cross-fetch';
-import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import fetch, { RequestInit } from 'node-fetch';
 
-type CreateLedgerInput = {
+export type CreateLedgerPayload = {
   orderId: string;
-  amount: number;
+  amount: number; // cents
   currency?: string;
   buyerId?: string;
-  metadata?: any;
+  metadata?: Record<string, any>;
 };
 
-type LedgerProof = {
+export type LedgerProof = {
   ledger_proof_id: string;
-  signer_kid: string;
-  signature: string; // base64
-  ts: string;
+  signer_kid?: string;
+  signature?: string; // base64
+  ts?: string;
   payload?: any;
 };
 
-const FINANCE_API_URL = process.env.FINANCE_API_URL || '';
-const FINANCE_SERVICE_TOKEN = process.env.FINANCE_SERVICE_TOKEN || '';
-const FINANCE_SIGNER_KID = process.env.FINANCE_SIGNER_KID || 'finance-signer-v1';
-
-/**
- * Helper: POST JSON with optional bearer token and timeout.
- */
-async function postJson(url: string, body: any, token?: string, timeout = 15000): Promise<any> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-
+function readOptionalFile(p?: string) {
+  if (!p) return undefined;
   try {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    const text = await resp.text();
-    try {
-      return { ok: resp.ok, status: resp.status, body: text ? JSON.parse(text) : null };
-    } catch {
-      return { ok: resp.ok, status: resp.status, body: text };
+    const full = path.resolve(p);
+    if (fs.existsSync(full)) {
+      return fs.readFileSync(full);
     }
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Synthesize a deterministic ledger proof for local/dev.
- */
-function synthesizeLedgerProof(input: CreateLedgerInput): LedgerProof {
-  const now = new Date().toISOString();
-  const base = `${input.orderId}|${input.amount}|${input.currency || 'USD'}|${input.buyerId || ''}|${now}`;
-  const digest = crypto.createHash('sha256').update(base).digest('hex');
-  const ledgerProofId = `ledger-proof-${digest.slice(0, 16)}`;
-  const signature = Buffer.from(`ledger:${ledgerProofId}`).toString('base64');
-  return {
-    ledger_proof_id: ledgerProofId,
-    signer_kid: FINANCE_SIGNER_KID,
-    signature,
-    ts: now,
-    payload: {
-      orderId: input.orderId,
-      amount: input.amount,
-      currency: input.currency || 'USD',
-      buyerId: input.buyerId,
-      produced_at: now,
-      digest,
-    },
-  };
-}
-
-/**
- * Try multiple possible endpoints on FINANCE_API_URL to create a ledger.
- * Returns a LedgerProof-like object on success.
- */
-async function callFinanceCreateLedger(input: CreateLedgerInput): Promise<LedgerProof | null> {
-  if (!FINANCE_API_URL) return null;
-
-  const endpoints = [
-    `${FINANCE_API_URL.replace(/\/$/, '')}/ledger`,
-    `${FINANCE_API_URL.replace(/\/$/, '')}/ledgers`,
-    `${FINANCE_API_URL.replace(/\/$/, '')}/v1/ledger`,
-    `${FINANCE_API_URL.replace(/\/$/, '')}/create-ledger`,
-    `${FINANCE_API_URL.replace(/\/$/, '')}/ledger/create`,
-  ];
-
-  for (const ep of endpoints) {
-    try {
-      const payload = {
-        orderId: input.orderId,
-        amount: input.amount,
-        currency: input.currency || 'USD',
-        buyerId: input.buyerId,
-        metadata: input.metadata || {},
-      };
-      const resp = await postJson(ep, payload, FINANCE_SERVICE_TOKEN);
-      if (resp && resp.ok && resp.body) {
-        // Expect finance to return { ok: true, ledger_proof: { ledger_proof_id, signer_kid, signature, ts, payload } } or similar.
-        const body = resp.body;
-        const ledger = body.ledger_proof || body.ledgerProof || body || null;
-        if (ledger && ledger.ledger_proof_id) {
-          return {
-            ledger_proof_id: ledger.ledger_proof_id,
-            signer_kid: ledger.signer_kid || ledger.signerKid || FINANCE_SIGNER_KID,
-            signature: ledger.signature,
-            ts: ledger.ts || new Date().toISOString(),
-            payload: ledger.payload || ledger,
-          };
-        }
-        // Some finance APIs may return a different shape: try to parse common fields
-        if (body.ok && body.ledger_proof_id) {
-          return {
-            ledger_proof_id: body.ledger_proof_id,
-            signer_kid: body.signer_kid || FINANCE_SIGNER_KID,
-            signature: body.signature,
-            ts: body.ts || new Date().toISOString(),
-            payload: body,
-          };
-        }
-      }
-    } catch (e) {
-      // try next endpoint
-      // eslint-disable-next-line no-console
-      console.debug('finance create ledger endpoint failed:', ep, (e as Error).message);
-    }
-  }
-
-  return null;
-}
-
-/**
- * Create ledger entries for an order and return a signed ledger proof.
- */
-export async function createLedgerForOrder(input: CreateLedgerInput): Promise<LedgerProof> {
-  // Try Finance service first
-  try {
-    const fromFinance = await callFinanceCreateLedger(input);
-    if (fromFinance) return fromFinance;
-  } catch (e) {
-    // fallback to synthesize
-    // eslint-disable-next-line no-console
-    console.debug('Finance create ledger call failed, synthesizing proof:', (e as Error).message);
-  }
-
-  // Synthesize for local/dev
-  return synthesizeLedgerProof(input);
-}
-
-/**
- * Verify ledger proof: call Finance verify endpoint if available; otherwise
- * perform best-effort verification (for synthesized proofs, accept if id format matches digest).
- */
-async function callFinanceVerify(ledgerProof: any): Promise<boolean | null> {
-  if (!FINANCE_API_URL) return null;
-  const endpoints = [
-    `${FINANCE_API_URL.replace(/\/$/, '')}/ledger/verify`,
-    `${FINANCE_API_URL.replace(/\/$/, '')}/ledger/verification`,
-    `${FINANCE_API_URL.replace(/\/$/, '')}/v1/ledger/verify`,
-    `${FINANCE_API_URL.replace(/\/$/, '')}/verify-ledger`,
-  ];
-
-  for (const ep of endpoints) {
-    try {
-      const resp = await postJson(ep, { ledger_proof: ledgerProof }, FINANCE_SERVICE_TOKEN);
-      if (resp && resp.ok && resp.body) {
-        const body = resp.body;
-        if (body.verified !== undefined) return Boolean(body.verified);
-        if (body.ok && body.verified === undefined) return Boolean(body.ok);
-      }
-    } catch (e) {
-      // try next
-      // eslint-disable-next-line no-console
-      console.debug('finance verify endpoint failed:', ep, (e as Error).message);
-    }
-  }
-  return null;
-}
-
-/**
- * Verify ledger proof (best-effort):
- * - If finance verify endpoint available, use it.
- * - If ledger proof looks like one synthesized by this module, verify digest-based id.
- * - Otherwise accept (return true) in dev, and return false in strict/production where verification failed.
- */
-export async function verifyLedgerProof(ledgerProof: any): Promise<boolean> {
-  if (!ledgerProof) return false;
-
-  try {
-    const remote = await callFinanceVerify(ledgerProof);
-    if (remote !== null) return Boolean(remote);
-  } catch (e) {
-    // ignore and try local verification
-    // eslint-disable-next-line no-console
-    console.debug('Finance verify call failed:', (e as Error).message);
-  }
-
-  // Best-effort: if ledgerProof.payload.digest exists and ledger_proof_id matches prefix, accept
-  try {
-    if (ledgerProof.payload && ledgerProof.payload.digest && ledgerProof.ledger_proof_id) {
-      const expectedIdPrefix = `ledger-proof-${String(ledgerProof.payload.digest).slice(0, 16)}`;
-      if (String(ledgerProof.ledger_proof_id).startsWith(expectedIdPrefix)) return true;
-    }
-
-    // If signature is present and signer_kid matches expected, accept in dev
-    if (ledgerProof.signature && ledgerProof.signer_kid) {
-      return process.env.NODE_ENV !== 'production' ? true : false;
-    }
+    return undefined;
   } catch {
-    // fall through
+    return undefined;
   }
-
-  // In dev, be permissive
-  if (process.env.NODE_ENV !== 'production') return true;
-
-  // In production, cannot verify — return false
-  return false;
 }
 
-export default {
-  createLedgerForOrder,
-  verifyLedgerProof,
-};
+export class FinanceClient {
+  private baseUrl?: string;
+  private apiToken?: string;
+  private agent?: https.Agent;
+
+  constructor() {
+    this.baseUrl = process.env.FINANCE_API_URL;
+    this.apiToken = process.env.FINANCE_API_TOKEN;
+
+    // Try mTLS configuration (prefer file paths)
+    const certPath = process.env.FINANCE_MTLS_CERT_PATH;
+    const keyPath = process.env.FINANCE_MTLS_KEY_PATH;
+    const caPath = process.env.FINANCE_MTLS_CA_PATH;
+
+    const certRaw = readOptionalFile(certPath);
+    const keyRaw = readOptionalFile(keyPath);
+    const caRaw = readOptionalFile(caPath);
+
+    if (certRaw && keyRaw) {
+      // Build agent with client cert/key and optional ca
+      this.agent = new https.Agent({
+        cert: certRaw,
+        key: keyRaw,
+        ca: caRaw || undefined,
+        keepAlive: true,
+        rejectUnauthorized: caRaw ? true : false,
+      });
+    } else {
+      // no mTLS - agent not required (but create a default agent with keepAlive)
+      this.agent = new https.Agent({ keepAlive: true });
+    }
+  }
+
+  isConfigured() {
+    return !!this.baseUrl;
+  }
+
+  private _url(p: string) {
+    if (!this.baseUrl) throw new Error('FINANCE_API_URL not configured');
+    return `${this.baseUrl.replace(/\/$/, '')}${p}`;
+  }
+
+  private _headers(extra?: Record<string, string>) {
+    const h: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...extra,
+    };
+    if (this.apiToken) {
+      h['Authorization'] = `Bearer ${this.apiToken}`;
+    }
+    return h;
+  }
+
+  private async _fetchJson<T = any>(url: string, opts: RequestInit = {}): Promise<T> {
+    const merged: RequestInit = {
+      ...opts,
+      agent: this.agent,
+      headers: { ...(opts.headers as any || {}) },
+    };
+    const res = await fetch(url, merged);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '<no body>');
+      throw new Error(`Finance API ${res.status} ${res.statusText}: ${txt}`);
+    }
+    return (await res.json()) as T;
+  }
+
+  /**
+   * createLedgerForOrder
+   * - Calls Finance service to create a ledger proof for an order.
+   * - Returns a LedgerProof object.
+   *
+   * If FINANCE_API_URL is not configured, returns a synthesized ledger proof
+   * suitable for local development/testing.
+   */
+  async createLedgerForOrder(payload: CreateLedgerPayload): Promise<LedgerProof> {
+    if (!this.baseUrl) {
+      // synthesize a ledger proof for dev/test
+      const ledgerProofId = `ledger-sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const signature = Buffer.from(`ledger:${ledgerProofId}`).toString('base64');
+      return {
+        ledger_proof_id: ledgerProofId,
+        signer_kid: process.env.FINANCE_SIGNER_KID || 'finance-signer-v1',
+        signature,
+        ts: new Date().toISOString(),
+        payload: {
+          simulated: true,
+          orderId: payload.orderId,
+          amount: payload.amount,
+        },
+      };
+    }
+
+    const url = this._url('/ledgers');
+    const body = {
+      order_id: payload.orderId,
+      amount: payload.amount,
+      currency: payload.currency || 'USD',
+      buyer_id: payload.buyerId,
+      metadata: payload.metadata || {},
+    };
+
+    const resp = await this._fetchJson<{ ledger_proof: any }>(url, {
+      method: 'POST',
+      headers: this._headers(),
+      body: JSON.stringify(body),
+    });
+
+    // Expect finance to reply with ledger_proof object (ledger_proof_id, signature, signer_kid)
+    if (!resp || !resp.ledger_proof) {
+      throw new Error('Finance create ledger returned unexpected response');
+    }
+
+    // Normalize to LedgerProof shape
+    const lp = resp.ledger_proof;
+    return {
+      ledger_proof_id: lp.ledger_proof_id || lp.id,
+      signer_kid: lp.signer_kid,
+      signature: lp.signature,
+      ts: lp.ts || new Date().toISOString(),
+      payload: lp.payload || lp,
+    };
+  }
+
+  /**
+   * health - basic health check against finance service
+   */
+  async health(): Promise<boolean> {
+    if (!this.baseUrl) return false;
+    const endpoints = ['/health', '/ping', '/status', '/'];
+    for (const p of endpoints) {
+      try {
+        const url = this._url(p);
+        const res = await fetch(url, { method: 'GET', headers: this._headers(), agent: this.agent });
+        if (res.ok) return true;
+      } catch {
+        // continue
+      }
+    }
+    return false;
+  }
+}
+
+/* Singleton convenience instance */
+export const financeClient = new FinanceClient();
+export default financeClient;
 

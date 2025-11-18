@@ -1,48 +1,36 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    './app/**/*.{ts,tsx,js,jsx}',
-    './src/**/*.{ts,tsx,js,jsx}',
-    './components/**/*.{ts,tsx,js,jsx}',
-    './pages/**/*.{ts,tsx,js,jsx}',
+    // Next.js app router + src
+    './app/**/*.{js,ts,jsx,tsx}',
+    './src/**/*.{js,ts,jsx,tsx}',
+    // include any top-level components/pages you might add
+    './components/**/*.{js,ts,jsx,tsx}',
+    './pages/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
       colors: {
+        // convenience mapping to your tokens (you still use CSS tokens)
         illuvrse: {
-          DEFAULT: '#1C8174',          // primary
-          light: '#49B2A2',            // primary-light
-          dark: '#0CFD44',             // primary-dark (use cautiously)
-          gold: '#E2B443',             // accent gold
-          gold2: '#C89C2E',            // accent gold 2
-          glow: '#7FFFD4',             // glowing highlight
-          bg: '#FFFFFF',
-          bgDark: '#0A1A1A',
-          muted: '#6B7A78',
-          text: '#042A2A'
-        }
-      },
-      borderRadius: {
-        'md-lg': '10px',
-        'lg-xl': '14px'
+          500: '#1C8174',
+          600: '#0F7466',
+          700: '#0C5B4F',
+        },
+        gold: {
+          DEFAULT: '#E2B443',
+        },
       },
       boxShadow: {
-        'illuvrse-soft': '0 8px 30px rgba(10, 20, 20, 0.06)',
-        'illuvrse-strong': '0 12px 40px rgba(10, 20, 20, 0.12)'
+        // allows `shadow-illuvrse-soft` to be used via @apply in your CSS
+        'illuvrse-soft': 'var(--card-shadow)',
       },
       fontFamily: {
-        heading: ['"Playfair Display"', 'serif'],
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif']
+        heading: ['"Playfair Display"', 'Georgia', 'Times New Roman', 'serif'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto'],
       },
-      spacing: {
-        '9': '2.25rem',
-        '18': '4.5rem'
-      }
-    }
+    },
   },
-  plugins: [
-    require('@tailwindcss/forms'),
-    require('@tailwindcss/typography')
-  ]
+  plugins: [],
 };
 

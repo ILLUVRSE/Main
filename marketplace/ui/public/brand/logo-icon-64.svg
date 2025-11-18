@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">Illuvrse logo</title>
+  <desc id="logoDesc">Stylized IV monogram in teal and gold</desc>
+  <defs>
+    <linearGradient id="g1" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#1C8174"/>
+      <stop offset="1" stop-color="#49B2A2"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#E2B443"/>
+      <stop offset="1" stop-color="#C89C2E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- soft rounded square background -->
+  <rect x="0" y="0" width="64" height="64" rx="12" fill="url(#g1)" />
+
+  <!-- white inner shape to give contrast -->
+  <rect x="6" y="6" width="52" height="52" rx="10" fill="white" opacity="0.06"/>
+
+  <!-- Stylized 'I' -->
+  <rect x="18" y="16" width="6" height="32" rx="3" fill="white" opacity="0.95"/>
+
+  <!-- Stylized 'V' using path filled with gold gradient -->
+  <path d="M44 20 L34 44 L24 20 L30 20 L34 34 L38 20 Z" fill="url(#g2)" opacity="0.98" transform="translate(0,0)"/>
+
+  <!-- subtle inner highlight -->
+  <path d="M22 18 L22 46" stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-linecap="round" />
+
+</svg>
+

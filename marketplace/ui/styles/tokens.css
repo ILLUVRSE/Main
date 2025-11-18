@@ -119,6 +119,7 @@ button:focus, a:focus {
 }
 
 @media (min-width: 1024px) {
-  .container { max-width: 1100px; }
+  /* widened container for better desktop layout */
+  .container { max-width: 1200px; }
 }
 

@@ -52,3 +52,7 @@ RepoWriter/web/preview.log
 RepoWriter/web/dist/
 sentinelnet/.env
 control-panel/node_modules/
+
+.minio-data/
+
+.minio-data/

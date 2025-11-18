@@ -1,27 +1,26 @@
 'use client';
-
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import Image from 'next/image';
-import api from '@/lib/api';
 import type { SkuSummary } from '@/types';
+import * as api from '@/lib/api';
+import SkuCard from '../../src/components/SkuCard';
+import { PreviewProvider, usePreview } from '../../src/components/PreviewProvider';
 
 /**
- * marketplace/ui/app/marketplace/page.tsx
+ * Marketplace catalog page — wrapped with PreviewProvider so any SkuCard can
+ * open the preview modal via the `onPreview` callback.
  *
- * Simple client-side marketplace catalog page that fetches /catalog
- * and renders a responsive SKU grid. Uses the API wrapper (src/lib/api.ts).
- *
- * This is intentionally light: we render simple cards here and later replace
- * them with full SkuCard components when available.
+ * Note: This is a client component because it uses the preview client hook.
  */
 
-export default function MarketplacePage() {
+function MarketplaceCatalogInner() {
   const [items, setItems] = useState<SkuSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [page, setPage] = useState<number>(1);
   const [total, setTotal] = useState<number>(0);
-  const [pageSize] = useState<number>(12);
+  const pageSize = 12;
+
+  // preview hook from the provider
+  const { openPreview } = usePreview();
 
   useEffect(() => {
     let mounted = true;
@@ -43,93 +42,93 @@ export default function MarketplacePage() {
     return () => {
       mounted = false;
     };
-  }, [page, pageSize]);
+  }, [page]);
 
   return (
-    <section>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-heading font-bold">Marketplace</h2>
-          <p className="text-muted text-sm">Discover signed models, previews & licensed delivery</p>
+    <div>
+      {/* Hero / marketing */}
+      <section className="hero">
+        <h1 className="text-3xl md:text-4xl lg:text-5xl font-heading font-extrabold">
+          Marketplace for trusted models, proofs & licensed delivery
+        </h1>
+        <p className="mt-4 text-muted max-w-2xl">
+          Discover Kernel-signed manifests, preview sandboxes, and buy with auditable signed proofs.
+          Secure delivery, royalty-aware payouts, and verifiable licenses.
+        </p>
+
+        <div className="mt-6 flex gap-4">
+          <a className="btn-primary" href="#catalog">Browse models</a>
+          <a className="btn-outline" href="/docs/PRODUCTION">Read Runbook</a>
+        </div>
+      </section>
+
+      {/* Catalog */}
+      <section id="catalog" className="container mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-sm text-muted">
+            {loading ? 'Loading…' : `${Math.min(page * pageSize, total)} of ${total} items`}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <select className="text-sm border rounded-md px-3 py-1 bg-white">
+              <option>All categories</option>
+              <option>ML model</option>
+              <option>Tool</option>
+            </select>
+            <button className="btn-ghost">Sort</button>
+          </div>
         </div>
 
-        <div className="text-sm text-muted">
-          {loading ? 'Loading…' : `${Math.min(page * pageSize, total)} of ${total} items`}
+        {/* Grid — uses .sku-grid from globals.css */}
+        <div className="sku-grid">
+          {loading
+            ? Array.from({ length: pageSize }).map((_, i) => (
+                <div key={i} className="card h-64 animate-pulse" />
+              ))
+            : items.map((s) => (
+                <SkuCard
+                  key={s.sku_id}
+                  sku={s}
+                  onPreview={(skuId: string) => {
+                    // open the preview modal via provider hook
+                    openPreview(skuId);
+                  }}
+                />
+              ))}
         </div>
-      </div>
 
-      <div className="sku-grid">
-        {loading
-          ? // render skeleton placeholders
-            Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="card animate-pulse">
-                <div className="h-40 bg-gray-100 rounded-md" />
-                <div className="mt-3 h-4 bg-gray-100 w-3/4 rounded" />
-                <div className="mt-2 h-3 bg-gray-100 w-1/2 rounded" />
-                <div className="mt-4 flex justify-between items-center">
-                  <div className="h-8 w-20 bg-gray-100 rounded" />
-                  <div className="h-8 w-20 bg-gray-100 rounded" />
-                </div>
-              </div>
-            ))
-          : items.map((s) => (
-              <article key={s.sku_id} className="card">
-                <div className="relative h-40 bg-gray-50 rounded-md overflow-hidden flex items-center justify-center">
-                  {s.thumbnail ? (
-                    <Image src={s.thumbnail} alt={s.title} fill style={{ objectFit: 'contain' }} />
-                  ) : (
-                    <div className="text-muted">No Image</div>
-                  )}
-                </div>
-
-                <h3 className="mt-3 text-lg font-semibold">{s.title}</h3>
-                <p className="text-sm text-muted mt-1 line-clamp-2">{s.summary}</p>
-
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="price-pill">${(s.price / 100).toFixed(2)}</span>
-                    {s.manifest_valid ? (
-                      <span className="illuvrse-badge bg-green-50 text-green-700">Verified</span>
-                    ) : (
-                      <span className="illuvrse-badge bg-yellow-50 text-yellow-700">Unverified</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Link href={`/sku/${encodeURIComponent(s.sku_id)}`}>
-                      <button className="btn-outline">View</button>
-                    </Link>
-                    <Link href={`/checkout?sku=${encodeURIComponent(s.sku_id)}`}>
-                      <button className="btn-primary">Buy</button>
-                    </Link>
-                  </div>
-                </div>
-              </article>
-            ))}
-      </div>
-
-      {/* Simple pagination controls */}
-      <div className="mt-8 flex items-center justify-between">
-        <div className="text-sm text-muted">
-          Page {page} • Showing {items.length} items
-        </div>
-        <div className="flex items-center gap-2">
+        {/* Pagination */}
+        <div className="mt-6 flex justify-center gap-4">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             className="btn-ghost"
-            disabled={page <= 1}
+            aria-label="Previous page"
           >
             Prev
           </button>
+
+          <div className="text-sm text-muted">Page {page}</div>
+
           <button
             onClick={() => setPage((p) => p + 1)}
             className="btn-ghost"
-            disabled={page * pageSize >= total}
+            aria-label="Next page"
           >
             Next
           </button>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
+  );
+}
+
+export default function MarketplacePage() {
+  // Wrap the catalog with the provider here to scope preview modal to this page.
+  // For app-wide access, move PreviewProvider into layout.tsx.
+  return (
+    <PreviewProvider>
+      <MarketplaceCatalogInner />
+    </PreviewProvider>
   );
 }
 

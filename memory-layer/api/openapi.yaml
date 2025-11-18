@@ -1,328 +1,289 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: ILLUVRSE — Memory Layer API
+  title: ILLUVRSE Memory Layer API
   version: "1.0.0"
-  description: |
-    Canonical Memory Layer API for ILLUVRSE.
-    - Persistent, auditable MemoryNodes, Artifacts, and semantic search.
-    - All state-changing operations must include audit context headers where applicable:
-      X-Manifest-Signature-Id, X-Prev-Audit-Hash, X-Service-Id.
-    - RBAC enforced by bearer JWT and/or mTLS in production. For local/dev tests a
-      `X-Local-Dev-Principal` header is accepted by the server to simulate a principal.
-servers:
-  - url: https://api.illuvrse.local
-    description: Production-like server
-  - url: http://localhost:4300
-    description: Local development
+  description: >
+    Memory Layer API — canonical contract for storing memory nodes, embeddings,
+    artifacts, and managing retention/legal-hold. All state-changing operations
+    MUST emit an AuditEvent that conforms to the Kernel audit-log-spec. Production
+    requires mTLS for service calls and OIDC for human flows.
 
-tags:
-  - name: health
-    description: Health & readiness endpoints
-  - name: memory
-    description: Memory nodes and artifacts
-  - name: search
-    description: Semantic search
+servers:
+  - url: http://localhost:4300
+    description: local dev
+  - url: https://memory-layer.{env}.illuvrse.internal
+    description: production (mTLS)
+
+security:
+  - mutualTLS: []
+  - oidc: []
 
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
     mutualTLS:
       type: mutualTLS
-      description: Mutual TLS may be required in production for service-to-service auth.
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://auth.example.com/.well-known/openid-configuration
+
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      description: "Optional request id for tracing"
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: "Idempotency key to deduplicate requests"
+      schema:
+        type: string
+
   schemas:
     Error:
       type: object
       properties:
-        code:
-          type: string
-          description: Machine-readable error code
-        message:
-          type: string
-        details:
-          type: array
-          items:
-            type: string
+        ok:
+          type: boolean
+          const: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
       required:
-        - message
+        - ok
+        - error
 
-    AuditRef:
+    MemoryNode:
       type: object
+      description: >
+        Canonical memory node stored in Memory Layer. Writes must be accompanied by
+        an audit emission.
       properties:
-        auditId:
+        id:
           type: string
-        hash:
+          description: "Unique node id (uuid or string)"
+        embeddingId:
           type: string
-        timestamp:
-          type: string
-          format: date-time
-
-    ArtifactInput:
-      type: object
-      properties:
-        artifactUrl:
-          type: string
-          format: uri
-          description: "s3:// or https:// url to the artifact"
-        sha256:
-          type: string
-          description: "Lowercase hex 64-char sha256"
-          pattern: "^[a-fA-F0-9]{64}$"
-        sizeBytes:
-          type: integer
-          format: int64
-        manifestSignatureId:
-          type: string
-          description: "Manifest signature id that proves artifact provenance (required for production writes)"
-        createdBy:
-          type: string
+        payload:
+          type: object
+          additionalProperties: true
         metadata:
           type: object
           additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
       required:
-        - artifactUrl
-        - sha256
+        - id
+        - payload
 
-    ArtifactView:
-      allOf:
-        - $ref: '#/components/schemas/ArtifactInput'
-        - type: object
-          properties:
-            artifactId:
-              type: string
-            createdAt:
-              type: string
-              format: date-time
-            latestAudit:
-              $ref: '#/components/schemas/AuditRef'
-
-    MemoryEmbedding:
+    CreateMemoryNodeRequest:
       type: object
       properties:
-        model:
+        node:
+          $ref: '#/components/schemas/MemoryNode'
+        audit_context:
+          type: object
+          description: "Audit context linking to kernel manifestSignatureId, request info"
+          additionalProperties: true
+      required:
+        - node
+
+    CreateMemoryNodeResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+        node_id:
           type: string
-        dimension:
-          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    Embedding:
+      type: object
+      properties:
+        id:
+          type: string
         vector:
           type: array
           items:
             type: number
-      required:
-        - model
-
-    MemoryNodeInput:
-      type: object
-      properties:
-        embeddingId:
-          type: string
-          description: "Optional externally-assigned embedding id"
-        owner:
-          type: string
-          description: "Owner principal or service"
-        metadata:
-          type: object
-          additionalProperties: true
-        piiFlags:
-          type: object
-          additionalProperties: true
-        legalHold:
-          type: boolean
-          default: false
-        ttlSeconds:
-          type: integer
-          description: "Time-to-live in seconds (>=3600)"
-          minimum: 3600
-        embedding:
-          $ref: '#/components/schemas/MemoryEmbedding'
-        artifacts:
-          type: array
-          items:
-            $ref: '#/components/schemas/ArtifactInput'
-      required:
-        - owner
-
-    MemoryNodeView:
-      type: object
-      properties:
-        memoryNodeId:
-          type: string
-        owner:
-          type: string
-        embeddingId:
+        node_id:
           type: string
         metadata:
           type: object
           additionalProperties: true
-        piiFlags:
-          type: object
-          additionalProperties: true
-        legalHold:
-          type: boolean
-        ttlSeconds:
-          type: integer
-        expiresAt:
+        created_at:
           type: string
           format: date-time
-        artifacts:
-          type: array
-          items:
-            $ref: '#/components/schemas/ArtifactView'
-        latestAudit:
-          $ref: '#/components/schemas/AuditRef'
+      required:
+        - id
+        - vector
+        - node_id
 
-    SearchRequest:
+    StoreEmbeddingRequest:
       type: object
       properties:
-        queryEmbedding:
+        embedding:
+          $ref: '#/components/schemas/Embedding'
+        idempotency_key:
+          type: string
+      required:
+        - embedding
+
+    StoreEmbeddingResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+        embedding_id:
+          type: string
+
+    EmbeddingSearchRequest:
+      type: object
+      properties:
+        query_vector:
           type: array
           items:
             type: number
-        topK:
+        top_k:
           type: integer
           default: 10
           minimum: 1
-          maximum: 100
         filter:
           type: object
+          description: "Optional metadata filters (simple equality / ranges)."
           additionalProperties: true
-          description: "Filter expressions mapping to metadata/piiFlags/owner. Example: {\"owner\": [\"kernel\"]}"
-        namespace:
-          type: string
-          default: "kernel-memory"
-        scoreThreshold:
-          type: number
-          format: float
-          minimum: 0
-          maximum: 1
+        include_vectors:
+          type: boolean
+          default: false
       required:
-        - queryEmbedding
+        - query_vector
 
-    SearchResult:
+    EmbeddingMatch:
       type: object
       properties:
-        memoryNodeId:
+        embedding_id:
+          type: string
+        node_id:
           type: string
         score:
           type: number
         metadata:
           type: object
           additionalProperties: true
-        artifactIds:
+        vector:
           type: array
           items:
-            type: string
-        vectorRef:
-          type: string
+            type: number
 
-    LegalHoldRequest:
+    EmbeddingSearchResponse:
       type: object
       properties:
-        legalHold:
+        ok:
           type: boolean
-        reason:
+          const: true
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmbeddingMatch'
+
+    ArtifactUploadRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        idempotency_key:
           type: string
       required:
-        - legalHold
+        - filename
+        - content_type
+        - size_bytes
 
-  parameters:
-    memoryNodeId:
-      name: id
-      in: path
-      description: "MemoryNode id (UUID)"
-      required: true
-      schema:
-        type: string
-        format: uuid
-    artifactId:
-      name: id
-      in: path
-      description: "Artifact id (UUID)"
-      required: true
-      schema:
-        type: string
-        format: uuid
+    ArtifactUploadResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+        upload_url:
+          type: string
+          description: "Presigned URL (PUT) for artifact upload"
+        upload_id:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
 
-  headers:
-    X-Manifest-Signature-Id:
-      description: "Manifest signature id to associate with writes (overrides per-artifact if provided)"
-      schema:
-        type: string
-    X-Prev-Audit-Hash:
-      description: "Previous audit hash to chain audit event"
-      schema:
-        type: string
-    X-Service-Id:
-      description: "Caller service id"
-      schema:
-        type: string
-    Idempotency-Key:
-      description: "Idempotency key for POST operations"
-      schema:
-        type: string
-    X-Local-Dev-Principal:
-      description: "JSON-encoded test principal used in development/testing to bypass strict auth"
-      schema:
-        type: string
+    ArtifactCompleteRequest:
+      type: object
+      properties:
+        upload_id:
+          type: string
+        sha256:
+          type: string
+        manifest_signature_id:
+          type: string
+      required:
+        - upload_id
+        - sha256
 
-  responses:
-    BadRequest:
-      description: "Validation error"
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              error:
-                $ref: '#/components/schemas/Error'
-    Unauthorized:
-      description: "Unauthorized"
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              error:
-                $ref: '#/components/schemas/Error'
-    Forbidden:
-      description: "Forbidden"
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              error:
-                $ref: '#/components/schemas/Error'
-    NotFound:
-      description: "Not Found"
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              error:
-                $ref: '#/components/schemas/Error'
-    InternalError:
-      description: "Server Error"
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              error:
-                $ref: '#/components/schemas/Error'
+    ArtifactCompleteResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+        artifact_id:
+          type: string
+        artifact_url:
+          type: string
+        sha256:
+          type: string
+
+    RetentionRequest:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+        ttl_days:
+          type: integer
+        legal_hold:
+          type: boolean
+      required:
+        - artifact_id
+
+    RetentionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
 
 paths:
-  /healthz:
+  /health:
     get:
-      tags:
-        - health
-      summary: Health check
-      description: "Checks DB connectivity and vector adapter health. Returns 200 when healthy."
+      summary: Liveness probe
       responses:
-        '200':
-          description: healthy
+        "200":
+          description: OK
           content:
             application/json:
               schema:
@@ -330,19 +291,15 @@ paths:
                 properties:
                   status:
                     type: string
-                  vector:
-                    type: object
-        '500':
-          $ref: '#/components/responses/InternalError'
+                  ts:
+                    type: string
+                    format: date-time
 
-  /readyz:
+  /ready:
     get:
-      tags:
-        - health
-      summary: Readiness check
-      description: "Verifies migrations applied and adapter warmed. Returns 200 when ready, 503 when degraded."
+      summary: Readiness probe (DB + Vector DB + signer)
       responses:
-        '200':
+        "200":
           description: ready
           content:
             application/json:
@@ -351,278 +308,265 @@ paths:
                 properties:
                   status:
                     type: string
-                  vector:
-                    type: object
-        '503':
-          description: degraded
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  message:
-                    type: string
+                  dbOk:
+                    type: boolean
+                  vectorOk:
+                    type: boolean
+                  signerOk:
+                    type: boolean
+        "503":
+          description: not ready
 
-  /v1/memory/nodes:
+  /memory/nodes:
     post:
       tags:
         - memory
-      summary: Create MemoryNode
+      summary: Create a memory node (append-only)
       description: >
-        Persist a memory node atomically with artifacts and an audit event.
-        If `embedding` is provided the server will attempt an immediate vector upsert;
-        on vector provider failure a pending `memory_vectors` row will be created for worker replay.
-      operationId: createMemoryNode
+        Create a MemoryNode. Must emit an AuditEvent. If node.id exists the API should reject or be idempotent based on Idempotency-Key.
       security:
-        - bearerAuth: []
+        - mutualTLS: []
+        - oidc: []
       parameters:
-        - $ref: '#/components/headers/Idempotency-Key'
-        - $ref: '#/components/headers/X-Manifest-Signature-Id'
-        - $ref: '#/components/headers/X-Prev-Audit-Hash'
-        - $ref: '#/components/headers/X-Service-Id'
-        - $ref: '#/components/headers/X-Local-Dev-Principal'
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MemoryNodeInput'
+              $ref: '#/components/schemas/CreateMemoryNodeRequest'
       responses:
-        '201':
-          description: Created
+        "201":
+          description: Node created
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  memoryNodeId:
-                    type: string
-                  embeddingVectorId:
-                    type: string
-                  auditEventId:
-                    type: string
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: '#/components/schemas/CreateMemoryNodeResponse'
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "409":
+          description: conflict / already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
-  /v1/memory/nodes/{id}:
+  /memory/nodes/{id}:
     get:
       tags:
         - memory
-      summary: Get MemoryNode
-      description: "Returns MemoryNode metadata, artifacts, and latest audit pointer. PII flags are redacted unless caller has READ_PII scope."
-      operationId: getMemoryNode
-      security:
-        - bearerAuth: []
+      summary: Get a memory node by id
       parameters:
-        - $ref: '#/components/parameters/memoryNodeId'
-        - $ref: '#/components/headers/X-Local-Dev-Principal'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/RequestId'
       responses:
-        '200':
-          description: MemoryNode
+        "200":
+          description: memory node
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MemoryNodeView'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: '#/components/schemas/MemoryNode'
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
-    delete:
-      tags:
-        - memory
-      summary: Soft-delete MemoryNode
-      description: "Soft-deletes the node (sets deleted_at) and emits a signed audit event. Fails if node is under legal hold."
-      operationId: deleteMemoryNode
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/memoryNodeId'
-        - $ref: '#/components/headers/X-Manifest-Signature-Id'
-        - $ref: '#/components/headers/X-Prev-Audit-Hash'
-        - $ref: '#/components/headers/X-Service-Id'
-        - $ref: '#/components/headers/X-Local-Dev-Principal'
-      responses:
-        '204':
-          description: Deleted (soft-delete)
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: "Conflict (e.g., node under legal hold)"
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /v1/memory/artifacts:
+  /memory/embeddings:
     post:
       tags:
-        - memory
-      summary: Create Artifact
-      description: "Persist artifact metadata. Artifact checksum (sha256) is validated by streaming the object; `manifestSignatureId` is required (or supplied via X-Manifest-Signature-Id header)."
-      operationId: createArtifact
+        - embeddings
+      summary: Store an embedding
       security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/headers/X-Manifest-Signature-Id'
-        - $ref: '#/components/headers/X-Prev-Audit-Hash'
-        - $ref: '#/components/headers/X-Service-Id'
-        - $ref: '#/components/headers/X-Local-Dev-Principal'
+        - mutualTLS: []
+        - oidc: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - $ref: '#/components/schemas/ArtifactInput'
-                - type: object
-                  properties:
-                    memoryNodeId:
-                      type: string
-                      nullable: true
+              $ref: '#/components/schemas/StoreEmbeddingRequest'
       responses:
-        '201':
-          description: Artifact created
+        "201":
+          description: embedding stored
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  artifactId:
-                    type: string
-                  auditEventId:
-                    type: string
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: '#/components/schemas/StoreEmbeddingResponse'
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
-  /v1/memory/artifacts/{id}:
+  /memory/embeddings/search:
+    post:
+      tags:
+        - embeddings
+      summary: Search for nearest embeddings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingSearchRequest'
+      responses:
+        "200":
+          description: search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingSearchResponse'
+        "400":
+          description: invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /artifacts/upload:
+    post:
+      tags:
+        - artifacts
+      summary: Request a presigned upload URL for an artifact
+      description: >
+        Returns a presigned URL for client to PUT the artifact. Implementation must record a pending upload and return upload_id.
+      security:
+        - mutualTLS: []
+        - oidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtifactUploadRequest'
+      responses:
+        "200":
+          description: presigned upload info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactUploadResponse'
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /artifacts/complete:
+    post:
+      tags:
+        - artifacts
+      summary: Complete an artifact upload and create artifact record
+      description: >
+        Validate the computed sha256 and produce an artifact record with artifact_url (S3 or equivalent).
+        Emit AuditEvent referencing manifestSignatureId when provided.
+      security:
+        - mutualTLS: []
+        - oidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtifactCompleteRequest'
+      responses:
+        "200":
+          description: artifact finalized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactCompleteResponse'
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "409":
+          description: mismatch or duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /artifacts/{artifact_id}:
     get:
       tags:
-        - memory
-      summary: Get Artifact
-      description: "Returns artifact metadata, manifest signature id, and latest audit reference."
-      operationId: getArtifact
-      security:
-        - bearerAuth: []
+        - artifacts
+      summary: Fetch artifact metadata
       parameters:
-        - $ref: '#/components/parameters/artifactId'
-        - $ref: '#/components/headers/X-Local-Dev-Principal'
+        - name: artifact_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/RequestId'
       responses:
-        '200':
-          description: Artifact
+        "200":
+          description: artifact metadata
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ArtifactView'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: '#/components/schemas/ArtifactCompleteResponse'
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
-  /v1/memory/search:
+  /artifacts/retention:
     post:
       tags:
-        - search
-      summary: Semantic search over MemoryNodes
-      description: "Performs a vector search and applies metadata/piiFilters server-side. Returns ordered results with scores."
-      operationId: searchMemoryNodes
+        - artifacts
+      summary: Set TTL / legal hold for an artifact
       security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/headers/X-Service-Id'
-        - $ref: '#/components/headers/X-Local-Dev-Principal'
+        - mutualTLS: []
+        - oidc: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SearchRequest'
+              $ref: '#/components/schemas/RetentionRequest'
       responses:
-        '200':
-          description: Search results
+        "200":
+          description: retention updated
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  results:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/SearchResult'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: '#/components/schemas/RetentionResponse'
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
-  /v1/memory/nodes/{id}/legal-hold:
-    post:
-      tags:
-        - memory
-      summary: Set or clear legal hold
-      description: "Set or clear legal hold on a MemoryNode. Writes a signed audit event."
-      operationId: setLegalHold
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/memoryNodeId'
-        - $ref: '#/components/headers/X-Manifest-Signature-Id'
-        - $ref: '#/components/headers/X-Prev-Audit-Hash'
-        - $ref: '#/components/headers/X-Service-Id'
-        - $ref: '#/components/headers/X-Local-Dev-Principal'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LegalHoldRequest'
-      responses:
-        '204':
-          description: Legal hold updated
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+# Tags
+tags:
+  - name: memory
+    description: Memory node operations
+  - name: embeddings
+    description: Embedding storage & search
+  - name: artifacts
+    description: Artifact upload & retention
 
-security:
-  - bearerAuth: []
-
-externalDocs:
-  description: Memory Layer API reference & operational notes
-  url: ./memory-layer/api.md
+x-notes:
+  - "All write operations MUST emit AuditEvent with prevHash/hash/signature that can be verified by kernel/tools/audit-verify.js"
+  - "Embedding store should support queue fallback when external vector provider is unavailable (`VECTOR_WRITE_QUEUE`)."
+  - "Presigned uploads should follow the principle: server issues presigned PUT, client performs PUT, client calls /artifacts/complete with computed sha256."
 

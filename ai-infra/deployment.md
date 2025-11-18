@@ -1,141 +1,364 @@
-# AI & Infrastructure — Deployment & Ops Guide
+# AI & Infrastructure — Deployment, Security & Runbook
 
-Actionable runbook for bringing the AI Infra service (training metadata, model registry, promotion workflow) to production with deterministic training runners, SentinelNet gating, and KMS-backed signing.
+**Purpose**
+Guidance to deploy reproducible training pipelines, model registry & lineage, promotion gating (SentinelNet + manifest signatures), model serving canaries and rollbacks, and drift detection. This supports the blueprint acceptance criteria requiring reproducible training, registry lineage, manifest signing, promotion/canary, rollback, and drift detection pipeline.
 
 ---
 
-## 1. Database migrations
-Apply the schema before booting any API instance:
+## 0 — Summary / Intent
+
+Run training in reproducible, auditable, and signed workflows: recorded codeRef, datasetRefs, hyperparams, container digests; store artifacts in model-registry with signerId; gate promotion with SentinelNet + manifestSignature; support canary rollout and automatic rollback on regression; detect drift and surface retrain suggestions.
+
+---
+
+## 1 — Topology & Components (high-level)
+
+* **Training Orchestrator** (batch runner / orchestration): schedules training jobs, records codeRef/container digest + dataset checksums, collects artifacts.
+* **Model Registry**: stores artifact metadata (artifactId, codeRef, datasetRefs, signerId), manifests, promotion state, canary config.
+* **Signing Proxy / KMS**: signs manifests, audit events, and ledger proofs (Ed25519/RSA depending on org).
+* **SentinelNet**: policy gating for promotions.
+* **Eval Engine / Reasoning Graph**: collect evals and reasoning traces for promotions.
+* **Canary Controller / Serving infra**: runs canary deployments and automated rollback on regressions.
+* **Drift Detector**: periodic pipeline comparing production distribution to training baseline, emits retrain suggestions.
+* **Storage**: object store (S3) for artifacts, model binaries, snapshots; Postgres for metadata/indices.
+* **Audit Bus & Indexer**: Kafka → indexer → Postgres + S3 archive.
+* **Monitoring/Observability**: Prometheus, Grafana, OTEL.
+
+---
+
+## 2 — Required cloud components & names (exact)
+
+* **Postgres** (>=14) for registry and indexes. Env var: `MODEL_REGISTRY_DATABASE_URL`
+* **Object storage (S3)**: `illuvrse-models-${ENV}`, audit archive: `illuvrse-audit-archive-${ENV}` (Object Lock COMPLIANCE)
+* **KMS/HSM** for signing (`AUDIT_SIGNING_KMS_KEY_ID`, `MANIFEST_SIGNING_KMS_KEY_ID`)
+* **Kubernetes / cluster** for training/serving
+* **Kafka/Redpanda** for audit/events
+* **CI runner** for reproducible builds (build + push + record digest)
+* **Secrets manager** (Vault) for keys/credentials
+
+---
+
+## 3 — Required environment variables (minimum)
+
+```
+NODE_ENV=production
+MODEL_REGISTRY_DATABASE_URL=postgresql://...
+MODEL_REGISTRY_S3_BUCKET=illuvrse-models-${ENV}
+AUDIT_SIGNING_KMS_KEY_ID=arn:aws:kms:...
+MANIFEST_SIGNING_KMS_KEY_ID=arn:aws:kms:...
+MANIFEST_SIGNER_KID=manifest-signer-v1
+REQUIRE_KMS=true
+REQUIRE_MTLS=true
+KERNEL_API_URL=https://kernel.illuvrse.internal
+SENTINELNET_URL=https://sentinelnet.internal
+DRIFT_S3_BUCKET=illuvrse-drift-${ENV}
+PROM_ENDPOINT=...
+OTEL_COLLECTOR_URL=...
+```
+
+Local dev may use ephemeral keys if `DEV_ALLOW_EPHEMERAL=true`, but `NODE_ENV=production` must fail when `DEV_ALLOW_EPHEMERAL=true`.
+
+---
+
+## 4 — Reproducible training & artifact recording (must-have)
+
+**Principles**
+
+* Record everything that influences model: `codeRef` (commit SHA or image digest), container digest, datasetRefs (dataset id + checksum), hyperparameters, random seeds, environment, training logs, evaluation outputs, and provenance metadata.
+* Produce a **training manifest** JSON: `{ artifactId, codeRef, containerDigest, datasetRefs, hyperparams, trainingCmd, artifactSha256, createdAt }`.
+* Every artifact registration creates a **manifest** and is **signed** by KMS (or signing proxy) producing a `ManifestSignature` with `signerId`, `signature`, `ts`.
+
+**Implementation checklist**
+
+* Training orchestration records `codeRef`, container digest and dataset checksums at the start and produces artifact with deterministic artifact checksum (sha256).
+* Provide a `train --record` helper that:
+
+  * builds container (if local) → record container digest
+  * computes dataset checksums (or datasetRefs)
+  * runs training with fixed seeds → produce artifact
+  * computes artifact sha256 and writes manifest
+  * calls model-registry API to register artifact (registry returns `artifactId`)
+* CI must be able to reproduce a training run given the manifest (i.e., start from codeRef + container digest + datasetRefs + hyperparams) and reproduce artifact checksum within tolerance.
+
+**Verification command (example)**
 
 ```bash
-psql "$AI_INFRA_DATABASE_URL" -f ai-infra/sql/migrations/001_init.sql
+# run a deterministic small training run
+TRAIN_DATASET=tests/data/sample \
+CODE_REF=gitsha \
+CONTAINER_DIGEST=sha256:... \
+npm --prefix ai-infra run train:smoke -- --manifest-out=manifest.json
+
+# verify reproducible artifact checksum
+sha256sum model.tar.gz
+# registry verify:
+curl -X POST $MODEL_REGISTRY_API/verify-manifest -d @manifest.json
 ```
 
-The migration creates `training_jobs`, `model_artifacts`, and `model_promotions` plus indexes used by the runner and registry APIs.
+---
+
+## 5 — Model Registry & lineage (MUST include)
+
+**Schema (essential fields)**
+
+* `artifactId` (uuid)
+* `artifact_url` (s3)
+* `artifact_sha256`
+* `codeRef` (git sha or image digest)
+* `container_digest`
+* `datasetRefs` (list of `{ id, checksum, version }`)
+* `signerId` and `manifestSignatureId`
+* `metadata` (task, metrics)
+* `create_ts`, `created_by`
+
+**APIs**
+
+* `POST /registry/register` — register artifact + manifest (returns artifactId)
+* `GET /registry/{artifactId}` — fetch metadata
+* `POST /registry/{artifactId}/promote` — request/promote artifact to env (gates apply)
+* `GET /registry/promotions/{artifactId}` — promotion history
+
+**Lineage**
+
+* Link datasetRefs to dataset registry records for traceability.
+* Provide `tools/export_lineage.sh` to export artifact + dataset + codeRef chain for auditors.
+
+**Verification**
+
+* `python3 ai-infra/tools/verify_manifest.py --artifact-id <id>` verifies artifact sha256, signature, and provenance.
 
 ---
 
-## 2. Required configuration
+## 6 — Promotion, SentinelNet gating & manifest signatures (MUST)
 
-| Env var | Purpose |
-| --- | --- |
-| `AI_INFRA_ADDR` | Listen address (default `:8061`). |
-| `AI_INFRA_DATABASE_URL` | Postgres connection string. |
-| `AI_INFRA_SIGNER_KEY_B64` | Base64 Ed25519 private key (fallback when no KMS). |
-| `AI_INFRA_SIGNER_ID` | Identifier embedded in signatures (rotate per key). |
-| `AI_INFRA_KMS_ENDPOINT` | Optional HTTP signer adapter endpoint (`POST /sign`). |
-| `AI_INFRA_MIN_PROMO_SCORE` | Default SentinelNet static threshold when no remote policy. |
-| `AI_INFRA_SENTINEL_URL` | Optional SentinelNet base URL for live policy checks. |
-| `AI_INFRA_ALLOW_DEBUG_TOKEN` / `AI_INFRA_DEBUG_TOKEN` | Enable/disable debug header auth in dev. |
-| `AI_INFRA_RUNNER` | When `true`, start the in-process deterministic training runner. |
+**Promotion flow**
 
-Example `.env` for local use:
+1. Register artifact in registry. Registry stores manifest and returns `artifactId` + manifestSignatureId after signing.
+2. Evaluation & Eval Engine produce `promotion` decision and record to Reasoning Graph referencing `manifestSignatureId`.
+3. `POST /registry/{artifactId}/promote` triggers:
 
+   * SentinelNet policy check (synchronous or async per policy)
+   * If policy requires multisig → return `pending_multisig` until 3-of-5 approvals are collected.
+   * If allowed → create promotion record and begin canary deploy.
+4. Promotion record must include `promotion_id`, `artifactId`, `target_env`, `manifestSignatureId`, `applied_at`, `status`.
+
+**Manifest signature**
+
+* `MANIFEST_SIGNING_KMS_KEY_ID` used to sign manifests (Ed25519).
+* Registry stores signature + `manifestSignatureId`.
+* Promotion operations verify manifest signature before proceeding.
+
+**Audit**
+
+* Promotion must emit AuditEvent referencing `manifestSignatureId` and promotion decision.
+
+**Acceptance test**
+
+* `POST /registry/{id}/promote` with a signed manifest → SentinelNet allows → promotion record created and signed.
+
+---
+
+## 7 — Canary strategy & automated rollback (MUST)
+
+**Canary Controller**
+
+* When promotion is approved, controller performs canary rollout:
+
+  * Deploy artifact to small % of traffic (configurable)
+  * Monitor evaluation metrics (p95/p99, accuracy, regression thresholds)
+  * If regression threshold met, auto-rollback to previous artifact and emit `rollback` audit event.
+
+**Canary config**
+
+* `canary.percent` (e.g., 5%), `canary.window` (duration), `rollback_threshold` (e.g., relative score drop > 0.02)
+* Canary should be deterministic by request sampling (seeded by request ids) or traffic split.
+
+**Rollbacks**
+
+* Rollback must be a promotion-like flow requiring signoff for large/critical rollbacks (multisig possible).
+* Provide `./scripts/canary_check.sh` for local canary simulation.
+
+**Acceptance**
+
+* Canary success path and rollback path must be covered by tests; auto-rollback test simulates injected regression.
+
+---
+
+## 8 — Drift detection & retrain suggestions (MUST)
+
+**Drift pipeline**
+
+* Periodic job compares production input distribution and model performance against baseline training datasets & evaluation metrics.
+* If drift detected above threshold, pipeline emits a retrain suggestion event to Reasoning Graph & logs to registry.
+* Implement drift detectors for feature drift, label drift, and performance regressions.
+
+**Implementation**
+
+* `ai-infra/cron/drift_detector.py` or a container job running daily/weekly.
+* Store drift reports in S3 and index in registry.
+
+**Acceptance**
+
+* Drift pipeline emits `drift.suggestion` AuditEvent and creates a retrain task when drift > threshold.
+* Provide a reproducible `drift/sample` command to simulate drift and verify retrain suggestion.
+
+---
+
+## 9 — Serving & canary serving (MUST)
+
+**Serving**
+
+* Serve models via model-serving infra (KFServing, Triton, or custom).
+* Serving infra must validate manifestSignatureId and record serving metadata in registry.
+
+**Canary serving**
+
+* Support traffic split and blue/green deployments.
+* Health checks include model-specific metrics; failing thresholds trigger rollback.
+
+**Observability**
+
+* Serve metric types: `model_inference_latency_seconds`, `model_inference_error_rate`, `model_prediction_quality` (if label feedback exists).
+
+---
+
+## 10 — Backup & DR (MUST)
+
+* **Artifacts**: keep model artifacts in S3 with versioning + lifecycle; keep copies in cold storage for compliance.
+* **Registry DB**: PITR + daily snapshots; monthly restore drills.
+* **Replay**: ability to re-run `verify_manifest` and `audit-verify` against S3 archive to validate chain.
+* **DR drill**: restore registry DB + S3 artifact snapshot → run `ai-infra/tools/rebuild_registry_index.py` → run parity/verification.
+
+---
+
+## 11 — Security & governance (MUST)
+
+* **KMS/HSM**: Mandatory for manifest signing in prod. Configure `MANIFEST_SIGNING_KMS_KEY_ID`.
+* **Public key distribution**: registry verifier endpoint or update `kernel/tools/signers.json` (public keys).
+* **RBAC & mTLS**: Kernel ↔ registry and controllers must use mTLS. Admin UI uses OIDC.
+* **No private keys in repo**: enforce secrets scanning in CI.
+* **Multisig**: high-risk promotions/rollbacks must use Kernel multisig.
+
+**IAM sample policy (KMS)**
+
+```json
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    {
+      "Effect":"Allow",
+      "Action":["kms:Sign","kms:Verify","kms:GetPublicKey"],
+      "Resource":"arn:aws:kms:REGION:ACCOUNT:key/MANIFEST_SIGNING_KEY"
+    }
+  ]
+}
 ```
-AI_INFRA_ADDR=:8061
-AI_INFRA_DATABASE_URL=postgres://aiinfra:dev@localhost:5432/aiinfra?sslmode=disable
-AI_INFRA_SIGNER_KEY_B64=<base64-ed25519-private-key>
-AI_INFRA_SIGNER_ID=ai-infra-dev
-AI_INFRA_MIN_PROMO_SCORE=0.85
-AI_INFRA_ALLOW_DEBUG_TOKEN=true
-AI_INFRA_DEBUG_TOKEN=dev
-AI_INFRA_RUNNER=true
-```
-
-Load with `source .env` before running the binary.
 
 ---
 
-## 3. Signing & KMS
+## 12 — CI & reproducible builds
 
-The service now ships with a signer factory:
+* **Training artifacts**: CI job must be able to reproduce training artifacts (or run a smoke deterministic training to verify manifest).
+* **Builds**: build training container images and record digest; treat container digest as `codeRef` for reproducibility.
+* **Protected branch guards**: enforce `REQUIRE_KMS=true` and secrets scanning.
 
-- **KMS / HSM (recommended):** set `AI_INFRA_KMS_ENDPOINT=https://kms.internal` (the service POSTs `{payload_b64}` to `/sign` and expects `{signature_b64, signer_id}`). Timeouts + retries are builtin.
-- **Local Ed25519 fallback:** omit `AI_INFRA_KMS_ENDPOINT`, provide `AI_INFRA_SIGNER_KEY_B64` + `AI_INFRA_SIGNER_ID`. Keys should come from Vault or ops-managed secrets; never commit private keys.
-- Rotation: roll a new key/KMS signing profile, update the env vars, restart pods. Consumers read `signerId` off registry objects to choose verification keys.
+**Example CI tasks**
 
----
+* `ai-infra-ci.yml`:
 
-## 4. SentinelNet policy integration
-
-- Set `AI_INFRA_SENTINEL_URL` to enable the HTTP client that POSTs to `${AI_INFRA_SENTINEL_URL}/sentinelnet/check`. Timeouts and retries are managed inside the client.
-- When the URL is unset, the service uses the existing static threshold client (`AI_INFRA_MIN_PROMO_SCORE`).
-- Promotions record the entire SentinelNet decision payload; rejections keep policy IDs + reasons for audit.
+  * lint, unit tests, reproducible training smoke test, manifest signing mock test, registry contract tests.
 
 ---
 
-## 5. Training runner & compute
+## 13 — Tests & acceptance hooks
 
-The module now includes a deterministic local runner:
+* Unit tests:
 
-- Enable via `AI_INFRA_RUNNER=true` **or** CLI flag `--run-runner`. The runner polls `training_jobs` with `status=queued`, marks them `running`, computes deterministic checksums (`codeRef || containerDigest || canonical JSON || seed`), simulates training, registers an artifact, and marks the job `completed`.
-- Artifact URIs default to `s3://ai-infra-dev/artifacts/<job-id>.model`; customize upstream orchestrators to upload real artifacts to S3/GCS before calling `/ai-infra/register` if you deploy distributed training.
-- To swap in production-grade compute, point a Kubernetes Job/Argo Workflow/Ray cluster at the `training_jobs` table. The external worker can reuse the checksum helper from `internal/runner` to stay deterministic and then call the service’s `RegisterArtifact` endpoint. The built-in runner is a safe local fallback or reference implementation.
+  * canonicalization parity, manifest creation, verify manifest signatures.
+* Integration tests:
 
----
+  * Train→register→sign→promote→canary→rollback flow in staging (mock SentinelNet toggles).
+* Drift test:
 
-## 6. Artifact storage
+  * simulate drift → verify retrain suggestion event.
+* Canary test:
 
-- Use an S3-compatible bucket dedicated to model artifacts (e.g., `s3://ai-infra-prod-artifacts`).
-- Enable bucket versioning and Object Lock (governance mode) so artifacts are immutable once uploaded.
-- Suggested bucket policy: restrict `PutObject` to the training cluster IAM role, `GetObject` to registry + downstream deployment roles, and block public ACLs.
-- Maintain a separate audit bucket for manifests/checkpoints if required by compliance. Emit checksum + signer metadata to CloudTrail/S3 Access Logs for lineage verification.
+  * inject regression during canary → verify auto rollback triggers and emits audit.
 
----
-
-## 7. Running the service locally
+**Example test commands**
 
 ```bash
-# With runner enabled via env var
-AI_INFRA_RUNNER=true \
-AI_INFRA_ALLOW_DEBUG_TOKEN=true AI_INFRA_DEBUG_TOKEN=dev \
-go run ./ai-infra/cmd/ai-infra-service
+# smoke reproducible training
+npm --prefix ai-infra run train:smoke
 
-# OR explicitly run the worker flag
-go run ./ai-infra/cmd/ai-infra-service --run-runner
+# registry acceptance
+python3 ai-infra/tools/verify_manifest.py --artifact-id <id>
+
+# promotion flow e2e (staging with mocks)
+./ai-infra/scripts/e2e_promotion_flow.sh
 ```
 
-Submit a training job:
+---
+
+## 14 — Runbooks (must exist)
+
+* `ai-infra/runbooks/key_rotation.md` — how to rotate manifest signing keys and update verifier registry.
+* `ai-infra/runbooks/manifest_issues.md` — investigate parity/signature issues.
+* `ai-infra/runbooks/canary_rollback.md` — handle automatic rollback and postmortem.
+* `ai-infra/runbooks/drift_drill.md` — run drift detection drill.
+
+---
+
+## 15 — Observability & SLOs (MUST)
+
+**Metrics**
+
+* `ai_infra.training_job_duration_seconds` (histogram)
+* `ai_infra.artifact_registration_latency_seconds`
+* `ai_infra.promotion_latency_seconds`
+* `ai_infra.canary_rollbacks_total`
+* `ai_infra.drift_suggestions_total`
+
+**SLOs (examples)**
+
+* Training orchestration job startup (p95 < 30s for small jobs).
+* Artifact registration p95 < 500ms.
+* Promotion flow p95 < 2s (assuming async gating).
+* Canary rollback response within X minutes of metric violation threshold.
+
+---
+
+## 16 — Sign-off & acceptance criteria
+
+AI & Infrastructure is accepted when:
+
+* Deterministic small training runs reproduce artifact checksum (reproducibility test).
+* Model registry stores `artifactId`, `codeRef`, `datasetRefs`, `signerId` and `manifestSignatureId` with verification tooling passing.
+* Promotion gating with SentinelNet and manifest signatures: `POST /registry/{artifact}/promote` tested end-to-end.
+* Canary rollouts with automated rollback on injected regressions tested in staging.
+* Drift detection pipeline exists and emits retrain suggestions when threshold crossed.
+* KMS/HSM used for manifest signing in staging/prod and `REQUIRE_KMS=true` enforced in CI.
+* Audit chain verification tools verify sample artifacts and promotions (`kernel/tools/audit-verify.js` + registry checks).
+* Runbooks, DR drills, and CI guardrails exist.
+* Signoffs: `ai-infra/signoffs/ml_lead.sig` and `ai-infra/signoffs/security_engineer.sig`.
+
+---
+
+## 17 — Reviewer commands (quick)
 
 ```bash
-curl -H 'Content-Type: application/json' -H 'X-Debug-Token: dev' \
-  -d '{"codeRef":"git://repo","containerDigest":"sha256:abc"}' \
-  http://localhost:8061/ai-infra/train
+# reproducible training smoke
+npm --prefix ai-infra ci
+npm --prefix ai-infra run train:smoke
+
+# verify manifest & signature
+python3 ai-infra/tools/verify_manifest.py --manifest manifest.json
+
+# run promotion e2e (staging with mocks)
+./ai-infra/scripts/e2e_promotion_flow.sh
+
+# run drift detection sample
+python3 ai-infra/cron/drift_detector.py --sample
 ```
 
-The runner will pick it up, register an artifact with deterministic checksum/signature, and you can list it via `GET /ai-infra/models`.
-
 ---
-
-## 8. Production deployment checklist
-
-1. **Platform**: deploy the API via Kubernetes (≥2 replicas, rolling updates). Add liveness/readiness probes on `/health`, `PodDisruptionBudget`, and NetworkPolicies limiting DB/KMS/SentinelNet access.
-2. **Migrations**: ship an init Job (or `atlas migrate`) that runs `001_init.sql` on every release.
-3. **Auth**: disable debug tokens (`AI_INFRA_ALLOW_DEBUG_TOKEN=false`) and enforce mTLS at ingress.
-4. **Observability**: scrape logs for signature IDs, decision IDs, and runner status. Future work: expose Prometheus metrics for queue depth and SentinelNet latency.
-5. **Disaster recovery**: enable PITR on Postgres, back up S3 buckets with Object Lock, and archive promotion manifests/signatures for at least the compliance retention window.
-6. **Validation**: run `go test ./ai-infra/...` in CI, then issue a low-quality promotion in staging to confirm SentinelNet denials flow through before promoting to production.
-
-With these steps in place you have a full train → register → promote workflow, deterministic runner for dev/test, production-callable SentinelNet & KMS adapters, and auditable artifact lineage.
-
----
-
-## 9. Operational runbook
-- **Training jobs stuck in `queued`**  
-  1. Check runner logs/pod readiness. If runners are disabled intentionally, confirm external orchestrator is writing status updates.  
-  2. Inspect `training_jobs` for rows older than SLA; requeue by setting `status='queued'` and bumping `updated_at`.  
-  3. If checksum mismatch occurs, confirm `codeRef`, `containerDigest`, and `seed` match orchestrator input; fix upstream pipeline before resuming.
-- **Signer/KMS failure**  
-  1. Alert fires from `ai_infra_sign_errors_total`. Temporarily enable local fallback by providing `AI_INFRA_SIGNER_KEY_B64` stored in Vault, but only after Security approval.  
-  2. Failing KMS endpoint? Rotate IAM creds, test with signer diagnostics (`go run ./cmd/signertest`).  
-  3. Re-sign pending promotions by rerunning `promotionService.Finalize` once KMS is back.
-- **SentinelNet unreachable**  
-  1. Service returns HTTP 5xx when hitting SentinelNet. Automatically degrade by switching to static threshold (unset `AI_INFRA_SENTINEL_URL`, set `AI_INFRA_MIN_PROMO_SCORE`).  
-  2. Flag promotion records with `evaluation.fallback=true` for audit. Once SentinelNet recovers, replay pending promotions through `/sentinelnet/check` and update records.
-- **Database failover / corruption**  
-  1. Trigger managed Postgres failover (or promote replica).  
-  2. Run `go run ./cmd/consistency` (future tool) or manual checks to ensure `model_artifacts` rows link to valid `training_jobs`.  
-  3. Rebuild read replicas, re-enable writers, and verify `model_promotions` statuses.
-- **Artifact integrity breach**  
-  1. Compare reported checksum vs stored `model_artifacts.checksum`. If mismatch, revoke artifact, mark promotions `revoked`, and notify downstream deployers.  
-  2. Require retraining; delete affected S3 objects via delete markers while keeping immutable copies in audit bucket for forensics.

@@ -29,6 +29,9 @@ This folder contains the following files (one per the agreed single-file workflo
 5. Use `multisig-workflow.md` when proposing any Kernel-level upgrade; do not attempt upgrades without following that process.
 6. Validate the implementation using `acceptance-criteria.md`. All checks must pass before sign-off.
 
+## # Local & CI tooling
+Keep `kernel/tools/signers.json` (documented in `kernel/tools/README.md`) current with the KMS-exported public keys, then run `node kernel/tools/audit-verify.js -s kernel/tools/signers.json` to sanity-check the bundle; protected branches should also run `kernel/ci/require_kms_check.sh`, which probes `SIGNING_PROXY_URL`/`KMS_ENDPOINT` with a short timeout and fails fast if the signing path is unhealthy or misconfigured.
+
 ## # Sign-off & governance
 - Final approver: **Ryan (SuperAdmin)**.
 - Required reviewer: **Security Engineer** (for KMS/HSM and SentinelNet rules).
@@ -40,4 +43,3 @@ Create and commit the `.gitignore` file (one line action) that excludes runtime 
 ---
 
 End of README.
-

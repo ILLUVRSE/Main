@@ -1,19 +1,18 @@
 {
   "signers": [
     {
-      "signerId": "auditor-signing-v1",
-      "algorithm": "rsa-sha256",
-      "publicKey": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_RSA_PUBLIC_KEY_PEM\n-----END PUBLIC KEY-----",
+      "signer_kid": "kernel-audit-ed25519-v1",
+      "algorithm": "ed25519",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_ED25519_PUBLIC_KEY_PEM\n-----END PUBLIC KEY-----",
       "deployedAt": "2025-11-10T00:00:00Z",
-      "notes": "Example RSA signer. Replace publicKey with PEM exported from KMS."
+      "description": "Primary Kernel audit signer (export from KMS or signing proxy)."
     },
     {
-      "signerId": "auditor-signing-ed25519-v1",
-      "algorithm": "ed25519",
-      "publicKey": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_ED25519_PUBLIC_KEY_PEM\n-----END PUBLIC KEY-----",
+      "signer_kid": "kernel-audit-rsa-v1",
+      "algorithm": "rsa-sha256",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_RSA_PUBLIC_KEY_PEM\n-----END PUBLIC KEY-----",
       "deployedAt": "2025-11-10T00:00:00Z",
-      "notes": "Example Ed25519 signer. Replace with PEM exported from KMS."
+      "description": "Fallback RSA signer for audit exports."
     }
   ]
 }
-

@@ -108,11 +108,10 @@ jobs:
         run: |
           # This expects a run-local.sh or docker-compose.dev.yml in finance/
           if [ -x ./run-local.sh ]; then
-            ./run-local.sh &
-            echo $! > /tmp/finance-run-local.pid
+            ./run-local.sh
             # Wait for health probe
             for i in $(seq 1 40); do
-              if curl -fsS http://127.0.0.1:4000/health >/dev/null 2>&1; then
+              if curl -fsS http://127.0.0.1:8050/health >/dev/null 2>&1; then
                 echo "finance local started"
                 break
               fi
@@ -126,7 +125,7 @@ jobs:
       - name: Run E2E tests (checkout-ledger)
         working-directory: finance
         env:
-          FINANCE_BASE_URL: http://127.0.0.1:4000
+          FINANCE_BASE_URL: http://127.0.0.1:8050
         run: |
           # Example: execute vitest or node e2e script
           if [ -f package.json ] && jq -e '.scripts | has("test:e2e")' package.json >/dev/null 2>&1; then
@@ -150,10 +149,7 @@ jobs:
       - name: Teardown local orchestration
         if: always()
         run: |
-          if [ -f /tmp/finance-run-local.pid ]; then
-            kill $(cat /tmp/finance-run-local.pid) || true
-            rm -f /tmp/finance-run-local.pid
-          fi
+          ./finance/run-local.sh teardown || true
 
   audit-verify:
     name: Audit Verification (best-effort)
@@ -208,23 +204,4 @@ jobs:
           REQUIRE_SIGNING_PROXY: ${{ env.REQUIRE_SIGNING_PROXY }}
           SIGNING_PROXY_URL: ${{ secrets.SIGNING_PROXY_URL || '' }}
           KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT || '' }}
-        run: |
-          if [ "${REQUIRE_SIGNING_PROXY}" = "true" ]; then
-            if [ -z "${SIGNING_PROXY_URL}" ]; then
-              echo "REQUIRE_SIGNING_PROXY=true but SIGNING_PROXY_URL not provided" && exit 2
-            fi
-            if ! curl -fsS -m 5 ${SIGNING_PROXY_URL}/health >/dev/null 2>&1; then
-              echo "Signing proxy unreachable at ${SIGNING_PROXY_URL}" && exit 3
-            fi
-            echo "Signing proxy reachable"
-          fi
-          if [ "${REQUIRE_KMS}" = "true" ]; then
-            if [ -z "${KMS_ENDPOINT}" ]; then
-              echo "REQUIRE_KMS=true but KMS_ENDPOINT not provided" && exit 2
-            fi
-            if ! curl -fsS -m 5 ${KMS_ENDPOINT}/health >/dev/null 2>&1; then
-              echo "KMS endpoint unreachable at ${KMS_ENDPOINT}" && exit 3
-            fi
-            echo "KMS endpoint reachable"
-          fi
-
+        run: ./kernel/ci/require_kms_check.sh

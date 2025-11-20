@@ -115,7 +115,8 @@ main:focus {
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center font-semibold transition-colors duration-200;
+    @apply inline-flex items-center justify-center transition-colors duration-200;
+    font-weight: 600;
     background: var(--color-primary);
     color: white;
     border-radius: 0.75rem;
@@ -127,7 +128,8 @@ main:focus {
   }
 
   .btn-outline {
-    @apply inline-flex items-center justify-center font-semibold transition-colors duration-200;
+    @apply inline-flex items-center justify-center transition-colors duration-200;
+    font-weight: 600;
     border: 1px solid var(--color-primary);
     color: var(--color-primary-accessible);
     border-radius: 0.75rem;

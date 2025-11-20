@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { MarketplaceModel } from "@/lib/types";
 
 interface ModelCardProps {
@@ -17,7 +18,7 @@ export function ModelCard({ model, onPreview, onAddToCart }: ModelCardProps) {
 
   return (
     <article className="flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-900/50 shadow-xl shadow-black/40 transition hover:border-brand hover:shadow-brand/30">
-      <div className="relative h-56 w-full">
+      <Link href={`/sku/${model.slug}`} className="relative block h-56 w-full">
         <Image
           src={model.thumbnailUrl}
           alt={model.title}
@@ -36,14 +37,16 @@ export function ModelCard({ model, onPreview, onAddToCart }: ModelCardProps) {
             Verified
           </span>
         )}
-      </div>
+      </Link>
       <div className="flex flex-1 flex-col gap-5 p-6">
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-400">
             <span>{model.owner}</span>
             <span>{model.categories.join(" · ")}</span>
           </div>
-          <h3 className="text-2xl font-semibold text-white">{model.title}</h3>
+          <Link href={`/sku/${model.slug}`} className="text-2xl font-semibold text-white hover:text-brand">
+            {model.title}
+          </Link>
           <p className="text-sm text-slate-300">{model.shortDescription}</p>
         </div>
         <div className="flex items-center justify-between text-sm text-slate-400">

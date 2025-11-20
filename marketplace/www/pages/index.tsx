@@ -2,6 +2,7 @@ import Head from "next/head";
 import { GetServerSideProps } from "next";
 import { useMemo, useState } from "react";
 import { ModelCard } from "@/components/ModelCard";
+import { PreviewPanel } from "@/components/PreviewPanel";
 import { fetchCatalog } from "@/lib/api";
 import { CatalogResponse, MarketplaceModel } from "@/lib/types";
 import { useCart } from "@/context/cart";
@@ -16,6 +17,8 @@ export default function CatalogPage({ initialCatalog }: CatalogPageProps) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [previewModel, setPreviewModel] = useState<MarketplaceModel | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const { addItem, totalItems } = useCart();
 
   const filtered = useMemo(() => {
@@ -126,7 +129,15 @@ export default function CatalogPage({ initialCatalog }: CatalogPageProps) {
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {paginated.map((model) => (
-                <ModelCard key={model.id} model={model} onAddToCart={handleAddToCart} />
+                <ModelCard
+                  key={model.id}
+                  model={model}
+                  onAddToCart={handleAddToCart}
+                  onPreview={(selected) => {
+                    setPreviewModel(selected);
+                    setIsPreviewOpen(true);
+                  }}
+                />
               ))}
             </div>
           )}
@@ -158,6 +169,14 @@ export default function CatalogPage({ initialCatalog }: CatalogPageProps) {
             </button>
           </div>
         </footer>
+        {previewModel && (
+          <PreviewPanel
+            model={previewModel}
+            open={isPreviewOpen}
+            onClose={() => setIsPreviewOpen(false)}
+            versionId={previewModel.versions[0]?.id}
+          />
+        )}
       </main>
     </>
   );

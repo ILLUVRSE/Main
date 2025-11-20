@@ -27,6 +27,8 @@ export default function CheckoutPage() {
   const [buyerEmail, setBuyerEmail] = useState<string>('');
   const [company, setCompany] = useState<string>('');
   const [deliveryPref, setDeliveryPref] = useState<'buyer-key' | 'marketplace-key'>('buyer-key');
+  const [buyerPublicKey, setBuyerPublicKey] = useState<string>('');
+  const [buyerKeyLabel, setBuyerKeyLabel] = useState<string>('buyer-key');
 
   const [order, setOrder] = useState<OrderRecord | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -71,18 +73,46 @@ export default function CheckoutPage() {
     };
   }, [orderId]);
 
+  function rememberOrder(id: string) {
+    if (typeof window === 'undefined' || !id) return;
+    try {
+      const key = 'illuvrse_orders_v1';
+      const existing = JSON.parse(window.localStorage.getItem(key) || '[]');
+      const list = Array.isArray(existing) ? existing : [];
+      if (!list.includes(id)) {
+        const next = [id, ...list].slice(0, 25);
+        window.localStorage.setItem(key, JSON.stringify(next));
+      }
+    } catch {
+      // ignore storage issues in non-browser envs
+    }
+  }
+
   async function handleCreateCheckout() {
     setLoading(true);
     setError(null);
     try {
       if (!skuId) throw new Error('SKU not selected. Provide ?sku=<sku_id> or choose from catalog.');
+      const mode = deliveryPref === 'buyer-key' ? 'buyer-managed' : 'marketplace-managed';
+      if (mode === 'buyer-managed' && !buyerPublicKey.trim()) {
+        throw new Error('Provide a buyer public key when using buyer-managed encryption.');
+      }
       // Build payload in shape backend expects
       const payload = {
         sku_id: skuId,
         buyer_id: buyerEmail || `buyer:${buyerEmail || 'anonymous'}`,
         payment_method: { provider: 'mock', payment_intent: `pi_${uuidv4().slice(0, 8)}` },
         billing_metadata: { company: company || null },
-        delivery_preferences: { encryption: deliveryPref },
+        delivery_preferences:
+          mode === 'buyer-managed'
+            ? {
+                mode,
+                buyer_public_key: buyerPublicKey.trim(),
+                key_identifier: buyerKeyLabel || undefined,
+              }
+            : {
+                mode,
+              },
         order_metadata: { correlation_id: `ui:${Date.now()}` },
       };
 
@@ -90,6 +120,7 @@ export default function CheckoutPage() {
       const ord = res.order as OrderRecord;
       setOrderId(ord.order_id);
       setOrder(ord);
+      rememberOrder(ord.order_id);
       // start polling will pick it up by orderId effect
     } catch (err: any) {
       // eslint-disable-next-line no-console
@@ -114,6 +145,8 @@ export default function CheckoutPage() {
         provider: 'mock',
         status: 'succeeded',
         payment_intent: `pi-sim-${uuidv4().slice(0, 8)}`,
+        amount: order?.amount ?? 0,
+        currency: order?.currency ?? 'USD',
       };
       await api.postPaymentWebhook(webhookPayload);
       // The backend should react to the webhook and update order. Poll will pick it up.
@@ -183,6 +216,28 @@ export default function CheckoutPage() {
             <p className="text-muted text-sm mt-2">
               Buyer-managed keys give the buyer exclusive access; marketplace-ephemeral keys simplify UX.
             </p>
+            {deliveryPref === 'buyer-key' && (
+              <div className="mt-3 space-y-3">
+                <label className="block">
+                  <div className="text-sm font-medium">Buyer public key (PEM)</div>
+                  <textarea
+                    rows={5}
+                    className="mt-1 block w-full rounded-md border px-3 py-2 font-mono text-xs"
+                    placeholder="-----BEGIN PUBLIC KEY-----"
+                    value={buyerPublicKey}
+                    onChange={(e) => setBuyerPublicKey(e.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <div className="text-sm font-medium">Key identifier / label</div>
+                  <input
+                    className="mt-1 block w-full rounded-md border px-3 py-2"
+                    value={buyerKeyLabel}
+                    onChange={(e) => setBuyerKeyLabel(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="mt-6 flex gap-3">
@@ -232,6 +287,24 @@ export default function CheckoutPage() {
                       Simulate payment (dev)
                     </button>
                   </div>
+
+                  {(order?.delivery_mode || order?.key_metadata) && (
+                    <div className="mt-4 text-xs text-muted space-y-1">
+                      <div>
+                        <strong>Delivery mode:</strong> {order?.key_metadata?.mode || order?.delivery_mode || '—'}
+                      </div>
+                      {order?.key_metadata?.buyer_public_key_fingerprint && (
+                        <div>
+                          <strong>Buyer key fingerprint:</strong> {order.key_metadata.buyer_public_key_fingerprint}
+                        </div>
+                      )}
+                      {order?.key_metadata?.kms_key_id && (
+                        <div>
+                          <strong>KMS key:</strong> {order.key_metadata.kms_key_id}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -280,4 +353,3 @@ export default function CheckoutPage() {
     </section>
   );
 }
-

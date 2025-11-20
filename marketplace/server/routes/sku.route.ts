@@ -95,7 +95,7 @@ router.get('/sku/:sku_id', async (req: Request, res: Response) => {
  *
  * Body:
  * {
- *   "manifest": { /* Kernel-signed manifest object */ },
+ *   "manifest": { ... }, // Kernel-signed manifest object
  *   "catalog_metadata": { "categories": ["ml-model"], "visibility": "public", "title": "...", "summary": "...", "price": 19999, "currency":"USD" }
  * }
  */
@@ -180,4 +180,3 @@ router.post('/sku', async (req: Request, res: Response) => {
 });
 
 export default router;
-

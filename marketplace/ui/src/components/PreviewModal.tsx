@@ -4,7 +4,11 @@ import React from 'react';
 import type { PreviewSession } from '@/types';
 
 type Props = {
+  skuId: string | null;
   session: PreviewSession | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
   onClose: () => void;
   onOpenConsole?: (endpoint?: string) => void;
 };
@@ -20,10 +24,18 @@ type Props = {
  * can reuse it (catalog quick-preview, admin debug, etc.).
  */
 
-export default function PreviewModal({ session, onClose, onOpenConsole }: Props) {
-  if (!session) return null;
+export default function PreviewModal({
+  skuId,
+  session,
+  loading,
+  error,
+  onRetry,
+  onClose,
+  onOpenConsole,
+}: Props) {
+  if (!skuId) return null;
 
-  const { session_id, endpoint, expires_at } = session;
+  const { session_id, endpoint, expires_at } = session || {};
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Preview session">
@@ -32,6 +44,7 @@ export default function PreviewModal({ session, onClose, onOpenConsole }: Props)
           <div>
             <h3 className="text-xl font-semibold">Preview Session</h3>
             <p className="text-sm text-muted mt-1">Ephemeral preview environment for SKU testing.</p>
+            <p className="text-xs text-muted mt-1">SKU: <span className="font-mono">{skuId}</span></p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -39,6 +52,20 @@ export default function PreviewModal({ session, onClose, onOpenConsole }: Props)
           </div>
         </div>
 
+        {loading && (
+          <div className="mt-6 text-center text-sm text-muted">
+            Provisioning sandbox… this typically takes a few seconds.
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="mt-6 bg-red-50 text-red-700 text-sm rounded p-3 flex items-center justify-between">
+            <span>{error}</span>
+            <button className="btn-ghost text-xs" onClick={onRetry}>Retry</button>
+          </div>
+        )}
+
+        {!loading && !error && session && (
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <div className="text-sm text-muted">Session ID</div>
@@ -102,15 +129,18 @@ export default function PreviewModal({ session, onClose, onOpenConsole }: Props)
             </div>
           </div>
         </div>
+        )}
 
         <div className="mt-6 text-sm text-muted">
           <p>
             The preview environment runs a deterministic workload in an isolated sandbox. Audit events
             are emitted for session lifecycle (`preview.started`, `preview.completed`, `preview.expired`).
           </p>
+          {!loading && !session && !error && (
+            <p className="mt-2">No session details yet. Use the Retry button to request a new sandbox.</p>
+          )}
         </div>
       </div>
     </div>
   );
 }
-

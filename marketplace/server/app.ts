@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
+import { getMetricsRegistry } from './lib/metrics';
 
 dotenv.config();
 
@@ -31,10 +32,13 @@ app.use(cookieParser());
  * Request ID middleware
  */
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  const requestId = req.header('X-Request-Id') || uuidv4();
-  req.context = { requestId };
-  // Propagate a minimal log-friendly header
-  resSetHeaderSafe(_res, 'X-Request-Id', requestId);
+  const requestId: string = req.header('X-Request-Id') ?? uuidv4();
+  if (!req.context) {
+    req.context = { requestId };
+  } else {
+    req.context.requestId = req.context.requestId || requestId;
+  }
+  resSetHeaderSafe(_res, 'X-Request-Id', req.context.requestId);
   next();
 });
 
@@ -44,7 +48,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
  */
 app.use((req: Request, _res: Response, next: NextFunction) => {
   const idempotencyKey = req.header('Idempotency-Key') || undefined;
-  req.context = { ...(req.context || {}), idempotencyKey };
+  req.context = req.context || { requestId: uuidv4() };
+  req.context.idempotencyKey = idempotencyKey;
   next();
 });
 
@@ -59,7 +64,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
     const token = auth.slice('Bearer '.length).trim();
     // In dev mode we do not validate tokens here. Real validation should occur in route handlers.
     // For audit/trace we attach a best-effort actor id.
-    req.context = { ...(req.context || {}), actorId: `actor:${token.substring(0, 16)}` };
+    req.context = req.context || { requestId: uuidv4() };
+    req.context.actorId = `actor:${token.substring(0, 16)}`;
   }
   next();
 });
@@ -99,6 +105,12 @@ app.get('/ready', async (_req: Request, res: Response) => {
     return res.json({ ok: true, db: true, s3: true, kernel });
   }
   return res.status(500).json({ ok: false, error: { code: 'NOT_READY', message: 'Missing runtime dependencies' } });
+});
+
+const metricsRegistry = getMetricsRegistry();
+app.get('/metrics', async (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', metricsRegistry.contentType);
+  res.send(await metricsRegistry.metrics());
 });
 
 /**
@@ -162,3 +174,10 @@ function resSetHeaderSafe(res: Response, name: string, value: string) {
 
 export default app;
 
+if (require.main === module) {
+  const port = Number(process.env.PORT || 8080);
+  app.listen(port, () => {
+    // eslint-disable-next-line no-console
+    console.log(`[marketplace] listening on http://0.0.0.0:${port}`);
+  });
+}

@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { addSeconds, formatISO } from 'date-fns';
 
 const router = Router();
 
@@ -16,6 +15,15 @@ type PreviewSession = {
 };
 
 const sessions = new Map<string, PreviewSession>();
+
+function addSecondsToDate(date: Date, seconds: number) {
+  return new Date(date.getTime() + seconds * 1000);
+}
+
+function toIso(date: Date | string) {
+  if (typeof date === 'string') return date;
+  return date.toISOString();
+}
 
 /**
  * Helper: attempt to append an audit event if auditWriter exists.
@@ -227,4 +235,3 @@ router.get('/preview/:session_id', async (req: Request, res: Response) => {
 });
 
 export default router;
-

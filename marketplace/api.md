@@ -234,7 +234,11 @@ Body:
   "buyer_id": "user:buyer@example.com",
   "payment_method": { "provider": "stripe", "payment_intent": "pi_..." },
   "billing_metadata": { "company": "Acme" },
-  "delivery_preferences": { "encryption": "buyer-key" },
+  "delivery_preferences": {
+    "mode": "buyer-managed",
+    "buyer_public_key": "-----BEGIN PUBLIC KEY-----...",
+    "key_identifier": "buyer-kms-key-01"
+  },
   "order_metadata": { "correlation_id": "..." }
 }
 ```
@@ -250,7 +254,8 @@ Response:
     "status": "pending",  // pending | paid | settled | failed
     "amount": 19999,
     "currency": "USD",
-    "created_at": "2025-11-17T12:40:00Z"
+    "created_at": "2025-11-17T12:40:00Z",
+    "delivery_mode": "buyer-managed"
   }
 }
 ```
@@ -258,6 +263,9 @@ Response:
 Behavior:
 
 * Creates pending order and reserves SKU availability.
+* Normalizes `delivery_preferences.mode`:
+  * `buyer-managed` — caller supplies `buyer_public_key` (PEM). Marketplace encrypts the delivery key with the buyer key and records fingerprints in `key_metadata`.
+  * `marketplace-managed` — Marketplace generates an ephemeral key using KMS/signing-proxy and stores wrapped ciphertext + signer metadata.
 * Calls Payment Provider asynchronously or via webhook (see payment webhooks).
 * Emits AuditEvent `order.created` with payload and links to manifest.
 
@@ -312,14 +320,37 @@ Response:
 ```json
 {
   "ok": true,
-  "license": {
-    "license_id": "lic-0001",
-    "signed_license": { /* license object + signature */ }
-  },
-  "delivery": {
-    "delivery_id": "delivery-001",
-    "status": "initiated",
-    "encrypted_delivery_url": "s3://encrypted/..."
+  "order": {
+    "order_id": "order-123",
+    "status": "finalized",
+    "license": {
+      "license_id": "lic-0001",
+      "signed_license": { /* license object + signature */ }
+    },
+    "delivery": {
+      "delivery_id": "delivery-001",
+      "status": "ready",
+      "encrypted_delivery_url": "s3://encrypted/proof-abc",
+      "proof_id": "proof-abc",
+      "mode": "buyer-managed",
+      "encryption": {
+        "algorithm": "aes-256-gcm",
+        "encrypted_key": "<base64>",
+        "key_fingerprint": "sha256:abcd...",
+        "key_hint": "buyer-kms-key-01"
+      },
+      "proof": {
+        "proof_id": "proof-abc",
+        "canonical_payload": { /* deterministic payload */ },
+        "signer_kid": "artifact-publisher-signer-v1",
+        "signature": "<base64>"
+      }
+    },
+    "key_metadata": {
+      "mode": "buyer-managed",
+      "buyer_public_key_fingerprint": "sha256:abcd...",
+      "created_at": "2025-11-17T12:45:00Z"
+    }
   }
 }
 ```
@@ -329,6 +360,7 @@ Behavior:
 * Validate ledger proof signature and balanced ledger claim.
 * Create license record and sign license with Marketplace signer (KMS or signing proxy) or delegate to ArtifactPublisher.
 * Record AuditEvents for license issuance and delivery initiation.
+* Persist `key_metadata` describing encryption artifacts (buyer-managed fingerprints or KMS signer references).
 
 #### `GET /order/{order_id}/license`
 
@@ -396,9 +428,15 @@ Response:
     "proof_id": "proof-20251117-001",
     "order_id": "order-123",
     "artifact_sha256": "abcdef...",
+    "delivery_mode": "buyer-managed",
+    "canonical_payload": { "proof_id": "proof-20251117-001", "order_id": "order-123", "ledger_proof_id": "ledger-proof-xyz" },
     "signature": "<base64>",
     "signer_kid": "artifact-publisher-signer-v1",
-    "ts": "2025-11-17T12:35:10Z"
+    "ts": "2025-11-17T12:35:10Z",
+    "key_metadata": {
+      "mode": "buyer-managed",
+      "buyer_public_key_fingerprint": "sha256:abcd..."
+    }
   }
 }
 ```

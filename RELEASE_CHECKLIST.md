@@ -21,12 +21,12 @@
 - [x] Signoff templates (`IDEA/signoffs/security_engineer.sig`) populated with placeholders.
 
 ## Marketplace
-- [ ] Backend checkout + delivery endpoints wired to Finance + signed proof generation.
-- [ ] Sandbox runner + unit/e2e tests passing.
+- [x] Backend checkout + delivery endpoints wired to Finance + signed proof generation.
+- [x] Sandbox runner + unit/e2e tests passing.
 - [ ] Next.js storefront + control-panel with OIDC/dev fallback implemented.
-- [ ] Docs updated (`docs/PRODUCTION.md` for Object Lock + key rotation).
+- [x] Docs updated (`docs/PRODUCTION.md` for Object Lock + key rotation).
 - [ ] Signed proof e2e + checkout acceptance tests green in CI workflow.
-- [ ] Signoff templates (security, finance lead, Ryan) committed.
+- [x] Signoff templates (security, finance lead, Ryan) committed.
 
 ## Finance
 - [ ] Ledger endpoints (`/ledger/post`, `/settlement`, `/proofs/*`) enforcing double-entry invariants.

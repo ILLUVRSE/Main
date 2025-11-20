@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import crypto from 'crypto';
+import { buildFulfillmentArtifacts } from '../lib/fulfillment';
+import { persistProof } from '../lib/proofStore';
+import { DeliveryMode, DeliveryPreferences } from '../lib/deliveryEncryption';
 
 const router = Router();
 
@@ -19,6 +20,10 @@ type OrderRecord = {
   license?: any;
   ledger_proof_id?: string;
   payment?: any;
+  delivery_mode?: DeliveryMode | string;
+  delivery_preferences?: DeliveryPreferences;
+  order_metadata?: Record<string, any>;
+  key_metadata?: any;
 };
 
 /**
@@ -40,7 +45,7 @@ function getDb(): any | null {
 async function loadOrder(orderId: string): Promise<OrderRecord | null> {
   const db = getDb();
   if (db && typeof db.query === 'function') {
-    const q = `SELECT order_id, sku_id, buyer_id, amount, currency, status, created_at, delivery, license, ledger_proof_id, payment
+    const q = `SELECT order_id, sku_id, buyer_id, amount, currency, status, created_at, delivery, license, ledger_proof_id, payment, delivery_mode, delivery_preferences, order_metadata, key_metadata
     FROM orders WHERE order_id = $1 LIMIT 1`;
     const r = await db.query(q, [orderId]);
     if (r && r.rows && r.rows[0]) {
@@ -57,6 +62,10 @@ async function loadOrder(orderId: string): Promise<OrderRecord | null> {
         license: row.license,
         ledger_proof_id: row.ledger_proof_id,
         payment: row.payment,
+        delivery_mode: row.delivery_mode,
+        delivery_preferences: row.delivery_preferences,
+        order_metadata: row.order_metadata,
+        key_metadata: row.key_metadata,
       } as OrderRecord;
     }
     return null;
@@ -83,9 +92,18 @@ async function loadOrder(orderId: string): Promise<OrderRecord | null> {
 async function persistOrder(order: OrderRecord) {
   const db = getDb();
   if (db && typeof db.query === 'function') {
-    const q = `INSERT INTO orders (order_id, sku_id, buyer_id, amount, currency, status, created_at, payment, delivery, license, ledger_proof_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      ON CONFLICT (order_id) DO UPDATE SET status=EXCLUDED.status, payment=EXCLUDED.payment, delivery=EXCLUDED.delivery, license=EXCLUDED.license, ledger_proof_id=EXCLUDED.ledger_proof_id`;
+    const q = `INSERT INTO orders (order_id, sku_id, buyer_id, amount, currency, status, created_at, payment, delivery, license, ledger_proof_id, delivery_mode, delivery_preferences, order_metadata, key_metadata)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      ON CONFLICT (order_id) DO UPDATE SET
+        status=EXCLUDED.status,
+        payment=EXCLUDED.payment,
+        delivery=EXCLUDED.delivery,
+        license=EXCLUDED.license,
+        ledger_proof_id=EXCLUDED.ledger_proof_id,
+        delivery_mode=EXCLUDED.delivery_mode,
+        delivery_preferences=EXCLUDED.delivery_preferences,
+        order_metadata=EXCLUDED.order_metadata,
+        key_metadata=EXCLUDED.key_metadata`;
     const params = [
       order.order_id,
       order.sku_id,
@@ -98,6 +116,10 @@ async function persistOrder(order: OrderRecord) {
       order.delivery || null,
       order.license || null,
       order.ledger_proof_id || null,
+      order.delivery_mode || null,
+      order.delivery_preferences || null,
+      order.order_metadata || null,
+      order.key_metadata || null,
     ];
     await db.query(q, params);
     return;
@@ -167,56 +189,9 @@ async function verifyLedgerProofWithFinance(ledgerProof: any): Promise<boolean> 
  * Produce license/delivery/proof either via artifactPublisherClient or synthesize.
  */
 async function produceArtifacts(order: OrderRecord, ledgerProof: any) {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const apMod = require('../lib/artifactPublisherClient');
-    const apClient = apMod && (apMod.default || apMod);
-    if (apClient && typeof apClient.publishDelivery === 'function') {
-      return await apClient.publishDelivery({
-        orderId: order.order_id,
-        skuId: order.sku_id,
-        buyerId: order.buyer_id,
-        ledgerProof,
-      });
-    }
-  } catch {
-    // ignore and synthesize
-  }
-
-  // Synthesize license + delivery + proof
-  const licenseId = `lic-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const license = {
-    license_id: licenseId,
-    order_id: order.order_id,
-    sku_id: order.sku_id,
-    buyer_id: order.buyer_id,
-    scope: { type: 'single-user', expires_at: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString() },
-    issued_at: new Date().toISOString(),
-    signer_kid: process.env.MARKETPLACE_SIGNER_KID || 'marketplace-signer-v1',
-    signature: Buffer.from(`license:${licenseId}`).toString('base64'),
-  };
-
-  const artifactSha256 = crypto.createHash('sha256').update(order.order_id + order.sku_id).digest('hex');
-  const proofId = `proof-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const proof = {
-    proof_id: proofId,
-    order_id: order.order_id,
-    artifact_sha256: artifactSha256,
-    manifest_signature_id: `manifest-sig-${Math.random().toString(36).slice(2, 6)}`,
-    ledger_proof_id: ledgerProof?.ledger_proof_id || ledgerProof?.ledgerProofId || `ledger-sim-${Date.now()}`,
-    signer_kid: process.env.ARTIFACT_PUBLISHER_SIGNER_KID || 'artifact-publisher-signer-v1',
-    signature: Buffer.from(`proof:${proofId}`).toString('base64'),
-    ts: new Date().toISOString(),
-  };
-
-  const delivery = {
-    delivery_id: `delivery-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    status: 'ready',
-    encrypted_delivery_url: `s3://encrypted/${proof.proof_id}`,
-    proof_id: proof.proof_id,
-  };
-
-  return { license, delivery, proof };
+  const artifacts = await buildFulfillmentArtifacts(order, ledgerProof, order.delivery_preferences);
+  await persistProof(artifacts.proof);
+  return artifacts;
 }
 
 /**
@@ -287,6 +262,7 @@ router.post('/order/:order_id/finalize', async (req: Request, res: Response) => 
     const artifacts = await produceArtifacts(order, ledgerProof);
     order.license = artifacts.license;
     order.delivery = artifacts.delivery;
+    order.key_metadata = artifacts.keyMetadata;
     // we may want to persist proof separately; place proof under delivery or return it via /proofs endpoint
     order.status = 'finalized';
     await persistOrder(order);
@@ -296,6 +272,7 @@ router.post('/order/:order_id/finalize', async (req: Request, res: Response) => 
       license_id: artifacts.license?.license_id,
       delivery_id: artifacts.delivery?.delivery_id,
       proof_id: artifacts.proof?.proof_id || artifacts.delivery?.proof_id,
+      delivery_mode: order.delivery_mode,
     });
 
     return res.json({
@@ -306,6 +283,7 @@ router.post('/order/:order_id/finalize', async (req: Request, res: Response) => 
         license: order.license,
         delivery: order.delivery,
         ledger_proof_id: order.ledger_proof_id,
+        key_metadata: order.key_metadata,
       },
     });
   } catch (err: any) {
@@ -383,4 +361,3 @@ router.get('/order/:order_id/audit', async (req: Request, res: Response) => {
 });
 
 export default router;
-

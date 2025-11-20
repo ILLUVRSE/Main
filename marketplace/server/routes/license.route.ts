@@ -8,7 +8,7 @@ const router = Router();
  *
  * Body:
  * {
- *   "license": { /* signed license object (signed_license) */ },
+ *   "license": { ... }, // signed license object (signed_license)
  *   "expected_buyer_id": "user:buyer@example.com"
  * }
  *
@@ -91,4 +91,3 @@ router.post('/license/verify', async (req: Request, res: Response) => {
 });
 
 export default router;
-

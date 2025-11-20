@@ -1,4 +1,5 @@
 import { test, expect, APIRequestContext } from '@playwright/test';
+import crypto from 'crypto';
 
 const BASE = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3000';
 const FETCH_TIMEOUT = 30_000;
@@ -33,12 +34,14 @@ test('playwright smoke: checkout -> payment webhook -> finalize -> license + pro
 
   // 2) Create checkout
   const idempotencyKey = `playwright-e2e-${Date.now()}`;
+  const { publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const buyerPublicKey = publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const checkoutBody = {
     sku_id: 'e2e-sku-001',
     buyer_id: 'user:playwright@example.com',
     payment_method: { provider: 'mock', payment_intent: `pi-${Date.now()}` },
     billing_metadata: { company: 'Playwright Inc' },
-    delivery_preferences: { encryption: 'buyer-key' },
+    delivery_preferences: { mode: 'buyer-managed', buyer_public_key: buyerPublicKey, key_identifier: 'playwright' },
     order_metadata: { correlation_id: `corr-${Date.now()}` },
   };
 
@@ -115,4 +118,3 @@ test('playwright smoke: checkout -> payment webhook -> finalize -> license + pro
   expect(licenseJson.license).toBeTruthy();
   expect(licenseJson.license.signed_license || licenseJson.license.signature).toBeTruthy();
 });
-

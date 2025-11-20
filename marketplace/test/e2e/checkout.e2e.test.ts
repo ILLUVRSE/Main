@@ -16,6 +16,7 @@
  */
 
 import { test, expect } from 'vitest';
+import crypto from 'crypto';
 
 const BASE = process.env.MARKETPLACE_BASE_URL ?? 'http://127.0.0.1:3000';
 const FETCH_TIMEOUT = 30_000;
@@ -59,12 +60,14 @@ async function pollOrderStatus(orderId: string, desired: string, timeoutMs = POL
 test('checkout -> payment webhook -> finalize -> license + proof', async () => {
   // 1) Create a deterministic checkout request
   const idempotencyKey = `e2e-${Date.now()}`;
+  const { publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const buyerPublicKey = publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const checkoutBody = {
     sku_id: 'e2e-sku-001',
     buyer_id: 'user:e2e-buyer@example.com',
     payment_method: { provider: 'mock', payment_intent: `pi-${Date.now()}` },
     billing_metadata: { company: 'E2E Co.' },
-    delivery_preferences: { encryption: 'buyer-key' },
+    delivery_preferences: { mode: 'buyer-managed', buyer_public_key: buyerPublicKey, key_identifier: 'e2e-buyer' },
     order_metadata: { correlation_id: `corr-${Date.now()}` },
   };
 
@@ -123,6 +126,8 @@ test('checkout -> payment webhook -> finalize -> license + proof', async () => {
   expect(orderJson.ok).toBe(true);
   const fetchedOrder = orderJson.order;
   expect(['settled', 'paid', 'finalized']).toContain(String(fetchedOrder.status).toLowerCase());
+  expect(fetchedOrder.delivery_mode).toBe('buyer-managed');
+  expect(fetchedOrder.key_metadata).toBeTruthy();
 
   // 5) If delivery proof present, verify license + proof endpoints
   if (fetchedOrder.delivery && fetchedOrder.delivery.proof_id) {
@@ -162,4 +167,3 @@ test('checkout -> payment webhook -> finalize -> license + proof', async () => {
     throw new Error(`License verification failed: ${JSON.stringify(verifyJson)}`);
   }
 }, 120_000); // generous timeout for e2e
-

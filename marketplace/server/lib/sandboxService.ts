@@ -191,7 +191,10 @@ const sandboxService = {
     // Fire-and-forget: run the simulated job immediately (dev-only synchronous run)
     (async () => {
       try {
-        const result = await jobService.runJobOnce(job.id);
+        const result: any = await jobService.runJobOnce(job.id);
+        if (!result) {
+          throw new Error('jobService.runJobOnce returned null');
+        }
         const success = result.status === 'succeeded';
         const output = `Job ${result.id} finished with status ${result.status}`;
         // update sandbox lastRunResult
@@ -260,4 +263,3 @@ const sandboxService = {
 };
 
 export default sandboxService;
-

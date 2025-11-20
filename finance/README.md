@@ -22,6 +22,9 @@ All files for Finance live under:
    * Export formats for auditors and reconciliation tooling.  
    * Integration points for Marketplace (orders), Payment Provider (Stripe), and Payout orchestration.
 
+## # Local orchestration
+Run `./finance/run-local.sh` to spin up the express-based mock Finance API (`finance/mock/financeMockServer.js`) along with an optional disposable Postgres container (`START_POSTGRES=true`) for workflows that need a backing DB; the script writes the mock PID to `/tmp/finance-run-local.pid`, exposes the service on `http://127.0.0.1:8050`, and accepts `teardown` to stop anything it started so Marketplace E2E and CI pipelines can reuse the same tooling without touching production code. For audit chores, feed proof JSON + PEM files into `node finance/tools/verify_proof.js --proof <file> --public-key <pem>` to ensure the recorded signatures verify before handing artifacts to auditors.
+
 ## # Security & governance
 - Finance must run in a high-trust isolated environment.  
 - Use KMS/HSM for signing ledger proofs and never export private keys.  
@@ -37,4 +40,3 @@ Finance is accepted when ledger integrity and settlement flows are proven: balan
 
 ## # Next single step
 Create `deployment.md` describing the isolated topology, DB encryption, signing proxy details, and reconciliation/export tooling. When ready, reply **“next-finance”** and I’ll produce the file.
-

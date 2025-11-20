@@ -1,0 +1,62 @@
+{
+  "projects": [
+    {
+      "id": "project-lighthouse",
+      "slug": "lighthouse-overture",
+      "name": "Lighthouse Overture",
+      "summary": "An editorial metaverse drop exploring orbital guardianship with living manifests.",
+      "description": "Lighthouse Overture is a multimedia manifest that braids sound, interactive data, and luminous telemetry into a single living collectible. It ships with Kernel-audited proofs, Synapse preview flows, and a dynamic royalty map for downstream collaborations.",
+      "category": "Editorial",
+      "status": "preview",
+      "price": 6400,
+      "currency": "USD",
+      "badges": ["featured", "kernel-ready"],
+      "thumbnail": "/brand/hero-composite.png",
+      "heroImage": "/brand/hero-composite.png",
+      "manifestUrl": "https://mock.illuvrse.dev/manifests/lighthouse-overture.json",
+      "metrics": { "edition": 27, "collectors": 1280 },
+      "assets": [
+        { "name": "Hero render", "url": "https://mock.illuvrse.dev/assets/lighthouse/hero.png" },
+        { "name": "Telemetry patch", "url": "https://mock.illuvrse.dev/assets/lighthouse/telemetry.mp4" }
+      ],
+      "manifest": {
+        "name": "Lighthouse Overture",
+        "version": "1.0.2",
+        "license": "ILLUVRSE-CREATOR-2025",
+        "checksum": "sha256-9a7b2c1714e90f67a9d6ea1",
+        "author": "Illuvrse Studios",
+        "artifacts": [
+          { "type": "image/png", "path": "hero.png", "size": 5242880 },
+          { "type": "video/mp4", "path": "telemetry.mp4", "size": 28991012 }
+        ]
+      }
+    },
+    {
+      "id": "project-sentinel",
+      "slug": "sentinel-prisms",
+      "name": "Sentinel Prisms",
+      "summary": "A batch of three prisms that react to Kernel audit events in real time.",
+      "description": "Sentinel Prisms visualize the inner life of a Kernel-audited supply chain. Each prism is minted with bi-directional manifests so collectors can replay the signing moment inside their own vault.",
+      "category": "Data Sculpture",
+      "status": "draft",
+      "price": 3200,
+      "currency": "USD",
+      "badges": ["limited"],
+      "thumbnail": "/brand/logo-mark.png",
+      "heroImage": "/brand/logo-mark.png",
+      "manifestUrl": "https://mock.illuvrse.dev/manifests/sentinel-prisms.json",
+      "metrics": { "edition": 3, "collectors": 48 },
+      "assets": [
+        { "name": "Prism render", "url": "https://mock.illuvrse.dev/assets/sentinel/prism.png" }
+      ],
+      "manifest": {
+        "name": "Sentinel Prisms",
+        "version": "0.9.0",
+        "license": "ILLUVRSE-CREATOR-2025",
+        "checksum": "sha256-a81cbff9de6e12b625ac",
+        "author": "Illuvrse Studios",
+        "artifacts": [{ "type": "image/png", "path": "prism.png", "size": 2097152 }]
+      }
+    }
+  ]
+}

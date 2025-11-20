@@ -1,212 +1,71 @@
-import type {
-  CatalogResponse,
-  KernelManifest,
-  OrderRecord,
-  PreviewSession,
-  Proof,
-} from '@/types';
+import { Project, ProjectPreview, SignResponse } from '@/types/project';
 
-export function setAuthToken(token?: string) {
-  if (typeof window === 'undefined') return;
-  if (token) localStorage.setItem('illuvrse.authToken', token);
-  else localStorage.removeItem('illuvrse.authToken');
-}
+const DEFAULT_API_BASE = 'http://localhost:4001';
 
-export function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('illuvrse.authToken');
-}
-
-type RequestOptions = RequestInit & {
-  idempotencyKey?: string;
-  skipAuth?: boolean;
-};
-
-function resolveBaseUrl() {
-  const envBase =
-    process.env.NEXT_PUBLIC_MARKETPLACE_API_URL ||
-    process.env.MARKETPLACE_API_URL ||
-    '';
-  return envBase.replace(/\/$/, '');
-}
+const API_BASE =
+  (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL)?.replace(/\/$/, '') || DEFAULT_API_BASE;
 
 function buildUrl(path: string) {
-  if (/^https?:\/\//i.test(path)) return path;
-  const base = resolveBaseUrl();
-  if (!base) {
-    return path.startsWith('/') ? path : `/${path}`;
-  }
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${base}${normalizedPath}`;
+  if (/^https?:\/\//.test(path)) return path;
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE}${normalized}`;
 }
 
-async function request<T = any>(
-  path: string,
-  options: RequestOptions = {}
-): Promise<T> {
-  const url = buildUrl(path);
-  const headers = new Headers(options.headers || {});
-
-  if (!options.skipAuth) {
-    const token = getAuthToken();
-    if (token && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
-  }
-
-  if (options.idempotencyKey) {
-    headers.set('Idempotency-Key', options.idempotencyKey);
-  }
-
-  if (
-    !(options.body instanceof FormData) &&
-    !headers.has('Content-Type')
-  ) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const res = await fetch(url, {
-    ...options,
-    headers,
-    credentials: options.credentials ?? 'include',
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(buildUrl(path), {
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+      ...init?.headers,
+    },
+    ...init,
   });
 
-  if (!res.ok) {
-    let message = res.statusText;
-    try {
-      const errJson = await res.json();
-      message =
-        errJson?.error?.message ||
-        errJson?.message ||
-        JSON.stringify(errJson);
-    } catch {
-      try {
-        message = await res.text();
-      } catch {
-        // ignore
-      }
-    }
-    throw new Error(message || `Request failed (${res.status})`);
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`API ${response.status}: ${errorBody}`);
   }
 
-  if (res.status === 204) return null as T;
-
-  const text = await res.text();
-  if (!text) return null as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return text as T;
-  }
+  return response.json() as Promise<T>;
 }
 
-export async function apiFetch(input: RequestInfo, init: RequestInit = {}) {
-  return request(input as string, init);
+export function listProjects(): Promise<Project[]> {
+  return request('/api/projects');
 }
 
-function buildQuery(params: Record<string, any> = {}) {
-  const search = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '') return;
-    search.set(key, String(value));
-  });
-  const qs = search.toString();
-  return qs ? `?${qs}` : '';
+export function getProject(id: string): Promise<Project> {
+  return request(`/api/projects/${id}`);
 }
 
-async function getCatalog(
-  params: Record<string, any> = {}
-): Promise<CatalogResponse> {
-  return request(`/catalog${buildQuery(params)}`, { skipAuth: true });
+export function previewProject(id: string): Promise<ProjectPreview> {
+  return request(`/api/projects/${id}/preview`, { method: 'POST' });
 }
 
-async function getSku(skuId: string) {
-  return request(`/sku/${encodeURIComponent(skuId)}`, { skipAuth: true });
-}
-
-async function startPreview(
-  skuId: string,
-  payload: Record<string, any> = {}
-): Promise<PreviewSession> {
-  const res = await request(`/sku/${encodeURIComponent(skuId)}/preview`, {
+export function requestSign(id: string): Promise<SignResponse> {
+  return request('/api/kernel/sign', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ projectId: id }),
   });
-  return (res?.session || res) as PreviewSession;
 }
 
-async function postCheckout(
-  payload: Record<string, any>,
-  opts: { idempotencyKey?: string } = {}
-) {
-  return request('/checkout', {
+export function postLicenseVerify(license: unknown, expectedBuyerId?: string) {
+  return request('/api/licenses/verify', {
     method: 'POST',
-    body: JSON.stringify(payload),
-    idempotencyKey: opts.idempotencyKey,
+    body: JSON.stringify({ license, expectedBuyerId }),
   });
 }
 
-async function postPaymentWebhook(payload: Record<string, any>) {
-  return request('/webhooks/payment', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    skipAuth: true,
-  });
-}
-
-async function getOrder(orderId: string): Promise<{ order: OrderRecord }> {
-  return request(`/order/${encodeURIComponent(orderId)}`);
-}
-
-async function getProof(proofId: string): Promise<{ proof: Proof }> {
-  return request(`/proofs/${encodeURIComponent(proofId)}`);
-}
-
-async function getLicense(orderId: string) {
-  return request(`/order/${encodeURIComponent(orderId)}/license`);
-}
-
-async function postLicenseVerify(
-  license: any,
-  expectedBuyerId?: string
-): Promise<{ verified: boolean }> {
-  return request('/license/verify', {
-    method: 'POST',
-    body: JSON.stringify({
-      license,
-      expected_buyer_id: expectedBuyerId,
-    }),
-  });
-}
-
-async function postSku(
-  manifest: KernelManifest,
-  catalogMetadata: Record<string, any>,
-  operatorToken?: string
-) {
-  const headers: HeadersInit = {};
-  if (operatorToken) headers['Authorization'] = `Bearer ${operatorToken}`;
-  return request('/sku', {
-    method: 'POST',
-    body: JSON.stringify({
-      manifest,
-      catalog_metadata: catalogMetadata,
-    }),
-    headers,
-  });
+export function getProof(proofId: string) {
+  return request(`/api/proofs/${proofId}`);
 }
 
 const api = {
-  getCatalog,
-  getSku,
-  startPreview,
-  postCheckout,
-  postPaymentWebhook,
-  getOrder,
-  getProof,
-  getLicense,
+  listProjects,
+  getProject,
+  previewProject,
+  requestSign,
   postLicenseVerify,
-  postSku,
+  getProof,
 };
 
 export default api;

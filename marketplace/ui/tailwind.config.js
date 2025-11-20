@@ -1,5 +1,9 @@
+require('ts-node/register');
+const { tokens } = require('./src/styles/tokens');
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  important: true,
   content: [
     // Next.js app router + src
     './app/**/*.{js,ts,jsx,tsx}',
@@ -11,26 +15,58 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // convenience mapping to your tokens (you still use CSS tokens)
-        illuvrse: {
-          500: '#1C8174',
-          600: '#0F7466',
-          700: '#0C5B4F',
-        },
-        gold: {
-          DEFAULT: '#E2B443',
-        },
+        primary: tokens.colors.primary,
+        'primary-light': tokens.colors.primaryLight,
+        'primary-dark': tokens.colors.primaryDark,
+        accent: tokens.colors.accentGold,
+        'accent-dark': tokens.colors.accentGoldDark,
+        background: tokens.colors.backgroundLight,
+        'background-dark': tokens.colors.backgroundDark,
+        glow: tokens.colors.glow,
+        text: tokens.colors.text,
+        'text-muted': tokens.colors.textMuted,
+        outline: tokens.colors.outline,
+        surface: tokens.colors.surface,
+        'surface-elevated': tokens.colors.surfaceElevated,
       },
       boxShadow: {
-        // allows `shadow-illuvrse-soft` to be used via @apply in your CSS
-        'illuvrse-soft': 'var(--card-shadow)',
+        card: tokens.shadows.card,
+        header: tokens.shadows.header,
+        focus: tokens.shadows.focus,
       },
       fontFamily: {
-        heading: ['"Playfair Display"', 'Georgia', 'Times New Roman', 'serif'],
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto'],
+        heading: tokens.typography.fonts.heading
+          .split(',')
+          .map((part) => part.trim().replace(/^"|"$/g, '')),
+        sans: tokens.typography.fonts.body
+          .split(',')
+          .map((part) => part.trim().replace(/^"|"$/g, '')),
+        accent: tokens.typography.fonts.accent
+          .split(',')
+          .map((part) => part.trim().replace(/^"|"$/g, '')),
+      },
+      fontSize: {
+        xs: tokens.typography.sizes.xs,
+        sm: tokens.typography.sizes.sm,
+        base: tokens.typography.sizes.md,
+        lg: tokens.typography.sizes.lg,
+        xl: tokens.typography.sizes.xl,
+        '2xl': tokens.typography.sizes['2xl'],
+        '3xl': tokens.typography.sizes['3xl'],
+        display: tokens.typography.sizes.display,
+        hero: tokens.typography.sizes.hero,
+      },
+      spacing: tokens.spacing,
+      borderRadius: tokens.radii,
+      container: {
+        center: true,
+        padding: {
+          DEFAULT: tokens.spacing.md,
+          lg: tokens.spacing.lg,
+          xl: tokens.spacing.xl,
+        },
       },
     },
   },
   plugins: [],
 };
-

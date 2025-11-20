@@ -6,8 +6,13 @@ import type { License } from '@/types';
 
 // Mock the API module used by LicenseCard
 vi.mock('@/lib/api', () => {
-  return {
+  const mock = {
     postLicenseVerify: vi.fn(),
+  };
+  return {
+    __esModule: true,
+    default: mock,
+    ...mock,
   };
 });
 import api from '@/lib/api';
@@ -42,7 +47,7 @@ describe('LicenseCard', () => {
 
     expect(screen.getByText('License')).toBeInTheDocument();
     expect(screen.getByText(sampleLicense.license_id)).toBeInTheDocument();
-    expect(screen.getByText(/Buyer:/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Buyer:/i)[0]).toBeInTheDocument();
     expect(screen.getByText(sampleLicense.buyer_id)).toBeInTheDocument();
 
     // Verify buttons present
@@ -89,4 +94,3 @@ describe('LicenseCard', () => {
     });
   });
 });
-

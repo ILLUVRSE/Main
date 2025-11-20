@@ -48,29 +48,47 @@ IDEA/
 ---
 
 ## Developer quick start (local)
-Requirements: Node 18+, npm, docker (for sandbox), and access to a local or staging Kernel mock for signing.
+Requirements: Node 18+, npm, Docker, and access to a Kernel mock (provided).
 
 ```bash
-# install dependencies
-npm ci --prefix IDEA
+# install IDEA service dependencies (Fastify API + tests)
+(cd IDEA/service && npm install)
 
-# run local Kernel mock and services (example orchestrator)
-# (This repo may provide a helper script: IDEA/scripts/run-local.sh)
-./IDEA/scripts/run-local.sh
+# boot full local stack (Postgres + MinIO + signing proxy mock + IDEA API)
+IDEA/scripts/run-local.sh
+# logs live at /tmp/idea-service.log
 
-# submit a package (example)
-curl -X POST http://localhost:8200/packages/submit \
-  -H "Content-Type: application/json" \
-  -d '{
-    "package_name":"demo-product",
-    "version":"0.1.0",
-    "artifact_s3_key":"s3://local/pack-1.tar.gz",
-    "metadata":{"owner":"alice"}
-  }'
+# smoke test: submit + complete package
+curl -sS -X POST http://127.0.0.1:6060/packages/submit \
+  -H 'content-type: application/json' \
+  -H 'x-actor-id: dev-creator' \
+  -d '{"package_name":"demo","version":"0.1.0","metadata":{"owner":"alice"}}'
 
-# trigger manifest creation and request kernel signing (server-side step):
-# IDEA will call Kernel via mTLS, so ensure Kernel mock is running and DEV_SKIP_MTLS=true for dev or proper certs for mTLS.
+# multisig e2e (requires run-local stack + Kernel mock)
+IDEA/scripts/e2e_multisig.sh
+
+# validate artifact before upload
+IDEA/scripts/validate_package.js ./path/to/artifact.tgz
+
+# run tests (pg-mem in-memory database)
+(cd IDEA/service && npm test)
 ````
+
+## IDEA API service layout
+```
+IDEA/service
+├─ package.json          # Fastify service + vitest scripts
+├─ src/
+│  ├─ routes/            # packages, manifests, publish
+│  ├─ lib/               # S3, Kernel client, audit bridge
+│  └─ plugins/           # auth + metrics
+├─ test/                 # unit, contract, integration suites
+└─ scripts/migrate.ts    # bootstraps Postgres schema (pg or pg-mem)
+```
+- Start via `npm run dev` (uses tsx).  
+- Production build: `npm run build && npm start`.  
+- Environment: `IDEA_DATABASE_URL`, `IDEA_S3_BUCKET`, `SIGNING_PROXY_URL` (or `KMS_KEY_ID`), `AUTH_JWT_SECRET`.  
+- Metrics exposed at `/metrics` (Prometheus).
 
 ---
 

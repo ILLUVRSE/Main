@@ -2,6 +2,6 @@
   "name": "codex-local",
   "private": true,
   "version": "0.1.0",
-  "workspaces": [ "server", "web" ],
+  "workspaces": [ "server", "web", "service" ],
   "packageManager": "pnpm@9.0.0"
 }

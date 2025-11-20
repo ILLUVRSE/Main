@@ -167,7 +167,7 @@ function parseSignerRegistry(registryInput) {
   const map = new Map();
   entries.forEach((entry, idx) => {
     if (!entry) return;
-    let signerId = entry.signerId || entry.signer_id || entry.id || entry.kid;
+    let signerId = entry.signerId || entry.signer_id || entry.signer_kid || entry.id || entry.kid;
     if (!signerId && typeof idx === 'number') {
       throw new Error(`Signer entry at index ${idx} is missing signerId`);
     }

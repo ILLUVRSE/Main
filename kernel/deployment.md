@@ -42,6 +42,21 @@ Diagram:
 - Kernel should call a signing proxy or KMS over mTLS; CI must enforce `REQUIRE_KMS=true` for protected branches.
 - Signing flow must be atomic with audit append: compute canonical payload → compute hash → request signature → append event to audit topic and durable sink.
 - Public keys and signer metadata must be published at `/kernel/security/status` or Key Registry.
+- Signer registry format (`kernel/tools/signers.json`):
+  ```json
+  {
+    "signers": [
+      {
+        "signer_kid": "kernel-audit-ed25519-v1",
+        "algorithm": "ed25519",
+        "public_key_pem": "-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----",
+        "deployedAt": "2025-02-24T00:00:00Z",
+        "description": "Primary staging signer"
+      }
+    ]
+  }
+  ```
+  Update this file via `scripts/update-signers-from-kms.sh` and re-run `node kernel/tools/audit-verify.js --signers kernel/tools/signers.json` after every rotation.
 
 5) Audit pipeline & storage
 ---------------------------

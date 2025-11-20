@@ -12,8 +12,9 @@
 
 import fs from 'fs';
 import path from 'path';
-import { test, expect, beforeAll } from 'vitest';
+import { test, expect, beforeAll, describe } from 'vitest';
 import { vi } from 'vitest';
+import { buildPreviewTokens } from '../../sandbox/previewServer';
 
 const MODULE_REL_PATH = path.resolve(__dirname, '../../sandbox/sandboxRunner'); // marketplace/sandbox/sandboxRunner.{js,ts}
 
@@ -173,3 +174,17 @@ if (!runnerAvailable) {
   }, 10_000);
 }
 
+describe('preview sandbox token builder', () => {
+  test('produces deterministic sequences per combination', () => {
+    const base = { skuId: 'deterministic', input: 'hello world', versionId: 'v1' };
+    const tokensA = buildPreviewTokens(base);
+    const tokensB = buildPreviewTokens(base);
+    expect(tokensA).toEqual(tokensB);
+  });
+
+  test('produces distinct sequences when inputs change', () => {
+    const tokensA = buildPreviewTokens({ skuId: 'alpha', input: 'one' });
+    const tokensB = buildPreviewTokens({ skuId: 'alpha', input: 'two' });
+    expect(tokensA).not.toEqual(tokensB);
+  });
+});

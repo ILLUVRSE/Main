@@ -10,10 +10,12 @@ import {
   fetchReasoningTrace,
   fetchSentinelVerdict,
   getUpgrade,
+  rejectUpgrade,
 } from "../../../lib/kernelClient";
 import type { AuditEvent, ReasoningTraceNode, Upgrade } from "../../../lib/types";
 import { useSession } from "../../../lib/auth/client";
 import { signApproval } from "../../../lib/signingProxy";
+import { StatusBadge } from "@/components/StatusBadge";
 
 export default function UpgradeDetailPage() {
   const params = useParams<{ upgradeId: string }>();
@@ -26,10 +28,12 @@ export default function UpgradeDetailPage() {
   const [notes, setNotes] = useState("");
   const [ratificationNotes, setRatificationNotes] = useState("");
   const [emergencyReason, setEmergencyReason] = useState("");
+  const [rejectNotes, setRejectNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [ratifying, setRatifying] = useState(false);
   const [annotation, setAnnotation] = useState("");
   const [selectedNode, setSelectedNode] = useState<string>("");
@@ -241,6 +245,21 @@ export default function UpgradeDetailPage() {
               </div>
             )}
           </div>
+          <div className="space-y-2 border-t pt-3">
+            <textarea
+              value={rejectNotes}
+              onChange={(e) => setRejectNotes(e.target.value)}
+              placeholder="Rejection reason"
+              className="w-full text-sm border rounded px-3 py-2"
+            />
+            <button
+              onClick={handleReject}
+              disabled={rejecting}
+              className="w-full border border-red-200 text-red-700 px-4 py-2 rounded text-sm disabled:opacity-60"
+            >
+              {rejecting ? "Rejecting…" : "Reject upgrade"}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -376,17 +395,18 @@ export default function UpgradeDetailPage() {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: "bg-yellow-100 text-yellow-800",
-    active: "bg-blue-100 text-blue-800",
-    applied: "bg-green-100 text-green-800",
-    failed: "bg-red-100 text-red-800",
-    rejected: "bg-gray-200 text-gray-700",
-  };
-  return (
-    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[status] || "bg-gray-100 text-gray-600"}`}>
-      {status}
-    </span>
-  );
-}
+  async function handleReject() {
+    if (!upgrade || !session) return;
+    setRejecting(true);
+    try {
+      await rejectUpgrade(upgrade.id, { approverId: session.sub, notes: rejectNotes });
+      setRejectNotes("");
+      setUpgrade(await getUpgrade(upgrade.id));
+      setError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Reject failed";
+      setError(message);
+    } finally {
+      setRejecting(false);
+    }
+  }

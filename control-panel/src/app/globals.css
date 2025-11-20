@@ -3,13 +3,15 @@
 @tailwind utilities;
 
 /* minimal global styles (no @apply) */
-:root { color-scheme: light; }
+:root { color-scheme: light dark; }
 
 html, body, #__next { height: 100%; margin: 0; padding: 0; }
 
 body {
-  background-color: #f9fafb; /* equivalent to bg-gray-50 */
-  color: #111827;            /* equivalent to text-gray-900 */
+  background: radial-gradient(circle at 20% 20%, rgba(99,102,241,0.08), transparent 45%),
+              radial-gradient(circle at 80% 0%, rgba(14,165,233,0.08), transparent 55%),
+              #f4f5f7;
+  color: #111827;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

@@ -142,6 +142,13 @@ export async function approveUpgrade(upgradeId: string, payload: { approverId: s
   });
 }
 
+export async function rejectUpgrade(upgradeId: string, payload: { approverId: string; notes?: string }) {
+  return apiFetch(`/upgrades/${upgradeId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function applyUpgrade(upgradeId: string, payload: { emergency?: boolean; rationale?: string }) {
   return apiFetch(`/upgrades/${upgradeId}/apply`, {
     method: "POST",

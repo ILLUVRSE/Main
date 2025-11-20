@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "playwright:test": "playwright test"
   },
   "dependencies": {
     "js-cookie": "^3.0.5",
@@ -17,6 +18,7 @@
     "react-dom": "19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",

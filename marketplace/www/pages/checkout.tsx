@@ -282,7 +282,7 @@ export default function CheckoutPage() {
               )}
 
               {step === "success" && (
-                <div className="space-y-4 text-center text-slate-200">
+                <div className="space-y-4 text-center text-slate-200" data-testid="checkout-success">
                   <p className="text-3xl font-semibold text-white">Order ready</p>
                   <p>We recorded your manifest request and delivery proof pipeline is warming up.</p>
                   {orderId && (

@@ -9,7 +9,7 @@ const customConfig = {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
   collectCoverageFrom: ["src/**/*.{ts,tsx}"],
-  testPathIgnorePatterns: ["<rootDir>/e2e/"],
+  testPathIgnorePatterns: ["<rootDir>/e2e/", "<rootDir>/tests/e2e/"],
 };
 
 module.exports = createJestConfig(customConfig);

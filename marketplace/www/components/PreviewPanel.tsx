@@ -164,11 +164,11 @@ export function PreviewPanel({ model, open, onClose, versionId }: PreviewPanelPr
             </div>
           </form>
           <div className="rounded-3xl border border-white/10 bg-black/40 p-4" aria-live="polite">
-            <pre className="h-72 overflow-auto whitespace-pre-wrap text-sm text-slate-100">
+            <pre data-testid="preview-output" className="h-72 overflow-auto whitespace-pre-wrap text-sm text-slate-100">
               {tokens.length ? tokens.join("") : "Awaiting tokens..."}
             </pre>
           </div>
-          <div className="flex items-center justify-between text-sm text-slate-400">
+          <div className="flex items-center justify-between text-sm text-slate-400" data-testid="preview-status">
             <span>
               Status: <strong className="uppercase text-white">{status}</strong>
             </span>

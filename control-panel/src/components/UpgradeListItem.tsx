@@ -6,6 +6,7 @@ export function UpgradeListItem({ upgrade }: { upgrade: Upgrade }) {
   const sentinelBlocked = upgrade.sentinelVerdict && upgrade.sentinelVerdict.allowed === false;
   return (
     <Link
+      data-testid="upgrade-card"
       href={`/upgrades/${upgrade.id}`}
       className="block rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition hover:border-indigo-200"
     >

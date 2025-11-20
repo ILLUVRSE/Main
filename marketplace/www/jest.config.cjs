@@ -11,6 +11,7 @@ const customJestConfig = {
     "^@/(.*)$": "<rootDir>/$1",
   },
   collectCoverageFrom: ["components/**/*.{ts,tsx}", "pages/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
+  testPathIgnorePatterns: ["<rootDir>/tests/e2e/"],
 };
 
 module.exports = createJestConfig(customJestConfig);

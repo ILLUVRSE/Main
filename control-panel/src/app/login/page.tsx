@@ -35,20 +35,22 @@ export default function LoginPage() {
       <div className="login-card">
         <h1 className="login-title">ControlPanel Login</h1>
         <form onSubmit={submit}>
-          <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151" }}>
+          <label htmlFor="oidc-token" style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151" }}>
             OIDC token (optional)
           </label>
           <input
+            id="oidc-token"
             className="input mb-3"
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder="Paste id_token for SSO"
           />
 
-          <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151" }}>
+          <label htmlFor="admin-password" style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151" }}>
             Admin password (fallback)
           </label>
           <input
+            id="admin-password"
             className="input"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

@@ -27,7 +27,7 @@ export default defineConfig({
     setupFiles: [path.resolve(__dirname, 'tests/setupTests.ts')],
     include: ['tests/unit/**/*.test.{ts,tsx}'],
     coverage: {
-      provider: 'c8',
+      provider: 'v8',
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage',
       all: true,
@@ -37,4 +37,3 @@ export default defineConfig({
     testTimeout: 5000,
   },
 });
-

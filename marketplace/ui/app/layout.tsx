@@ -1,63 +1,52 @@
 import React from 'react';
-import '../src/styles/globals.css';
-import Header from '../src/components/Header';
-import { AuthProvider } from '../src/lib/auth';
-import Image from 'next/image';
+import { Cormorant_Garamond, Inter, Space_Grotesk } from 'next/font/google';
+import '@/styles/globals.css';
+import Header from '@/components/Header';
+import Footer from '@/components/Footer';
+import { AuthProvider } from '@/lib/auth';
 
-/**
- * Root layout for Next.js App Router.
- * - Imports global styles.
- * - Renders Header and basic Footer.
- * - Wraps the app in AuthProvider (client component).
- *
- * Save to `marketplace/ui/app/layout.tsx`.
- */
+const heading = Cormorant_Garamond({
+  subsets: ['latin'],
+  display: 'swap',
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-heading',
+});
+
+const body = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-body',
+});
+
+const accent = Space_Grotesk({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-accent',
+});
 
 export const metadata = {
-  title: 'ILLUVRSE Marketplace',
-  description: 'Marketplace for Illuvrse — catalog, preview, checkout, delivery proofs and audits',
+  title: 'ILLUVRSE',
+  description: 'Illuvrse — editorial-grade marketplace for verifiable metaverse artifacts and manifests.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>
-        {/* AuthProvider is a client component; it's safe to use inside server layout */}
+      <body className={`${heading.variable} ${body.variable} ${accent.variable} bg-[var(--color-bg-light)]`}>
+        <a href="#main" className="skip-nav">
+          Skip to main content
+        </a>
         <AuthProvider>
-          <Header />
-          <main className="container mt-8 mb-12">{children}</main>
-
-          <footer className="site-footer">
-            <div className="container flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-3">
-                  <div style={{ width: 40, height: 40, position: 'relative' }}>
-                    <Image src="/brand/logo-icon-64.svg" alt="Illuvrse" width={40} height={40} />
-                  </div>
-                  <div>
-                    <div className="font-heading text-lg">illuvrse</div>
-                    <div className="text-muted text-sm">© {new Date().getFullYear()} Illuvrse</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex gap-6 text-sm text-muted mt-4 md:mt-0">
-                <a href="/marketplace">Marketplace</a>
-                <a href="/docs/PRODUCTION">Docs</a>
-                <a href="/admin">Admin</a>
-              </div>
-
-              <div className="text-sm text-muted mt-4 md:mt-0">
-                Built with ❤️ — lighthouse & orbital inspiration
-              </div>
-            </div>
-          </footer>
-
-          {/* Modal root if you want to mount portals */}
-          <div id="modal-root" />
+          <div className="flex min-h-screen flex-col">
+            <Header />
+            <main id="main" className="flex-1">
+              {children}
+            </main>
+            <Footer />
+            <div id="modal-root" />
+          </div>
         </AuthProvider>
       </body>
     </html>
   );
 }
-

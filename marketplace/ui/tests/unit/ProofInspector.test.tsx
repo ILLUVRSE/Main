@@ -6,9 +6,14 @@ import type { Proof } from '@/types';
 
 // Mock the API module used by ProofInspector
 vi.mock('@/lib/api', () => {
-  return {
+  const mock = {
     getProof: vi.fn(),
     postLicenseVerify: vi.fn(),
+  };
+  return {
+    __esModule: true,
+    default: mock,
+    ...mock,
   };
 });
 import api from '@/lib/api';
@@ -109,4 +114,3 @@ describe('ProofInspector', () => {
     });
   });
 });
-

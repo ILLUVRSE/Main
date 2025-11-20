@@ -53,7 +53,7 @@ vi.mock(
       default: (props: any) => {
         // Use React.createElement to avoid JSX transform issues in setup file
         // Ensure style/width/height passed through for layout purposes in tests
-        const { src, alt, width, height, style = {}, ...rest } = props;
+const { src, alt, width, height, style = {}, fill, ...rest } = props;
         const imgProps = {
           src: typeof src === 'object' ? (src as any).src || '' : src,
           alt: alt || '',
@@ -96,4 +96,3 @@ if (typeof globalThis.fetch === 'undefined') {
 afterEach(() => {
   cleanup();
 });
-

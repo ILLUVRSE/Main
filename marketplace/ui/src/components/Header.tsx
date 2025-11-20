@@ -1,103 +1,82 @@
 'use client';
 
-import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import classNames from 'classnames';
 
-type NavItem = { label: string; href: string };
+type NavLink = { label: string; href: string };
 
-const NAV_ITEMS: NavItem[] = [
+const NAV_LINKS: NavLink[] = [
+  { label: 'Home', href: '/' },
+  { label: 'Features', href: '/#features' },
   { label: 'Marketplace', href: '/marketplace' },
+  { label: 'Media', href: '/media' },
   { label: 'Docs', href: '/docs/PRODUCTION' },
-  { label: 'Admin', href: '/admin' },
 ];
 
 export default function Header() {
-  const { user, login, logout, isOperator } = useAuth();
+  const pathname = usePathname();
+  const { user, login, logout } = useAuth();
 
-  // lightweight sign-in for dev convenience
-  const handleDevLogin = async () => {
-    // In real app use OIDC. Here we simulate a login and set a dummy token.
-    const demoToken = 'demo-token';
-    const demoUser = { id: 'user:demo', email: 'demo@illuvrse.com', name: 'Demo User', roles: ['buyer'] };
-    login(demoToken, demoUser, true);
+  const handleJoin = () => {
+    if (!user) {
+      login('demo-token', { id: 'user:guest', email: 'guest@illuvrse.com', name: 'Guest', roles: ['buyer'] }, true);
+    }
   };
 
   return (
-    <header className="site-header">
-      <div className="container flex items-center justify-between py-3">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="w-10 h-10 relative">
-              {/* Use SVG logo so Next serves correct content type */}
-              <Image src="/brand/logo-icon-64.svg" alt="Illuvrse" fill style={{ objectFit: 'contain' }} />
+    <header className="sticky top-0 z-40 px-4 pt-5">
+      <div className="mx-auto max-w-6xl rounded-3xl border border-[var(--color-outline)] bg-white/95 shadow-[var(--shadow-header)] backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4">
+          <Link href="/" className="flex items-center gap-3" aria-label="Illuvrse home">
+            <div className="relative h-12 w-12">
+              <Image src="/brand/logo-mark.png" alt="Illuvrse logo" fill sizes="48px" priority />
             </div>
-            <div className="hidden md:block">
-              <h1 className="text-xl font-heading">illuvrse</h1>
-            </div>
+            <span className="font-heading text-3xl text-[var(--color-primary-accessible)]">illuvrse</span>
           </Link>
-        </div>
 
-        <nav className="hidden lg:flex items-center gap-6">
-          {NAV_ITEMS.map((n) => (
-            <Link key={n.href} href={n.href} className="nav-link">
-              {n.label}
-            </Link>
-          ))}
-        </nav>
-
-        <div className="flex items-center gap-3">
-          {/* Search bar (small) */}
-          <div className="hidden md:flex items-center border rounded-md px-3 py-1 bg-white shadow-sm">
-            <input
-              type="search"
-              aria-label="Search marketplace"
-              placeholder="Search models, authors, tags..."
-              className="outline-none w-56 text-sm"
-            />
-            <button className="ml-2 text-[var(--illuvrse-primary)] font-semibold">Search</button>
-          </div>
-
-          {/* Operator quick link */}
-          {isOperator() && (
-            <Link href="/admin" className="btn-ghost hidden md:inline-block">
-              Operator
-            </Link>
-          )}
-
-          {/* Cart / Account */}
-          <div className="flex items-center gap-3">
-            <Link href="/cart" className="btn-ghost">
-              Cart
-            </Link>
-
-            {user ? (
-              <div className="flex items-center gap-2">
-                <div className="text-sm">
-                  <div className="font-medium">{user.name || user.email}</div>
-                </div>
-                <button
-                  onClick={() => logout()}
-                  className="btn-ghost text-sm"
-                  title="Sign out"
+          <nav aria-label="Primary" className="order-2 flex flex-1 justify-center gap-6 text-lg text-[var(--color-text-muted)]">
+            {NAV_LINKS.map(({ label, href }) => {
+              const isActive = pathname === href || (href !== '/' && pathname.startsWith(href.replace('/#', '/')));
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={classNames(
+                    'transition-colors',
+                    isActive ? 'text-[var(--color-primary-accessible)]' : 'hover:text-[var(--color-primary)]'
+                  )}
                 >
-                  Sign out
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleDevLogin}
-                  className="btn-outline text-sm hidden md:inline-block"
-                  title="Sign in (dev)"
-                >
-                  Sign in
-                </button>
-                <Link href="/account/register" className="btn-primary text-sm">
-                  Join In
+                  {label}
                 </Link>
+              );
+            })}
+          </nav>
+
+          <div className="order-3 flex items-center gap-3">
+            {user && (
+              <div className="hidden text-right text-sm text-[var(--color-text-muted)] sm:block">
+                <div className="font-accent text-[var(--color-primary-accessible)]">Welcome back</div>
+                <div>{user.name ?? user.email}</div>
               </div>
+            )}
+            {user ? (
+              <button
+                onClick={() => logout()}
+                className="rounded-full border border-[var(--color-outline)] px-4 py-2 text-sm font-semibold text-[var(--color-primary-accessible)] transition hover:bg-[var(--color-surface)]"
+                aria-label="Sign out"
+              >
+                Sign out
+              </button>
+            ) : (
+              <button
+                onClick={handleJoin}
+                className="rounded-[12px] bg-[var(--color-primary)] px-5 py-2 text-base font-semibold text-white shadow-[var(--shadow-card)] transition hover:bg-[var(--color-primary-accessible)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
+              >
+                Join in
+              </button>
             )}
           </div>
         </div>
@@ -105,4 +84,3 @@ export default function Header() {
     </header>
   );
 }
-

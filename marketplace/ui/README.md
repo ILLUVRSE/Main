@@ -1,138 +1,115 @@
-File 64/136 — Frontend README (how to run the UI locally, build, test).
+# Illuvrse Frontend & Design System
 
-**Save as**
+Next.js (App Router) experience + design system using the Illuvrse brand palette, typography, and hero comps. Everything is driven by explicit tokens (`src/styles/tokens.ts`) and showcased at `/tokens` + Storybook.
 
-```
-marketplace/ui/README.md
-```
-
-**Contents**
-
-````md
-# Illuvrse Marketplace — UI
-
-This directory contains the Illuvrse Marketplace frontend built with **Next.js (App router)**, **TypeScript**, **Tailwind CSS**, and **React Query**. It is intended to be run alongside the `marketplace` backend server (which implements the Marketplace API).
-
-> **Location:** `marketplace/ui`
+> Location: `marketplace/ui`
 
 ---
 
-## Quick start (development)
-
-1. **Install dependencies**
+## Quick start
 
 ```bash
 cd marketplace/ui
-npm ci
-````
-
-2. **Run the dev server**
-
-```bash
-npm run dev
-# opens at http://localhost:3000 by default
+npm install
 ```
 
-The UI expects the Marketplace backend API to be available. By default it will call `NEXT_PUBLIC_MARKETPLACE_BASE_URL` (defaults to `http://127.0.0.1:3000`). If you use `marketplace/run-local.sh` to run the backend and mocks locally, the defaults should work.
-
-### Environment variables
-
-Create a `.env.local` (not checked in) or export environment variables:
+### Run the full stack locally
 
 ```
-NEXT_PUBLIC_MARKETPLACE_BASE_URL=http://127.0.0.1:3000
-NEXT_PUBLIC_APP_ENV=dev
+npm run dev:mock
 ```
 
-For agent features, the UI proxies calls to the backend agent via Next API routes, which in turn call the backend `MARKETPLACE_BASE` (see `ui/src/pages/api/agent/*`).
+`dev:mock` launches:
+
+- `mock-api/server.js` (Express, port 4001) seeded from `mock-api/seed.json`
+- Next.js dev server with `NEXT_PUBLIC_API_BASE_URL=http://localhost:4001`
+
+Visit `http://localhost:3000` for the site and `http://localhost:3000/tokens` for the design tokens showcase.
+
+### Manual environment variables
+
+If you need to run servers separately, create `.env.local`:
+
+```
+NEXT_PUBLIC_API_BASE_URL=http://localhost:4001
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
 
 ---
 
-## Build & production
+## Key scripts
 
-Build the Next.js app and run in production mode:
+| Script | Purpose |
+| --- | --- |
+| `npm run dev` | Next.js only (expects API already running) |
+| `npm run dev:mock` | Starts mock API + Next (`scripts/run-local.sh`) |
+| `npm run mock-api` | Runs the Express mock API by itself |
+| `npm run build` & `npm start` | Production build & serve |
+| `npm run storybook` | Storybook for primitives + Hero/ProjectCard |
+| `npm run test` | Vitest unit tests (ProjectCard, etc.) |
+| `npm run playwright:test` | Playwright e2e (uses `scripts/run-local.sh`) |
 
-```bash
-npm run build
-npm start
-```
+---
 
-Alternatively, build a Docker image (see `Dockerfile`):
+## Design system + brand notes
 
-```bash
-# from marketplace/ui
-docker build -t illuvrse-marketplace-ui:latest .
-docker run -e NEXT_PUBLIC_MARKETPLACE_BASE_URL="https://api.illuvrse.com" -p 3000:3000 illuvrse-marketplace-ui:latest
-```
+- **Tokens**: `src/styles/tokens.ts` exports colors (including accessible variants), spacing, typography, radii, and shadows.
+- **Tailwind**: `tailwind.config.js` ingests tokens via `ts-node` and sets `important: true`. Custom fonts (Cormorant Garamond, Inter, Space Grotesk) load via `next/font`.
+- **Pages**:
+  - `/` hero replicates the supplied composition.
+  - `/marketplace` + `/projects` render project grids/cards with preview/sign flows.
+  - `/projects/[id]` shows manifest detail view.
+  - `/tokens` visually documents the palette, typography stack, spacing, and radii per acceptance criteria.
+- **Components**: Primitives live in `src/components/ui/*`; project modules in `src/components/projects/*`. Header/Footer/Hero mirror the provided comps with glow treatments and accessible contrast tweaks.
+
+---
+
+## Mock API
+
+- Source: `mock-api/seed.json`
+- Server: `mock-api/server.js` (Express, CORS enabled, ~300–700 ms delay)
+- Endpoints:
+  - `GET /api/projects`
+  - `GET /api/projects/:id`
+  - `POST /api/projects/:id/preview`
+  - `POST /api/kernel/sign`
+
+`scripts/run-local.sh` keeps the API and Next server synchronized and cleans up processes on exit.
 
 ---
 
 ## Testing
 
-### Unit tests (Vitest)
+### Unit (Vitest + RTL)
 
-```bash
-npm run test:unit
 ```
+npm run test
+```
+
+Includes coverage for `ProjectCard` (render + fallback) in `tests/unit/ProjectCard.test.tsx`. Add more cases under `tests/unit/`.
 
 ### End-to-end (Playwright)
 
-Start the app (or ensure `PW_BASE_URL` is set to a running instance), then:
-
-```bash
-npm run test:e2e
+```
+npm run playwright:test
 ```
 
-Playwright config lives at `playwright.config.ts` and e2e tests are in `tests/e2e/`.
+The `tests/e2e/illuvrse-flow.spec.ts` scenario walks through marketplace → preview modal → sign modal → verifies `manifestSignatureId` and `signed` badge. The Playwright config boots the coupled dev + mock servers automatically.
 
 ---
 
 ## Storybook
 
-To run component previews:
-
-```bash
+```
 npm run storybook
-# open http://localhost:6006
 ```
 
----
-
-## Lint & format
-
-```bash
-npm run lint
-npm run format
-```
-
-ESLint/Prettier configs are included.
+Stories exist for `Button`, `Modal`, `ProjectCard`, and `Hero`. Background tokens are available via the Storybook backgrounds addon for quick visual parity checks.
 
 ---
 
-## Architecture notes & conventions
+## Developer follow-ups
 
-* App Router (`/app`) powers pages. Client components use `'use client'`.
-* API calls use `src/lib/api.ts` which normalizes the `{ ok: boolean }` envelope returned by the backend.
-* Auth is a simple `AuthProvider` in `src/lib/auth.tsx` (dev-friendly). Replace with OIDC for production.
-* Agent-related UI calls `POST /api/agent/query` which proxies to your Marketplace agent endpoint — the server is responsible for authorizing, auditing, and calling OpenAI Agent Builder.
-* Admin pages expect operator authorization and call `/admin/*` backend endpoints that must be implemented server-side.
-
----
-
-## Helpful links
-
-* Backend acceptance criteria & runbooks: `marketplace/acceptance-criteria.md`, `marketplace/docs/PRODUCTION.md`
-* Backend code (manifest validation, audit writer, finance): see the repository root `marketplace/` server files.
-
----
-
-If you want, I can:
-
-* Generate a `.env.local.example` with the common variables
-* Add a `Makefile` or dev script that launches backend + UI + tests in one command
-* Scaffold the server-side admin endpoints to match the UI (e.g., `/admin/signers`, `/admin/audit/export`)
-
-Which would you like next?
-
-```
-
+1. **Wire real Kernel signing** – swap `/api/kernel/sign` mock with the production Kernel gateway and surface error codes in `SignModal`.
+2. **Add OIDC auth** – replace the stubbed `AuthProvider` with the real identity provider (and propagate tokens to API calls).
+3. **Marketplace filters & pagination** – extend `/marketplace` with category, status, and price filters plus lazy loading for larger catalogs.

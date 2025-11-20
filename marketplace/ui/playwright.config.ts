@@ -53,11 +53,10 @@ export default defineConfig({
 
   // Start the dev server before running tests. CI can override by starting its own server.
   webServer: {
-    command: 'npm run dev',
+    command: './scripts/run-local.sh',
     cwd: path.join(PROJECT_ROOT),
     url: 'http://127.0.0.1:3000',
-    timeout: 120_000,
+    timeout: 180_000,
     reuseExistingServer: !process.env.CI,
   },
 });
-

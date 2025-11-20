@@ -40,7 +40,7 @@ export default function OrderDetailPage({ order }: OrderPageProps) {
                 <li>Mode: {order.delivery.mode.replace("_", " ")}</li>
                 {order.delivery.keyMetadata && (
                   <>
-                    <li>Key type: {order.delivery.keyMetadata.keyType}</li>
+                    <li>Key type: {order.delivery.keyMetadata.key_type}</li>
                     <li>Format: {order.delivery.keyMetadata.format}</li>
                     {order.delivery.keyMetadata.fingerprint && <li>Fingerprint: {order.delivery.keyMetadata.fingerprint}</li>}
                   </>

@@ -97,10 +97,25 @@ export async function requestPreviewSession(payload: PreviewRequest): Promise<Pr
 }
 
 export async function submitCheckout(payload: CheckoutRequest): Promise<CheckoutSummary> {
+  const { deliveryPreferences, ...rest } = payload;
+  const normalizedDelivery =
+    deliveryPreferences.deliveryMode === "buyer_managed"
+      ? {
+          delivery_mode: "buyer_managed",
+          key_metadata: deliveryPreferences.keyMetadata ?? { key_type: "rsa", format: "pem" },
+          public_key: deliveryPreferences.publicKey,
+        }
+      : {
+          delivery_mode: "marketplace_managed",
+        };
+  const checkoutBody = {
+    ...rest,
+    delivery_preferences: normalizedDelivery,
+  };
   try {
     const data = await requestJson<CheckoutSummary>(`/api/checkout`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(checkoutBody),
     });
     return data;
   } catch (error) {

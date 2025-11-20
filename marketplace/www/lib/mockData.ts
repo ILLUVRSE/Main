@@ -226,7 +226,7 @@ export const demoOrders: Record<string, OrderRecord> = {
     delivery: {
       mode: "marketplace_managed",
       keyMetadata: {
-        keyType: "rsa",
+        key_type: "rsa",
         format: "pem",
         fingerprint: "AA:CD:42:91",
       },

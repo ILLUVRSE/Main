@@ -8,7 +8,7 @@ interface CartState {
 interface CartContextValue extends CartState {
   totalItems: number;
   addItem: (item: CartItemInput) => void;
-  removeItem: (skuId: string, versionId: string) => void;
+  removeItem: (skuId: string, versionId: string, buyerKeyPem?: string) => void;
   clear: () => void;
 }
 
@@ -30,7 +30,10 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       return { items: action.payload };
     case "add": {
       const existingIndex = state.items.findIndex(
-        (item) => item.skuId === action.payload.skuId && item.versionId === action.payload.versionId
+        (item) =>
+          item.skuId === action.payload.skuId &&
+          item.versionId === action.payload.versionId &&
+          item.buyerKeyPem === action.payload.buyerKeyPem
       );
       if (existingIndex >= 0) {
         const nextItems = [...state.items];
@@ -53,7 +56,12 @@ function cartReducer(state: CartState, action: CartAction): CartState {
     case "remove":
       return {
         items: state.items.filter(
-          (item) => !(item.skuId === action.payload.skuId && item.versionId === action.payload.versionId)
+          (item) =>
+            !(
+              item.skuId === action.payload.skuId &&
+              item.versionId === action.payload.versionId &&
+              item.buyerKeyPem === action.payload.buyerKeyPem
+            )
         ),
       };
     case "clear":
@@ -95,7 +103,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       items: state.items,
       totalItems,
       addItem: (item) => dispatch({ type: "add", payload: item }),
-      removeItem: (skuId, versionId) => dispatch({ type: "remove", payload: { skuId, versionId } }),
+      removeItem: (skuId, versionId, buyerKeyPem) =>
+        dispatch({ type: "remove", payload: { skuId, versionId, buyerKeyPem } }),
       clear: () => dispatch({ type: "clear" }),
     }),
     [state.items, totalItems]

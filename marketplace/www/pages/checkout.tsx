@@ -1,11 +1,12 @@
 import Head from "next/head";
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState, useEffect } from "react";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe, StripeElementsOptions } from "@stripe/stripe-js";
 import { computeCartTotals, submitCheckout } from "@/lib/api";
 import { CheckoutBuyer, DeliveryMode } from "@/lib/types";
 import { useCart } from "@/context/cart";
+import { validatePublicKeyPem } from "@/lib/pem";
 
 const stripePromise = typeof window === "undefined"
   ? null
@@ -57,9 +58,14 @@ function PaymentStage({ onSuccess }: PaymentStageProps) {
 
 export default function CheckoutPage() {
   const { items, totalItems, removeItem, clear } = useCart();
+  const buyerManagedItem = items.find((item) => item.deliveryMode === "buyer_managed");
   const [buyer, setBuyer] = useState<CheckoutBuyer>({ name: "", email: "", company: "" });
   const [notes, setNotes] = useState("");
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("marketplace_managed");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(
+    buyerManagedItem ? "buyer_managed" : "marketplace_managed"
+  );
+  const [checkoutPem, setCheckoutPem] = useState(buyerManagedItem?.buyerKeyPem ?? "");
+  const [pemError, setPemError] = useState<string | null>(null);
   const [step, setStep] = useState<CheckoutStep>("details");
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -79,10 +85,23 @@ export default function CheckoutPage() {
   );
   const isCartEmpty = items.length === 0;
 
+  useEffect(() => {
+    if (buyerManagedItem) {
+      setDeliveryMode("buyer_managed");
+      setCheckoutPem(buyerManagedItem.buyerKeyPem ?? "");
+    }
+  }, [buyerManagedItem]);
+
   async function handleDetailsSubmit(event: FormEvent) {
     event.preventDefault();
     if (isCartEmpty) {
       setStatusMessage("Your cart is empty.");
+      return;
+    }
+    const resolvedMode: DeliveryMode = buyerManagedItem ? "buyer_managed" : deliveryMode;
+    const resolvedPem = buyerManagedItem?.buyerKeyPem ?? checkoutPem;
+    if (resolvedMode === "buyer_managed" && !validatePublicKeyPem(resolvedPem)) {
+      setPemError("A valid PEM public key is required for buyer-managed delivery.");
       return;
     }
     setIsSubmitting(true);
@@ -92,7 +111,13 @@ export default function CheckoutPage() {
         cart: items,
         buyer: { ...buyer, notes },
         deliveryPreferences: {
-          deliveryMode,
+          deliveryMode: resolvedMode,
+          ...(resolvedMode === "buyer_managed"
+            ? {
+                keyMetadata: { key_type: "rsa", format: "pem" },
+                publicKey: resolvedPem.trim(),
+              }
+            : {}),
         },
       });
       setOrderId(summary.orderId);
@@ -194,28 +219,50 @@ export default function CheckoutPage() {
                   <div className="space-y-3">
                     <p className="text-sm text-slate-400">Delivery mode</p>
                     <div className="grid gap-3 md:grid-cols-2">
-                      {["marketplace_managed", "buyer_managed"].map((mode) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          onClick={() => setDeliveryMode(mode as DeliveryMode)}
-                          className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
-                            deliveryMode === mode
-                              ? "border-brand bg-brand/10 text-white"
-                              : "border-white/10 text-slate-300 hover:border-brand"
-                          }`}
-                          aria-pressed={deliveryMode === mode}
-                        >
-                          <span className="font-semibold capitalize">{mode.replace("_", " ")}</span>
-                          <p className="text-xs text-slate-400">
-                            {mode === "marketplace_managed"
-                              ? "Managed handoff with notarized proof"
-                              : "BYO delivery keys (configured later)"}
-                          </p>
-                        </button>
-                      ))}
+                      {(["marketplace_managed", "buyer_managed"] as DeliveryMode[]).map((mode) => {
+                        const disabled = Boolean(buyerManagedItem) && mode !== "buyer_managed";
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => !disabled && setDeliveryMode(mode)}
+                            className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                              deliveryMode === mode
+                                ? "border-brand bg-brand/10 text-white"
+                                : "border-white/10 text-slate-300 hover:border-brand"
+                            } ${disabled ? "opacity-40" : ""}`}
+                            aria-pressed={deliveryMode === mode}
+                            disabled={disabled}
+                          >
+                            <span className="font-semibold capitalize">{mode.replace("_", " ")}</span>
+                            <p className="text-xs text-slate-400">
+                              {mode === "marketplace_managed"
+                                ? "Managed handoff with notarized proof"
+                                : "BYO delivery keys (configured later)"}
+                            </p>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
+
+                  {(deliveryMode === "buyer_managed" || buyerManagedItem) && (
+                    <label className="flex flex-col gap-2 text-sm" htmlFor="checkout-pem">
+                      <span className="text-slate-400">Buyer-managed PEM public key</span>
+                      <textarea
+                        id="checkout-pem"
+                        value={buyerManagedItem?.buyerKeyPem ?? checkoutPem}
+                        onChange={(event) => {
+                          setCheckoutPem(event.currentTarget.value);
+                          setPemError(null);
+                        }}
+                        disabled={Boolean(buyerManagedItem)}
+                        className="h-32 rounded-2xl border border-white/10 bg-black/40 p-4 text-white focus:border-brand focus:outline-none"
+                        placeholder="-----BEGIN PUBLIC KEY-----"
+                      />
+                      {pemError && <span className="text-xs text-rose-400">{pemError}</span>}
+                    </label>
+                  )}
 
                   <button
                     type="submit"
@@ -264,14 +311,17 @@ export default function CheckoutPage() {
                       <p className="font-semibold">{item.modelTitle}</p>
                       <button
                         type="button"
-                        onClick={() => removeItem(item.skuId, item.versionId)}
+                        onClick={() => removeItem(item.skuId, item.versionId, item.buyerKeyPem)}
                         className="text-xs text-rose-400"
                       >
                         Remove
                       </button>
                     </div>
                     <p className="text-slate-400">{item.versionLabel}</p>
-                    <p className="text-slate-400">Qty {item.quantity}</p>
+                    <p className="text-slate-400">
+                      Qty {item.quantity} ·{" "}
+                      {item.deliveryMode === "buyer_managed" ? "Buyer-managed" : "Marketplace-managed"}
+                    </p>
                     <p className="text-white">
                       {new Intl.NumberFormat("en-US", {
                         style: "currency",

@@ -89,6 +89,7 @@ export interface CartItem {
   versionId: string;
   versionLabel: string;
   deliveryMode: DeliveryMode;
+  buyerKeyPem?: string;
 }
 
 export interface CartItemInput extends Omit<CartItem, "quantity"> {
@@ -97,12 +98,12 @@ export interface CartItemInput extends Omit<CartItem, "quantity"> {
 
 export interface DeliveryPreferences {
   deliveryMode: DeliveryMode;
-  buyerManagedKeyPem?: string;
   keyMetadata?: {
-    keyType: string;
+    key_type: string;
     format: string;
     fingerprint?: string;
   };
+  publicKey?: string;
 }
 
 export interface CheckoutRequest {

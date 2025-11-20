@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DeliveryMode, MarketplaceModel } from "@/lib/types";
+import { validatePublicKeyPem } from "@/lib/pem";
 
 interface BuyWidgetProps {
   model: MarketplaceModel;
   selectedVersionId: string;
   onSelectVersion: (versionId: string) => void;
-  onAddToCart: (options: { deliveryMode: DeliveryMode }) => void;
-  onCheckout?: (options: { deliveryMode: DeliveryMode }) => void;
+  onAddToCart: (options: { deliveryMode: DeliveryMode; pem?: string }) => void;
+  onCheckout?: (options: { deliveryMode: DeliveryMode; pem?: string }) => void;
 }
 
 const deliveryOptions: { label: string; value: DeliveryMode; description: string }[] = [
@@ -24,12 +25,32 @@ const deliveryOptions: { label: string; value: DeliveryMode; description: string
 
 export function BuyWidget({ model, selectedVersionId, onSelectVersion, onAddToCart, onCheckout }: BuyWidgetProps) {
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("marketplace_managed");
+  const [pem, setPem] = useState("");
+  const [pemTouched, setPemTouched] = useState(false);
   const selectedVersion = model.versions.find((version) => version.id === selectedVersionId) ?? model.versions[0];
   const formattedPrice = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: selectedVersion?.currency ?? model.currency,
     maximumFractionDigits: 0,
   }).format(selectedVersion?.price ?? model.price);
+
+  const isBuyerManaged = deliveryMode === "buyer_managed";
+  const pemValid = !isBuyerManaged || validatePublicKeyPem(pem);
+
+  useEffect(() => {
+    if (deliveryMode === "marketplace_managed") {
+      setPemTouched(false);
+    }
+  }, [deliveryMode]);
+
+  function handleAction(callback?: (options: { deliveryMode: DeliveryMode; pem?: string }) => void) {
+    if (!callback) return;
+    const trimmedPem = pem.trim();
+    callback({
+      deliveryMode,
+      pem: isBuyerManaged ? trimmedPem : undefined,
+    });
+  }
 
   return (
     <aside className="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-2xl shadow-black/40">
@@ -80,6 +101,25 @@ export function BuyWidget({ model, selectedVersionId, onSelectVersion, onAddToCa
           </div>
         </div>
 
+        {isBuyerManaged && (
+          <label className="flex flex-col gap-2 text-sm" htmlFor={`pem-${model.id}`}>
+            <span className="text-slate-400">Buyer-managed PEM public key</span>
+            <textarea
+              id={`pem-${model.id}`}
+              value={pem}
+              onChange={(event) => {
+                setPem(event.currentTarget.value);
+                setPemTouched(true);
+              }}
+              className="h-40 rounded-2xl border border-white/10 bg-black/40 p-4 text-white placeholder:text-slate-500 focus:border-brand focus:outline-none"
+              placeholder="-----BEGIN PUBLIC KEY-----"
+            />
+            {!pemValid && pemTouched && (
+              <span className="text-xs text-rose-400">Enter a valid PEM-formatted RSA public key.</span>
+            )}
+          </label>
+        )}
+
         <div className="space-y-2 text-sm">
           <p className="text-slate-400">Trust & posture</p>
           <ul className="space-y-2">
@@ -95,15 +135,17 @@ export function BuyWidget({ model, selectedVersionId, onSelectVersion, onAddToCa
         <div className="space-y-3">
           <button
             type="button"
-            onClick={() => onAddToCart({ deliveryMode })}
-            className="w-full rounded-2xl bg-brand px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            onClick={() => handleAction(onAddToCart)}
+            disabled={!pemValid}
+            className="w-full rounded-2xl bg-brand px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
           >
             Add to cart
           </button>
           <button
             type="button"
-            onClick={() => onCheckout?.({ deliveryMode })}
-            className="w-full rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:border-brand"
+            onClick={() => handleAction(onCheckout)}
+            disabled={!pemValid}
+            className="w-full rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:border-brand disabled:opacity-50"
           >
             Buy now
           </button>

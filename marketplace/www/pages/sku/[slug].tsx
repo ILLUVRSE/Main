@@ -34,8 +34,11 @@ export default function SkuDetailPage({ model }: SkuPageProps) {
     [model.versions, selectedVersionId]
   );
 
-  function addToCart(deliveryMode: DeliveryMode) {
+  function addToCart({ deliveryMode, pem }: { deliveryMode: DeliveryMode; pem?: string }) {
     if (!selectedVersion) return;
+    if (deliveryMode === "buyer_managed" && !pem) {
+      throw new Error("Buyer-managed deliveries require a PEM public key.");
+    }
     addItem({
       skuId: model.id,
       slug: model.slug,
@@ -45,11 +48,12 @@ export default function SkuDetailPage({ model }: SkuPageProps) {
       versionId: selectedVersion.id,
       versionLabel: selectedVersion.label,
       deliveryMode,
+      buyerKeyPem: pem,
     });
   }
 
-  function handleCheckout(deliveryMode: DeliveryMode) {
-    addToCart(deliveryMode);
+  function handleCheckout(options: { deliveryMode: DeliveryMode; pem?: string }) {
+    addToCart(options);
     router.push(`/checkout?sku=${model.slug}&version=${selectedVersion?.id}`);
   }
 
@@ -201,8 +205,8 @@ export default function SkuDetailPage({ model }: SkuPageProps) {
             model={model}
             selectedVersionId={selectedVersion?.id ?? model.versions[0]?.id ?? ""}
             onSelectVersion={setSelectedVersionId}
-            onAddToCart={({ deliveryMode }) => addToCart(deliveryMode)}
-            onCheckout={({ deliveryMode }) => handleCheckout(deliveryMode)}
+            onAddToCart={(opts) => addToCart(opts)}
+            onCheckout={(opts) => handleCheckout(opts)}
           />
         </div>
       </main>

@@ -1,0 +1,44 @@
+{
+  "name": "@illuvrse/idea-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint . --ext .ts",
+    "test": "USE_PGMEM=1 vitest run",
+    "test:watch": "USE_PGMEM=1 vitest",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "test:contract": "USE_PGMEM=1 vitest run test/contract",
+    "test:unit": "USE_PGMEM=1 vitest run test/unit",
+    "test:integration": "USE_PGMEM=1 vitest run test/integration"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.521.0",
+    "@aws-sdk/s3-request-presigner": "^3.521.0",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/helmet": "^11.1.1",
+    "@fastify/sensible": "^5.5.0",
+    "fastify": "^4.26.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.5",
+    "prom-client": "^15.1.3",
+    "uuid": "^11.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.12.7",
+    "@types/supertest": "^2.0.15",
+    "pg-mem": "^3.0.5",
+    "supertest": "^7.0.0",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.6.2",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.3",
+    "vitest": "^1.5.2"
+  }
+}

@@ -1,0 +1,97 @@
+name: idea-ci
+
+on:
+  push:
+    paths:
+      - 'IDEA/**'
+      - 'shared/lib/**'
+      - 'infra/startupGuards.ts'
+  pull_request:
+    paths:
+      - 'IDEA/**'
+      - 'shared/lib/**'
+      - 'infra/startupGuards.ts'
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'IDEA/service/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: IDEA/service
+        run: npm install
+
+      - name: Start signing proxy mock
+        run: |
+          node kernel/mock/signingProxyMock.js >/tmp/signing-proxy.log 2>&1 &
+          echo $! > /tmp/signing-proxy.pid
+          sleep 1
+
+      - name: Signing proxy guard
+        env:
+          REQUIRE_SIGNING_PROXY: 'true'
+          SIGNING_PROXY_URL: 'http://127.0.0.1:9100'
+        run: kernel/ci/require_kms_check.sh
+
+      - name: Secret scan
+        run: scripts/ci/check-no-private-keys.sh
+
+      - name: Run unit tests
+        working-directory: IDEA/service
+        run: npm run test:unit
+
+      - name: Run contract tests
+        working-directory: IDEA/service
+        run: npm run test:contract
+
+      - name: Run integration tests
+        working-directory: IDEA/service
+        run: npm run test:integration
+
+      - name: Build service
+        working-directory: IDEA/service
+        run: npm run build
+
+      - name: Start IDEA API (background)
+        working-directory: IDEA/service
+        run: |
+          DEV_PACKAGE_DIR=$GITHUB_WORKSPACE/tmp/dev-packages
+          mkdir -p "$DEV_PACKAGE_DIR"
+          USE_PGMEM=1 \
+          DEV_PACKAGE_DIR="$DEV_PACKAGE_DIR" \
+          SIGNING_PROXY_URL="http://127.0.0.1:9100" \
+          IDEA_S3_BUCKET="idea-ci" \
+          AUTH_JWT_SECRET="ci-secret" \
+          npm start >/tmp/idea-service.log 2>&1 &
+          echo $! > /tmp/idea-service.pid
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:6060/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/idea-service.log
+          exit 1
+
+      - name: Run multisig e2e script
+        env:
+          IDEA_API_URL: http://127.0.0.1:6060
+          IDEA_E2E_ACTOR: ci-creator
+          IDEA_E2E_DEV_UPLOAD: '1'
+          DEV_PACKAGE_DIR: ${{ github.workspace }}/tmp/dev-packages
+        run: IDEA/scripts/e2e_multisig.sh
+
+      - name: Stop services
+        if: always()
+        run: |
+          [[ -f /tmp/idea-service.pid ]] && kill $(cat /tmp/idea-service.pid) || true
+          [[ -f /tmp/signing-proxy.pid ]] && kill $(cat /tmp/signing-proxy.pid) || true

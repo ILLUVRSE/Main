@@ -28,7 +28,8 @@ export type FulfillmentArtifacts = {
 export async function buildFulfillmentArtifacts(
   order: OrderLike,
   ledgerProof: LedgerProof,
-  prefs?: DeliveryPreferences
+  prefs?: DeliveryPreferences,
+  manifestSignatureId?: string
 ): Promise<FulfillmentArtifacts> {
   const preferenceSource: DeliveryPreferences =
     prefs || order.delivery_preferences || (order.delivery_mode ? { mode: order.delivery_mode as DeliveryMode } : {});
@@ -58,11 +59,13 @@ export async function buildFulfillmentArtifacts(
     delivery_mode: resolveDeliveryMode(preferenceSource),
   };
 
+  const manifestSig = manifestSignatureId || (order as any).manifest_signature_id || `manifest-sig-${crypto.randomBytes(2).toString('hex')}`;
+
   const proof = {
     proof_id: proofId,
     order_id: order.order_id,
     artifact_sha256: artifactSha256,
-    manifest_signature_id: `manifest-sig-${crypto.randomBytes(2).toString('hex')}`,
+    manifest_signature_id: manifestSig,
     ledger_proof_id: ledgerProof?.ledger_proof_id,
     signer_kid: process.env.ARTIFACT_PUBLISHER_SIGNER_KID || 'artifact-publisher-signer-v1',
     signature: Buffer.from(`proof:${proofId}`).toString('base64'),
@@ -84,7 +87,7 @@ export async function buildFulfillmentArtifacts(
   };
 
   return {
-    license,
+    license: { ...license, manifest_signature_id: manifestSig },
     delivery,
     proof,
     keyMetadata: encryptionBundle.keyMetadata,

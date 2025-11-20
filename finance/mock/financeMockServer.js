@@ -32,7 +32,7 @@ app.get('/health', (_req, res) => {
 app.post(['/settlement', '/settle'], (req, res) => {
   const payload = req.body || {};
   const ledgerProofId = deterministicId('ledger-proof', `${JSON.stringify(payload)}:${nextSeq()}`);
-  const response = {
+  const proof = {
     ok: true,
     ledger_proof_id: ledgerProofId,
     signer_kid: SIGNER_KID,
@@ -40,7 +40,7 @@ app.post(['/settlement', '/settle'], (req, res) => {
     ts: now(),
     received: payload,
   };
-  res.json(response);
+  res.json({ ok: true, ledger_proof: proof });
 });
 
 app.post('/ledger/post', (req, res) => {

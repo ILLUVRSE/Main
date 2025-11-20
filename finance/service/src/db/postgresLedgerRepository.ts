@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
-import { Pool, PoolClient, PoolConfig, QueryResult } from 'pg';
+import { Pool, PoolClient, PoolConfig, QueryResult, QueryResultRow } from 'pg';
 import { JournalEntry, JournalLine } from '../models/journalEntry';
-import { LedgerRepository, ProofManifestRecord } from './repository/ledgerRepository';
+import { IdempotentRequest, LedgerRepository, ProofManifestRecord } from './repository/ledgerRepository';
 import { Payout } from '../models/payout';
 
 type Queryable = Pick<Pool, 'query'> | PoolClient;
@@ -255,6 +255,61 @@ export class PostgresLedgerRepository implements LedgerRepository {
     };
   }
 
+  async findIdempotentRequest(key: string): Promise<IdempotentRequest | undefined> {
+    const res = await this.query<{ payload_hash: string; journal_ids: string[] }>(
+      'SELECT payload_hash, journal_ids FROM journal_requests WHERE idempotency_key = $1',
+      [key]
+    );
+    if (!res.rowCount) return undefined;
+    return {
+      payloadHash: res.rows[0].payload_hash,
+      journalIds: res.rows[0].journal_ids ?? [],
+    };
+  }
+
+  async recordIdempotentRequest(key: string, payloadHash: string, journalIds: string[], actor: string): Promise<void> {
+    const res = await this.query<{ payload_hash: string }>(
+      `INSERT INTO journal_requests (idempotency_key, payload_hash, journal_ids, actor)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (idempotency_key)
+       DO UPDATE SET journal_ids = EXCLUDED.journal_ids, actor = EXCLUDED.actor
+       WHERE journal_requests.payload_hash = EXCLUDED.payload_hash
+       RETURNING payload_hash`,
+      [key, payloadHash, journalIds, actor]
+    );
+    if (!res.rowCount) {
+      throw new Error('IDEMPOTENCY_KEY_MISMATCH');
+    }
+  }
+
+  async fetchJournal(journalId: string): Promise<JournalEntry | undefined> {
+    const entryRes = await this.query<{ journal_id: string; batch_id: string; ts: string; currency: string; metadata: Record<string, unknown> | null }>(
+      'SELECT journal_id, batch_id, ts, currency, metadata FROM journal_entries WHERE journal_id = $1 LIMIT 1',
+      [journalId]
+    );
+    if (!entryRes.rowCount) return undefined;
+    const linesRes = await this.query<{
+      journal_id: string;
+      account_id: string;
+      direction: string;
+      amount_cents: string;
+      memo: string | null;
+    }>('SELECT journal_id, account_id, direction, amount_cents, memo FROM journal_lines WHERE journal_id = $1 ORDER BY line_id ASC', [journalId]);
+    return {
+      journalId: entryRes.rows[0].journal_id,
+      batchId: entryRes.rows[0].batch_id,
+      timestamp: entryRes.rows[0].ts,
+      currency: entryRes.rows[0].currency,
+      metadata: entryRes.rows[0].metadata ?? undefined,
+      lines: linesRes.rows.map((row) => ({
+        accountId: row.account_id,
+        direction: row.direction as JournalLine['direction'],
+        amount: Number(row.amount_cents),
+        memo: row.memo ?? undefined,
+      })),
+    };
+  }
+
   private async insertLines(journalId: string, lines: JournalLine[]): Promise<void> {
     const values: any[] = [];
     const placeholders = lines.map((line, idx) => {
@@ -281,7 +336,7 @@ export class PostgresLedgerRepository implements LedgerRepository {
     );
   }
 
-  private async query<T = any>(sql: string, params: any[] = []): Promise<QueryResult<T>> {
+  private async query<T extends QueryResultRow = QueryResultRow>(sql: string, params: any[] = []): Promise<QueryResult<T>> {
     const executor: Queryable = this.tx.getStore() ?? this.pool;
     return executor.query<T>(sql, params);
   }

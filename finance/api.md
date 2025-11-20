@@ -104,7 +104,7 @@ Body:
 Success response:
 
 ```json
-{ "ok": true, "journal_id": "jrn-20251117-0001", "posted_at": "2025-11-17T12:01:00Z" }
+{ "ok": true, "journal_id": "jrn-20251117-0001", "journal_ids": ["jrn-20251117-0001"], "posted_at": "2025-11-17T12:01:00Z" }
 ```
 
 Errors:
@@ -124,7 +124,7 @@ Get details of a posted journal and its audit metadata.
 Response:
 
 ```json
-{ "ok": true, "journal": { /* posted journal fields */ }, "audit": { "hash": "...", "signature": "...", "signer_kid": "finance-signer-v1" } }
+{ "ok": true, "journal": { /* posted journal fields */ } }
 ```
 
 ---
@@ -166,6 +166,16 @@ Body:
 {
   "settlement_id": "sett-abc-123",
   "invoice_id": "inv-20251117-001",
+  "journal": {
+    "journal_id": "jrn-20251117-0001",
+    "currency": "USD",
+    "timestamp": "2025-11-17T12:00:00Z",
+    "lines": [
+      { "account_id": "cash", "direction": "debit", "amount": 19999 },
+      { "account_id": "revenue", "direction": "credit", "amount": 17999 },
+      { "account_id": "royalty:actor:alice", "direction": "credit", "amount": 2000 }
+    ]
+  },
   "payment": { "provider": "stripe", "reference": "pi_...", "amount_cents": 19999, "currency": "USD" },
   "context": { "order_id": "order-123" }
 }
@@ -174,7 +184,15 @@ Body:
 Response:
 
 ```json
-{ "ok": true, "settlement_id": "sett-abc-123", "status": "posted", "journal_id": "jrn-20251117-0001" }
+{
+  "ok": true,
+  "ledger_proof": {
+    "ledger_proof_id": "ledger-proof-20251117-001",
+    "signer_kid": "finance-kms-v1",
+    "signature": "<base64>",
+    "ts": "2025-11-17T12:00:02Z"
+  }
+}
 ```
 
 Behavior:
@@ -203,10 +221,19 @@ Body:
 Response:
 
 ```json
-{ "ok": true, "proof_id": "ledger-proof-20251130-001", "status": "generating" }
+{
+  "ok": true,
+  "proof_id": "ledger-proof-20251130-001",
+  "proof": {
+    "manifest": { "range": { "from": "...", "to": "..." }, "entries": 10, "rootHash": "<hex>" },
+    "ledgerLines": ["{...}", "..."],
+    "hashChain": [{ "chunk": 0, "hash": "<hex>" }],
+    "signatures": [{ "role": "FinanceLead", "keyId": "finance-kms-v1", "signature": "<base64>", "signedAt": "..." }]
+  }
+}
 ```
 
-Proof generation is asynchronous for large ranges. The service will sign the canonicalized digest via KMS/signing-proxy and persist proof metadata plus the signature.
+Proof generation may take a moment for large ranges; clients can inspect the returned `proof_id` and poll `GET /proofs/{proof_id}` if needed.
 
 #### `GET /proofs/{proof_id}`
 
@@ -217,11 +244,12 @@ Return proof JSON and signature.
   "ok": true,
   "proof": {
     "proof_id": "ledger-proof-20251130-001",
-    "range": {...},
-    "hash": "...",
-    "signer_kid": "...",
-    "signature": "...",
-    "ts": "..."
+    "range_from": "2025-11-01T00:00:00Z",
+    "range_to": "2025-11-30T23:59:59Z",
+    "manifest": { "entries": 10, "rootHash": "<hex>" },
+    "manifest_hash": "<sha256>",
+    "root_hash": "<sha256>",
+    "signer_kid": "finance-kms-v1"
   }
 }
 ```
@@ -409,4 +437,3 @@ cd finance && npm ci && npm test
 ---
 
 If you want, I can now produce `finance/docs/RECONCILIATION.md` (next), or generate the CI workflow `.github/workflows/finance-ci.yml`. Which should I do?
-

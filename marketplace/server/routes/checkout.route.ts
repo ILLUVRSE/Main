@@ -31,6 +31,7 @@ type OrderRecord = {
   delivery_preferences?: DeliveryPreferences;
   order_metadata?: Record<string, any>;
   key_metadata?: any;
+  manifest_signature_id?: string;
 };
 
 const inMemoryOrders = new Map<string, OrderRecord>();
@@ -79,6 +80,11 @@ async function appendAuditEvent(eventType: string, actorId: string | undefined, 
 async function persistOrder(order: OrderRecord) {
   const db = getDb();
   if (db && typeof db.query === 'function') {
+    const metadata = { ...(order.order_metadata || {}) };
+    if (order.manifest_signature_id) {
+      metadata.manifest_signature_id = order.manifest_signature_id;
+    }
+    order.order_metadata = metadata;
     const q = `INSERT INTO orders (order_id, sku_id, buyer_id, amount, currency, status, created_at, payment, delivery, license, ledger_proof_id, delivery_mode, delivery_preferences, order_metadata, key_metadata)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       ON CONFLICT (order_id) DO UPDATE SET
@@ -144,6 +150,7 @@ async function loadOrder(orderId: string): Promise<OrderRecord | null> {
         delivery_preferences: row.delivery_preferences,
         order_metadata: row.order_metadata,
         key_metadata: row.key_metadata,
+        manifest_signature_id: row.order_metadata?.manifest_signature_id,
       };
     }
     return null;
@@ -164,19 +171,12 @@ async function createLedgerProof(order: OrderRecord) {
     if (financeClient) {
       if (typeof financeClient.settleOrder === 'function') {
         return await financeClient.settleOrder({
-          orderId: order.order_id,
+          order_id: order.order_id,
+          sku_id: order.sku_id,
+          buyer_id: order.buyer_id,
           amount: order.amount,
           currency: order.currency,
-          buyerId: order.buyer_id,
-          deliveryMode: order.delivery_mode,
-        });
-      }
-      if (typeof financeClient.createLedgerForOrder === 'function') {
-        return await financeClient.createLedgerForOrder({
-          orderId: order.order_id,
-          amount: order.amount,
-          currency: order.currency,
-          buyerId: order.buyer_id,
+          delivery_mode: order.delivery_mode,
         });
       }
     }
@@ -202,7 +202,7 @@ async function createLedgerProof(order: OrderRecord) {
  * - Otherwise synthesize license and delivery with a fake proof.
  */
 async function finalizeOrderAndProduceArtifacts(order: OrderRecord, ledgerProof: any) {
-  const artifacts = await buildFulfillmentArtifacts(order, ledgerProof, order.delivery_preferences);
+  const artifacts = await buildFulfillmentArtifacts(order, ledgerProof, order.delivery_preferences, order.manifest_signature_id);
   await persistProof(artifacts.proof);
   return artifacts;
 }
@@ -225,7 +225,10 @@ router.post('/checkout', async (req: Request, res: Response) => {
     const paymentMethod = body.payment_method || {};
     const billingMetadata = body.billing_metadata || {};
     const deliveryPreferences: DeliveryPreferences = body.delivery_preferences || {};
-    const orderMetadata = body.order_metadata || {};
+    const orderMetadata = { ...(body.order_metadata || {}) };
+    if (manifestSignatureId) {
+      orderMetadata.manifest_signature_id = manifestSignatureId;
+    }
 
     if (!skuId || !buyerId) {
       return res.status(400).json({ ok: false, error: { code: 'MISSING_FIELDS', message: 'sku_id and buyer_id required' } });
@@ -234,16 +237,31 @@ router.post('/checkout', async (req: Request, res: Response) => {
     // Determine amount/currency from SKU (DB lookup) or defaults
     let amount = Number(body.amount || 0);
     let currency = String(body.currency || 'USD');
+    let manifestSignatureId: string | undefined;
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const dbMod = require('../lib/db');
       const db = dbMod && (dbMod.default || dbMod);
       if (db && typeof db.query === 'function') {
-        const r = await db.query('SELECT price, currency FROM skus WHERE sku_id = $1 LIMIT 1', [skuId]);
+        const r = await db.query('SELECT price, currency, manifest_signature_id, manifest_metadata, manifest_valid FROM skus WHERE sku_id = $1 LIMIT 1', [skuId]);
         if (r && r.rows && r.rows[0]) {
-          amount = Number(r.rows[0].price) || amount;
-          currency = r.rows[0].currency || currency;
+          const row = r.rows[0];
+          amount = Number(row.price) || amount;
+          currency = row.currency || currency;
+          const manifestMeta = row.manifest_metadata || {};
+          manifestSignatureId =
+            row.manifest_signature_id ||
+            manifestMeta.manifest_signature_id ||
+            manifestMeta.manifestSignatureId ||
+            manifestMeta?.manifest_signature?.id ||
+            manifestMeta?.manifestSignature?.id ||
+            undefined;
+          if (row.manifest_valid === false) {
+            return res
+              .status(409)
+              .json({ ok: false, error: { code: 'MANIFEST_NOT_VERIFIED', message: 'SKU manifest not verified' } });
+          }
         }
       }
     } catch {
@@ -281,6 +299,7 @@ router.post('/checkout', async (req: Request, res: Response) => {
       delivery_mode: inferredMode,
       delivery_preferences: { ...deliveryPreferences, mode: inferredMode },
       order_metadata: orderMetadata,
+      manifest_signature_id: manifestSignatureId,
     };
 
     // Persist order

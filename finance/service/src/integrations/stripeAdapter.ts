@@ -21,7 +21,7 @@ export class StripeAdapter {
     if (!config.apiKey) throw new Error('Stripe API key required');
     this.webhookSecret = config.webhookSecret;
     this.maxPages = config.maxPages ?? 5;
-    const apiVersion: Stripe.LatestApiVersion = '2020-08-27';
+    const apiVersion: Stripe.LatestApiVersion = '2023-10-16';
     const clientConfig: Stripe.StripeConfig = {
       apiVersion,
     };
@@ -30,7 +30,6 @@ export class StripeAdapter {
       clientConfig.host = url.hostname;
       clientConfig.port = Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
       clientConfig.protocol = url.protocol.replace(':', '') as 'http' | 'https';
-      clientConfig.basePath = url.pathname && url.pathname !== '/' ? url.pathname : undefined;
     }
     this.client = new Stripe(config.apiKey, clientConfig);
   }

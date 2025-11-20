@@ -128,6 +128,8 @@ test('checkout -> payment webhook -> finalize -> license + proof', async () => {
   expect(['settled', 'paid', 'finalized']).toContain(String(fetchedOrder.status).toLowerCase());
   expect(fetchedOrder.delivery_mode).toBe('buyer-managed');
   expect(fetchedOrder.key_metadata).toBeTruthy();
+  expect(fetchedOrder.ledger_proof_id).toBeTruthy();
+  expect(fetchedOrder.order_metadata?.manifest_signature_id).toBeTruthy();
 
   // 5) If delivery proof present, verify license + proof endpoints
   if (fetchedOrder.delivery && fetchedOrder.delivery.proof_id) {
@@ -140,6 +142,9 @@ test('checkout -> payment webhook -> finalize -> license + proof', async () => {
     expect(proof.proof_id).toBe(proofId);
     expect(proof.signature).toBeTruthy();
     expect(proof.signer_kid).toBeTruthy();
+    if (fetchedOrder.order_metadata?.manifest_signature_id) {
+      expect(proof.manifest_signature_id).toBe(fetchedOrder.order_metadata.manifest_signature_id);
+    }
   }
 
   // 6) Check license endpoint

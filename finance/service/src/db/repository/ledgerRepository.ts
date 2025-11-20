@@ -11,6 +11,11 @@ export interface ProofManifestRecord {
   s3ObjectKey?: string;
 }
 
+export interface IdempotentRequest {
+  payloadHash: string;
+  journalIds: string[];
+}
+
 export interface LedgerRepository {
   withTransaction<T>(fn: () => Promise<T>): Promise<T>;
   insertJournalEntries(entries: JournalEntry[]): Promise<void>;
@@ -20,12 +25,16 @@ export interface LedgerRepository {
   getPayout(payoutId: string): Promise<Payout | undefined>;
   recordProofManifest(manifest: ProofManifestRecord): Promise<void>;
   getProofManifest(proofId: string): Promise<ProofManifestRecord | undefined>;
+  findIdempotentRequest(key: string): Promise<IdempotentRequest | undefined>;
+  recordIdempotentRequest(key: string, payloadHash: string, journalIds: string[], actor: string): Promise<void>;
+  fetchJournal(journalId: string): Promise<JournalEntry | undefined>;
 }
 
 export class InMemoryLedgerRepository implements LedgerRepository {
   private entries: JournalEntry[] = [];
   private payouts: Map<string, Payout> = new Map();
   private proofs: ProofManifestRecord[] = [];
+  private idem = new Map<string, IdempotentRequest & { actor?: string }>();
 
   async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
     return fn();
@@ -59,5 +68,17 @@ export class InMemoryLedgerRepository implements LedgerRepository {
 
   async getProofManifest(proofId: string): Promise<ProofManifestRecord | undefined> {
     return this.proofs.find((proof) => proof.proofId === proofId);
+  }
+
+  async findIdempotentRequest(key: string): Promise<IdempotentRequest | undefined> {
+    return this.idem.get(key);
+  }
+
+  async recordIdempotentRequest(key: string, payloadHash: string, journalIds: string[]): Promise<void> {
+    this.idem.set(key, { payloadHash, journalIds });
+  }
+
+  async fetchJournal(journalId: string): Promise<JournalEntry | undefined> {
+    return this.entries.find((entry) => entry.journalId === journalId);
   }
 }

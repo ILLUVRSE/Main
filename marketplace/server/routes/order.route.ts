@@ -24,6 +24,7 @@ type OrderRecord = {
   delivery_preferences?: DeliveryPreferences;
   order_metadata?: Record<string, any>;
   key_metadata?: any;
+  manifest_signature_id?: string;
 };
 
 /**
@@ -66,6 +67,7 @@ async function loadOrder(orderId: string): Promise<OrderRecord | null> {
         delivery_preferences: row.delivery_preferences,
         order_metadata: row.order_metadata,
         key_metadata: row.key_metadata,
+        manifest_signature_id: row.order_metadata?.manifest_signature_id,
       } as OrderRecord;
     }
     return null;
@@ -92,6 +94,11 @@ async function loadOrder(orderId: string): Promise<OrderRecord | null> {
 async function persistOrder(order: OrderRecord) {
   const db = getDb();
   if (db && typeof db.query === 'function') {
+    const metadata = { ...(order.order_metadata || {}) };
+    if (order.manifest_signature_id) {
+      metadata.manifest_signature_id = order.manifest_signature_id;
+    }
+    order.order_metadata = metadata;
     const q = `INSERT INTO orders (order_id, sku_id, buyer_id, amount, currency, status, created_at, payment, delivery, license, ledger_proof_id, delivery_mode, delivery_preferences, order_metadata, key_metadata)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       ON CONFLICT (order_id) DO UPDATE SET
@@ -189,7 +196,7 @@ async function verifyLedgerProofWithFinance(ledgerProof: any): Promise<boolean> 
  * Produce license/delivery/proof either via artifactPublisherClient or synthesize.
  */
 async function produceArtifacts(order: OrderRecord, ledgerProof: any) {
-  const artifacts = await buildFulfillmentArtifacts(order, ledgerProof, order.delivery_preferences);
+  const artifacts = await buildFulfillmentArtifacts(order, ledgerProof, order.delivery_preferences, order.manifest_signature_id);
   await persistProof(artifacts.proof);
   return artifacts;
 }

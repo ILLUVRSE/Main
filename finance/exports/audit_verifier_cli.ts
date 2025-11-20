@@ -22,7 +22,7 @@ export async function verifyPackage(pkg: ProofPackage): Promise<boolean> {
     throw new Error('Hash chain verification failed');
   }
   const manifestHash = manifestDigest(pkg);
-  const payloadHash = pkg.hashChain.at(-1)?.hash ?? '';
+  const payloadHash = pkg.hashChain.length ? pkg.hashChain[pkg.hashChain.length - 1].hash : '';
   await verifyWithKms(pkg.signatures, manifestHash, payloadHash);
   console.log('Verification succeeded for', canonicalJson({ range: pkg.manifest.range, entries: pkg.manifest.entries }));
   return true;

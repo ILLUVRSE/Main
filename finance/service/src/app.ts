@@ -1,6 +1,7 @@
 import express from 'express';
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
 import { loadConfig } from './server/config';
 import { InMemoryLedgerRepository } from './db/repository/ledgerRepository';
 import { PostgresLedgerRepository } from './db/postgresLedgerRepository';
@@ -16,6 +17,12 @@ import journalRouter from './controllers/journalController';
 import payoutRouter from './controllers/payoutController';
 import proofRouter from './controllers/proofController';
 import payoutApprovalRouter from './controllers/payoutApprovalController';
+import settlementRouter from './controllers/settlementController';
+import reconciliationRouter from './controllers/reconciliationController';
+import { enforceStartupGuards } from '../../../infra/startupGuards';
+
+dotenv.config();
+enforceStartupGuards({ serviceName: 'finance-service' });
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const requireKms = String(process.env.REQUIRE_KMS ?? '').toLowerCase() === 'true';
@@ -43,7 +50,6 @@ const stripeAdapter = new StripeAdapter({
   apiBase: config.stripe.apiBase,
 });
 const payoutAdapter = new PayoutProviderAdapter({ endpoint: config.payout.endpoint, authToken: config.payout.authToken });
-new ReconciliationService(repo, stripeAdapter, payoutAdapter); // instantiated for completeness
 const signingProxy = new SigningProxy({
   region: config.awsRegion,
   endpoint: config.kmsEndpoint,
@@ -51,6 +57,7 @@ const signingProxy = new SigningProxy({
 });
 const proofService = new ProofService(repo, signingProxy);
 const payoutService = new PayoutService(repo, auditService, payoutAdapter);
+const reconciliationService = new ReconciliationService(repo, stripeAdapter, payoutAdapter);
 
 const app = express();
 app.use(helmet());
@@ -62,9 +69,36 @@ app.use((req, _res, next) => {
   return next();
 });
 
-app.use('/finance/journal', journalRouter(ledgerService));
+app.use('/ledger', journalRouter(ledgerService));
+app.use('/finance/ledger', journalRouter(ledgerService));
+
+app.use('/payout', payoutRouter(payoutService));
+app.use('/payout', payoutApprovalRouter(payoutService));
 app.use('/finance/payout', payoutRouter(payoutService));
 app.use('/finance/payout', payoutApprovalRouter(payoutService));
-app.use('/finance/proof', proofRouter(proofService));
+
+app.use('/proofs', proofRouter(proofService));
+app.use('/finance/proofs', proofRouter(proofService));
+
+app.use('/settlement', settlementRouter(ledgerService, proofService));
+app.use('/finance/settlement', settlementRouter(ledgerService, proofService));
+
+app.use('/reconcile', reconciliationRouter(reconciliationService));
+app.use('/finance/reconcile', reconciliationRouter(reconciliationService));
+
+// Global error handler
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[finance] request error', err);
+  const status = err.status || 500;
+  const code = err.code || 'INTERNAL_ERROR';
+  res.status(status).json({
+    ok: false,
+    error: {
+      code,
+      message: err.message || 'Internal server error',
+      details: err.details,
+    },
+  });
+});
 
 export default app;

@@ -13,10 +13,7 @@ import publishRoutes from './routes/publish';
 import healthRoutes from './routes/health';
 
 const config = getConfig();
-
-if (process.env.NODE_ENV === 'production') {
-  enforceStartupGuards({ serviceName: 'idea-service' });
-}
+enforceStartupGuards({ serviceName: 'idea-service' });
 
 export async function buildApp() {
   const app = Fastify({ logger: true });

@@ -125,7 +125,8 @@ If either command returns `null`, halt deploys and re-apply object lock per `inf
    scripts/update-signers-from-kms.sh "$SINGER_KID" > /tmp/new-signer.json
    ```
 
-2. **Update signer registry** (`kernel/tools/signers.json`) and the Marketplace config map/secret referencing the signer kid.
+2. **Update signer registry** (`kernel/tools/signers.json`) and the Marketplace config map/secret referencing the signer kid.  
+   *The repository now ships real public keys for `kernel-audit-ed25519-v1` and `kernel-audit-rsa-v1`. Keep this file authoritative — auditors run `node kernel/tools/audit-verify.js -s kernel/tools/signers.json` before accepting ledger exports.*
 3. **Deploy canary** with new signer env vars (`MARKETPLACE_SIGNER_KID`, `ARTIFACT_PUBLISHER_SIGNER_KID`).
 4. **Verify** with a test checkout + `GET /proofs/{id}` ensuring `signer_kid` matches the rotated key.
 5. **Revoke old key** by removing it from signer registry once all regions confirm new proofs.
@@ -138,10 +139,11 @@ Use these commands after deployment to quickly validate health.
 
 1. **Health check**
 
-   ```bash
-   curl -fsS https://marketplace.example.com/health | jq
-   # Expected: ok: true, mTLS: true, signingConfigured: true
-   ```
+```bash
+curl -fsS https://marketplace.example.com/health | jq
+# Expected: ok: true, mTLS: true, signingConfigured: true
+```
+> Tip: `/ready` now surfaces the signing guard state. If `REQUIRE_KMS` or `REQUIRE_SIGNING_PROXY` is true but no signer is configured, readiness fails and `details.signing.signingErrors` explains the missing piece — fix this before sending traffic.
 
 2. **Create a test order (non-production funds / test payment)**
 

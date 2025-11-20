@@ -15,7 +15,7 @@ export default function payoutApprovalRouter(payoutService: PayoutService): Rout
         approvedAt: new Date().toISOString(),
       };
       const updated = await payoutService.recordApproval(payoutId, approval);
-      res.status(updated.status === 'released' ? 200 : 202).json({ payoutId, status: updated.status });
+      res.status(updated.status === 'released' ? 200 : 202).json({ ok: true, payoutId, status: updated.status });
     } catch (error) {
       if ((error as Error).message.includes('not found')) {
         return res.status(404).json({ message: (error as Error).message });

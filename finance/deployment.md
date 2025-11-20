@@ -63,7 +63,7 @@ Core:
 
 **Startup guard**
 
-* Service should fail startup if `NODE_ENV=production` and `REQUIRE_KMS` or `REQUIRE_SIGNING_PROXY` is set but signing path is not configured.
+* Service should fail startup if `NODE_ENV=production` and `REQUIRE_KMS` or `REQUIRE_SIGNING_PROXY` is set but signing path is not configured. Finance now invokes `infra/startupGuards.ts` during boot, so setting these env vars in CI/staging also enforces the guard (no more silent fallbacks).
 
 ---
 
@@ -107,6 +107,7 @@ Core:
 **Operational**
 
 * Publish public key to `kernel/tools/signers.json` with signer metadata prior to rotation. Maintain a key rotation plan and overlap verification window. 
+* The canonical registry already contains `kernel-audit-ed25519-v1` and `kernel-audit-rsa-v1`. When Finance rotates its key, update that file (via `scripts/update-signers-from-kms.sh`) so Marketplace/Kernal/auditors verify proofs against the live public key set.
 
 ---
 

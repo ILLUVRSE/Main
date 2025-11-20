@@ -1,0 +1,82 @@
+name: marketplace-frontend-ci
+
+on:
+  push:
+    paths:
+      - 'marketplace/**'
+      - '.github/workflows/marketplace-frontend-ci.yml'
+  pull_request:
+    paths:
+      - 'marketplace/**'
+      - '.github/workflows/marketplace-frontend-ci.yml'
+
+jobs:
+  marketplace-www:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install marketplace backend deps
+        run: npm ci
+        working-directory: marketplace
+
+      - name: Build marketplace backend
+        run: npm run build
+        working-directory: marketplace
+
+      - name: Install storefront deps
+        run: npm ci
+        working-directory: marketplace/www
+
+      - name: Build storefront
+        run: npm run build
+        working-directory: marketplace/www
+
+      - name: Run unit tests
+        run: npm test
+        working-directory: marketplace/www
+
+      - name: Start marketplace stack
+        run: |
+          ./marketplace/run-local.sh > /tmp/marketplace-dev.log 2>&1 &
+          echo $! > /tmp/marketplace-dev.pid
+
+      - name: Wait for marketplace health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Marketplace health endpoint did not respond" >&2
+          cat /tmp/marketplace-dev.log || true
+          exit 1
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+        working-directory: marketplace/www
+
+      - name: Run Playwright smoke tests
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+        run: npx playwright test
+        working-directory: marketplace/www
+
+      - name: Stop marketplace stack
+        if: always()
+        run: |
+          if [ -f /tmp/marketplace-dev.pid ]; then
+            kill $(cat /tmp/marketplace-dev.pid) || true
+          fi
+          docker ps -a | awk '/marketplace_dev_db|marketplace_minio/ { print $1 }' | xargs -r docker rm -f
+          cat /tmp/marketplace-dev.log || true

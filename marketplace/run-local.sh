@@ -20,6 +20,8 @@ MINIO_HOST_PORT=${MINIO_HOST_PORT:-9000}
 
 MARKETPLACE_PORT=${MARKETPLACE_PORT:-3000}
 MARKETPLACE_LOG=/tmp/marketplace_run_local.log
+PREVIEW_SANDBOX_PORT=${PREVIEW_SANDBOX_PORT:-8081}
+PREVIEW_SANDBOX_LOG=/tmp/preview-sandbox.log
 
 KERNEL_MOCK_CMD=${KERNEL_MOCK_CMD:-"node ./kernel/mock/kernelMockServer.js"}
 FINANCE_MOCK_CMD=${FINANCE_MOCK_CMD:-"node ./finance/mock/financeMockServer.js"}
@@ -42,6 +44,9 @@ cleanup() {
   fi
   if [ -n "${SIGNER_MOCK_PID:-}" ]; then
     kill "${SIGNER_MOCK_PID}" 2>/dev/null || true
+  fi
+  if [ -n "${PREVIEW_SANDBOX_PID:-}" ]; then
+    kill "${PREVIEW_SANDBOX_PID}" 2>/dev/null || true
   fi
   if docker ps -a --format '{{.Names}}' | grep -q "^${POSTGRES_CONTAINER}\$"; then
     echo "[run-local] stopping docker container ${POSTGRES_CONTAINER}..."
@@ -158,6 +163,20 @@ else
   echo "[run-local] Signer mock not found at marketplace/mocks/signerMock.js - marketplace can use a dev signing key if configured."
 fi
 
+# Preview sandbox server
+if [ -f "${ROOT_DIR}/marketplace/sandbox/previewServer.ts" ]; then
+  echo "[run-local] Starting preview sandbox..."
+  (
+    cd "${ROOT_DIR}/marketplace"
+    PREVIEW_PORT=${PREVIEW_SANDBOX_PORT} npx ts-node sandbox/previewServer.ts > "${PREVIEW_SANDBOX_LOG}" 2>&1 &
+    echo $! > /tmp/preview-sandbox.pid
+  )
+  PREVIEW_SANDBOX_PID=$(cat /tmp/preview-sandbox.pid)
+  echo "[run-local] Preview sandbox pid: ${PREVIEW_SANDBOX_PID} (ws://127.0.0.1:${PREVIEW_SANDBOX_PORT}/preview)"
+else
+  echo "[run-local] Preview sandbox not found - streaming previews will be disabled."
+fi
+
 # Apply migrations if present (search for migration script)
 if [ -f "${ROOT_DIR}/marketplace/scripts/runMigrations.sh" ]; then
   echo "[run-local] Running marketplace migrations..."
@@ -236,4 +255,3 @@ fi
 
 # Provide friendly exit (cleanup trap will run)
 exit 0
-

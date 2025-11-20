@@ -1,0 +1,84 @@
+name: control-panel-ci
+
+on:
+  push:
+    paths:
+      - 'control-panel/**'
+      - '.github/workflows/control-panel-ci.yml'
+  pull_request:
+    paths:
+      - 'control-panel/**'
+      - '.github/workflows/control-panel-ci.yml'
+
+jobs:
+  control-panel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: control-panel/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: control-panel
+
+      - name: Lint & unit tests
+        run: |
+          npm run lint
+          npm test
+        working-directory: control-panel
+
+      - name: Build production bundle
+        continue-on-error: true
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          TURBOPACK: "0"
+        run: npm run build
+        working-directory: control-panel
+
+      - name: Start dev server
+        env:
+          PORT: 4000
+          HOSTNAME: 127.0.0.1
+          DEMO_OIDC_TOKEN: demo-token
+          ADMIN_PASSWORD: playwright-password
+        run: |
+          npm run dev -- --hostname 127.0.0.1 --port 4000 > /tmp/control-panel-dev.log 2>&1 &
+          echo $! > /tmp/control-panel-dev.pid
+        working-directory: control-panel
+
+      - name: Wait for dev server
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:4000/login >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Control-panel dev server did not start" >&2
+          cat /tmp/control-panel-dev.log || true
+          exit 1
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+        working-directory: control-panel
+
+      - name: Run Playwright approval flow
+        env:
+          CONTROL_PANEL_BASE_URL: http://127.0.0.1:4000
+          DEMO_OIDC_TOKEN: demo-token
+        run: npm run playwright:test
+        working-directory: control-panel
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -f /tmp/control-panel-dev.pid ]; then
+            kill $(cat /tmp/control-panel-dev.pid) || true
+          fi
+          cat /tmp/control-panel-dev.log || true

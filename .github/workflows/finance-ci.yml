@@ -32,7 +32,6 @@ jobs:
           cache-dependency-path: finance/package-lock.json
 
       - name: Install deps
-        working-directory: finance
         run: npm ci
 
       - name: Lint (if configured)
@@ -44,13 +43,7 @@ jobs:
 
       - name: Run unit tests (ledger balance / idempotency)
         id: unit
-        working-directory: finance
-        run: |
-          if jq -e '.scripts | has("test")' finance/package.json >/dev/null 2>&1; then
-            npm test --silent
-          else
-            echo "No test script found - skipping"
-          fi
+        run: npx vitest run --config finance/vitest.config.ts finance/test/unit --runInBand
 
       - name: Check for private keys
         working-directory: .
@@ -92,7 +85,6 @@ jobs:
           cache-dependency-path: finance/package-lock.json
 
       - name: Install deps
-        working-directory: finance
         run: npm ci
 
       - name: Start local orchestration for E2E (DB + signing-proxy mock)
@@ -123,18 +115,10 @@ jobs:
           fi
 
       - name: Run E2E tests (checkout-ledger)
-        working-directory: finance
         env:
           FINANCE_BASE_URL: http://127.0.0.1:8050
         run: |
-          # Example: execute vitest or node e2e script
-          if [ -f package.json ] && jq -e '.scripts | has("test:e2e")' package.json >/dev/null 2>&1; then
-            npm run test:e2e --silent || (echo "E2E tests failed" && exit 1)
-          elif [ -d test/e2e ]; then
-            npx vitest run test/e2e/checkout-ledger.e2e.test.ts --runInBand || (echo "E2E checkout-ledger failed" && exit 1)
-          else
-            echo "No E2E tests found - skipping" && exit 0
-          fi
+          npx vitest run --config finance/vitest.config.ts finance/test/e2e/payment_payout_flow.test.ts --runInBand || (echo "E2E tests failed" && exit 1)
 
       - name: Upload E2E artifacts
         if: always()

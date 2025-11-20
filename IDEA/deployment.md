@@ -70,6 +70,7 @@ S3_SECRET=...
 * **Least privilege**: IDEA must not store private keys in repo or images. Signing is delegated to Kernel/KMS.
 * **Multisig**: For high-impact handoffs, IDEA must create an upgrade manifest and request multisig approvals via Kernel/Control-Panel. IDEA must refuse to proceed if multisig required but not satisfied.
 * **Audit**: Each step (submit, validate, manifest create, publish) must emit an AuditEvent with `prevHash`, `hash`, `signature` metadata or reference to Kernel-signed records.
+* **Startup guard**: IDEA now calls `infra/startupGuards.ts` at boot, so any environment (CI, staging, prod) with `REQUIRE_KMS`, `REQUIRE_SIGNING_PROXY`, or `REQUIRE_MTLS` set will fail fast if the corresponding signer or mTLS inputs are missing.
 
 ---
 

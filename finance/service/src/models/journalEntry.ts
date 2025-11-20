@@ -13,7 +13,7 @@ export interface JournalEntry {
   timestamp: string; // ISO-8601
   currency: string;
   lines: JournalLine[];
-  metadata?: Record<string, string>;
+  metadata?: Record<string, unknown>;
 }
 
 export function ensureBalanced(entry: JournalEntry): void {

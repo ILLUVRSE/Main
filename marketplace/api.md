@@ -120,6 +120,10 @@ Response:
   "page_size": 20,
   "total": 135
 }
+
+*Notes*:
+
+* Checkout refuses SKUs whose manifests are not validated (`manifest_valid=false`). Successful responses expose the manifest signature id under `order.order_metadata.manifest_signature_id` so downstream flows can link delivery and finance proofs back to the Kernel-signed manifest.
 ```
 
 #### `GET /sku/{sku_id}`
@@ -255,7 +259,11 @@ Response:
     "amount": 19999,
     "currency": "USD",
     "created_at": "2025-11-17T12:40:00Z",
-    "delivery_mode": "buyer-managed"
+    "delivery_mode": "buyer-managed",
+    "order_metadata": {
+      "correlation_id": "...",
+      "manifest_signature_id": "manifest-sig-abc123"
+    }
   }
 }
 ```

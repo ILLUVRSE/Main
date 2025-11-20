@@ -19,6 +19,21 @@ permissions:
   id-token: write
 
 jobs:
+  kms-signing-check:
+    name: Signing path guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require signing proxy / KMS availability
+        env:
+          REQUIRE_SIGNING_PROXY: ${{ secrets.REQUIRE_SIGNING_PROXY || 'false' }}
+          REQUIRE_KMS: ${{ secrets.REQUIRE_KMS || 'true' }}
+          SIGNING_PROXY_URL: ${{ secrets.SIGNING_PROXY_URL || '' }}
+          KMS_ENDPOINT: ${{ secrets.KMS_ENDPOINT || '' }}
+        run: ./kernel/ci/require_kms_check.sh
+
   update-signers:
     name: Update signers from KMS (safe PR)
     runs-on: ubuntu-latest
@@ -67,4 +82,3 @@ jobs:
       - name: Post-run summary
         run: |
           echo "update-signers-from-kms.sh completed. If a PR was created, please review it in the repo."
-

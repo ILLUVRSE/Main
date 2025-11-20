@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import crypto from 'crypto';
 import { LedgerRepository, ProofManifestRecord } from '../db/repository/ledgerRepository';
 import { canonicalJson } from '../utils/canonicalize';
 import { buildHashChain } from '../utils/hashchain';
@@ -31,10 +30,11 @@ export class ProofService {
     const entries = await this.repo.fetchLedgerRange(from, to);
     const ledgerLines = entries.map((entry) => canonicalJson(entry));
     const hashChain = buildHashChain(ledgerLines);
+    const lastHash = hashChain.length ? hashChain[hashChain.length - 1].hash : '';
     const manifest = {
       range: { from, to },
       entries: entries.length,
-      rootHash: hashChain.at(-1)?.hash,
+      rootHash: lastHash,
     };
     const manifestHash = crypto.createHash('sha256').update(canonicalJson(manifest)).digest('hex');
 
@@ -42,7 +42,7 @@ export class ProofService {
     const signatures = await this.signingProxy.sign(
       {
         manifestHash,
-        payloadHash: hashChain.at(-1)?.hash || '',
+        payloadHash: lastHash,
         requiredRoles: roles,
       },
       approvals
@@ -54,7 +54,7 @@ export class ProofService {
       rangeTo: to,
       manifest,
       manifestHash,
-      rootHash: hashChain.at(-1)?.hash || '',
+      rootHash: lastHash,
       s3ObjectKey: options.s3ObjectKey,
     });
 

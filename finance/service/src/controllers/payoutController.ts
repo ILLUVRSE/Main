@@ -10,7 +10,7 @@ export default function payoutRouter(payoutService: PayoutService): Router {
       const payout: Payout = req.body;
       const actor = req.headers['x-user-email'] as string;
       const accepted = await payoutService.requestPayout({ ...payout, approvals: [] }, actor);
-      res.status(202).json({ payoutId: accepted.payoutId, status: accepted.status });
+      res.status(202).json({ ok: true, payoutId: accepted.payoutId, status: accepted.status });
     } catch (error) {
       next(error);
     }
@@ -19,7 +19,7 @@ export default function payoutRouter(payoutService: PayoutService): Router {
   router.get('/:payoutId', async (req, res, next) => {
     try {
       const payout = await payoutService.getPayout(req.params.payoutId);
-      res.json(payout);
+      res.json({ ok: true, payout });
     } catch (error) {
       if ((error as Error).message.includes('not found')) {
         return res.status(404).json({ message: (error as Error).message });

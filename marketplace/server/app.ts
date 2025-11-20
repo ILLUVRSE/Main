@@ -3,8 +3,10 @@ import cookieParser from 'cookie-parser';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 import { getMetricsRegistry } from './lib/metrics';
+import { enforceStartupGuards } from '../../infra/startupGuards';
 
 dotenv.config();
+enforceStartupGuards({ serviceName: 'marketplace-api' });
 
 const app = express();
 
@@ -77,35 +79,72 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
  * Implementations can be made richer later (mTLS/kms checks).
  */
 app.get('/health', (_req: Request, res: Response) => {
-  // Compute best-effort flags from env
-  const requireKms = String(process.env.REQUIRE_KMS || 'false') === 'true';
-  const requireSigningProxy = String(process.env.REQUIRE_SIGNING_PROXY || 'false') === 'true';
-  const signingConfigured = Boolean(process.env.SIGNING_PROXY_URL || process.env.AUDIT_SIGNING_KMS_KEY_ID) || requireKms || requireSigningProxy;
-
-  const kernelConfigured = Boolean(process.env.KERNEL_API_URL);
-  // mTLS detection: if client cert/key provided then mTLS considered configured (best-effort)
-  const mTLSConfigured = Boolean(process.env.KERNEL_CLIENT_CERT && process.env.KERNEL_CLIENT_KEY);
-
+  const health = computeSigningAndInfraState();
   return res.json({
-    ok: true,
-    mTLS: mTLSConfigured,
-    kernelConfigured,
-    signingConfigured,
+    ok: health.ok,
+    mTLS: health.mtlsConfigured,
+    kernelConfigured: health.kernelConfigured,
+    signingConfigured: health.signingConfigured,
+    details: health.details,
   });
 });
 
 app.get('/ready', async (_req: Request, res: Response) => {
-  // Readiness: basic checks. In production should probe DB, S3 and Kernel.
-  // For now report ready if PORT/DATABASE_URL present (best-effort).
   const db = Boolean(process.env.DATABASE_URL);
   const s3 = Boolean(process.env.S3_ENDPOINT && process.env.S3_BUCKET);
   const kernel = Boolean(process.env.KERNEL_API_URL);
+  const signing = computeSigningAndInfraState();
 
-  if (db && s3) {
-    return res.json({ ok: true, db: true, s3: true, kernel });
+  if (db && s3 && signing.ok) {
+    return res.json({ ok: true, db: true, s3: true, kernel, signing: signing.details });
   }
-  return res.status(500).json({ ok: false, error: { code: 'NOT_READY', message: 'Missing runtime dependencies' } });
+  return res.status(500).json({
+    ok: false,
+    error: {
+      code: 'NOT_READY',
+      message: 'Missing runtime dependencies',
+      details: { db, s3, kernel, signing: signing.details },
+    },
+  });
 });
+
+function computeSigningAndInfraState() {
+  const requireKms = toBool(process.env.REQUIRE_KMS);
+  const requireSigningProxy = toBool(process.env.REQUIRE_SIGNING_PROXY);
+  const signingProxyConfigured = Boolean(process.env.SIGNING_PROXY_URL);
+  const kmsConfigured = Boolean(
+    process.env.AUDIT_SIGNING_KMS_KEY_ID ||
+      process.env.AUDIT_SIGNING_KMS_KEY ||
+      process.env.AWS_KMS_KEY_ID ||
+      process.env.KMS_KEY_ID ||
+      process.env.MARKETPLACE_KMS_KEY_ID
+  );
+  const kernelConfigured = Boolean(process.env.KERNEL_API_URL);
+  const mtlsConfigured = Boolean(process.env.MTLS_CA_CERT || process.env.MTLS_CA_BUNDLE || (process.env.KERNEL_CLIENT_CERT && process.env.KERNEL_CLIENT_KEY));
+
+  const signingErrors: string[] = [];
+  if (requireKms && !kmsConfigured) signingErrors.push('REQUIRE_KMS=true but no *_KMS_KEY_ID env configured');
+  if (requireSigningProxy && !signingProxyConfigured) signingErrors.push('REQUIRE_SIGNING_PROXY=true but SIGNING_PROXY_URL missing');
+  const signingConfigured = kmsConfigured || signingProxyConfigured;
+
+  return {
+    ok: signingErrors.length === 0,
+    kernelConfigured,
+    mtlsConfigured,
+    signingConfigured,
+    details: {
+      kmsConfigured,
+      signingProxyConfigured,
+      requireKms,
+      requireSigningProxy,
+      signingErrors,
+    },
+  };
+}
+
+function toBool(value?: string) {
+  return String(value || '').toLowerCase() === 'true';
+}
 
 const metricsRegistry = getMetricsRegistry();
 app.get('/metrics', async (_req: Request, res: Response) => {

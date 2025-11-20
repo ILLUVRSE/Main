@@ -1,15 +1,29 @@
 import { Router } from 'express';
 import { LedgerService } from '../services/ledgerService';
-import { JournalEntry } from '../models/journalEntry';
+import { normalizeJournalRequest, ApiJournalBody } from '../utils/journalNormalizer';
 
 export default function journalRouter(ledgerService: LedgerService): Router {
   const router = Router();
 
-  router.post('/', async (req, res, next) => {
+  router.post('/post', async (req, res, next) => {
     try {
-      const entries = req.body.entries as JournalEntry[];
-      await ledgerService.postEntries(entries, req.headers['x-user-email'] as string);
-      res.status(201).json({ committed: entries.map((e) => e.journalId) });
+      const entries = normalizeJournalRequest(req.body as ApiJournalBody);
+      const actor = (req.headers['x-user-email'] as string) || 'finance-service';
+      const idempotencyKey = (req.headers['idempotency-key'] as string) || req.header('Idempotency-Key') || undefined;
+      const committed = await ledgerService.postEntries(entries, actor, { idempotencyKey });
+      res.status(201).json({ ok: true, journal_ids: committed.map((entry) => entry.journalId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:journalId', async (req, res, next) => {
+    try {
+      const journal = await ledgerService.getJournal(req.params.journalId);
+      if (!journal) {
+        return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Journal not found' } });
+      }
+      res.json({ ok: true, journal });
     } catch (err) {
       next(err);
     }

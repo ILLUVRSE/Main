@@ -3,16 +3,16 @@
     {
       "signer_kid": "kernel-audit-ed25519-v1",
       "algorithm": "ed25519",
-      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_ED25519_PUBLIC_KEY_PEM\n-----END PUBLIC KEY-----",
-      "deployedAt": "2025-11-10T00:00:00Z",
-      "description": "Primary Kernel audit signer (exported from KMS via signing proxy)."
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA+IUIUPG3H1hvBBioVHQc6I+yF380qWAC+miCRy+JXKw=\n-----END PUBLIC KEY-----",
+      "deployedAt": "2025-01-10T00:00:00Z",
+      "description": "Primary Kernel audit signer issued via signing proxy (ed25519)."
     },
     {
       "signer_kid": "kernel-audit-rsa-v1",
       "algorithm": "rsa-sha256",
-      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_RSA_PUBLIC_KEY_PEM\n-----END PUBLIC KEY-----",
-      "deployedAt": "2025-11-10T00:00:00Z",
-      "description": "Fallback RSA signer for audit exports."
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEApchu0Pe76/B5HQh5Kd2Z\nkqHqLYXbpQoIWzHqmHM03cswtG/rh154GFCqwdfwzV4GvlzBNWkwWWKacSLFQ1Ma\nw3JYl98NWw0sC8wBCJ2rCg2ED0a3Gg0RJKUlBaTDhPJemVDSw9l01CueMRY9WRMF\nm/xcIRI3qRSDh2XDyc6wpiy7SLKZeGx0JGiC3SNTsUmH4Zgobry+0S+JVl1gn2fj\njq/9B36RZ0541+XPZxzsom1GBRzZlhs4HnPsueTc/YrAzN4Ib+QDuLXMrm5uCGmP\nWOKU61RrqrCbzjdcDYSTJWBS5erRK9kAHhv1sXt5c6D8KYH3SlOt7F+2QihjWnOl\nWYenAjwRfS9Se/PcuWSptuALUg4PMQ8ZitfzWHY+VI28HTY0x5kfuOAIrkXaEyrD\n9sIUCsi/4r+YmvTQwLCGTGqc9EOUVoH4fsjpo58wL4S2RAUfFupkl5+JT9QzuG6E\n1ufMCiGZIaeS8D4mlDoS2ucFWbwaCyd5c54aCI+MIfTNAgMBAAE=\n-----END PUBLIC KEY-----",
+      "deployedAt": "2025-01-10T00:00:00Z",
+      "description": "Fallback RSA signer for audit exports (KMS-backed)."
     }
   ]
 }

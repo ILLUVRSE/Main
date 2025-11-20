@@ -12,6 +12,9 @@
  *  - FINANCE_MTLS_CERT_PATH    path to client cert PEM (optional)
  *  - FINANCE_MTLS_KEY_PATH     path to client key PEM (optional)
  *  - FINANCE_MTLS_CA_PATH      path to CA PEM to validate server cert (optional)
+ *  - FINANCE_APPROVAL_ROLES    comma-separated roles required for proofs (default FinanceLead)
+ *  - FINANCE_APPROVAL_SIGNER   signer id recorded in approvals (default marketplace-service)
+ *  - FINANCE_ACTOR_ID          actor id recorded when calling settlement endpoints
  *
  * For local/dev use, if FINANCE_API_URL is not provided the client will synthesize
  * ledger proofs (non-production).
@@ -21,6 +24,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import fetch, { RequestInit } from 'node-fetch';
+import { mapOrderToJournal } from './royalties';
 
 export type CreateLedgerPayload = {
   orderId: string;
@@ -28,6 +32,15 @@ export type CreateLedgerPayload = {
   currency?: string;
   buyerId?: string;
   metadata?: Record<string, any>;
+};
+
+type OrderLike = {
+  order_id: string;
+  sku_id: string;
+  buyer_id: string;
+  amount: number;
+  currency: string;
+  delivery_mode?: string;
 };
 
 export type LedgerProof = {
@@ -55,10 +68,20 @@ export class FinanceClient {
   private baseUrl?: string;
   private apiToken?: string;
   private agent?: https.Agent;
+  private defaultRoles: string[];
+  private defaultApprovals: Array<{ role: string; signer: string }>;
+  private actorId: string;
 
   constructor() {
     this.baseUrl = process.env.FINANCE_API_URL;
     this.apiToken = process.env.FINANCE_API_TOKEN;
+    this.actorId = process.env.FINANCE_ACTOR_ID || 'marketplace-service';
+    this.defaultRoles = (process.env.FINANCE_APPROVAL_ROLES || 'FinanceLead').split(',').map((r) => r.trim()).filter(Boolean);
+    if (!this.defaultRoles.length) {
+      this.defaultRoles = ['FinanceLead'];
+    }
+    const approvalSigner = process.env.FINANCE_APPROVAL_SIGNER || 'marketplace-service';
+    this.defaultApprovals = this.defaultRoles.map((role) => ({ role, signer: approvalSigner }));
 
     // Try mTLS configuration (prefer file paths)
     const certPath = process.env.FINANCE_MTLS_CERT_PATH;
@@ -127,90 +150,150 @@ export class FinanceClient {
    * suitable for local development/testing.
    */
   async createLedgerForOrder(payload: CreateLedgerPayload): Promise<LedgerProof> {
-    if (!this.baseUrl) {
-      // synthesize a ledger proof for dev/test
-      const ledgerProofId = `ledger-sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const signature = Buffer.from(`ledger:${ledgerProofId}`).toString('base64');
-      return {
-        ledger_proof_id: ledgerProofId,
-        signer_kid: process.env.FINANCE_SIGNER_KID || 'finance-signer-v1',
-        signature,
-        ts: new Date().toISOString(),
-        payload: {
-          simulated: true,
-          orderId: payload.orderId,
-          amount: payload.amount,
-        },
-      };
-    }
-
-    const url = this._url('/ledgers');
-    const body = {
+    return this.settleOrder({
       order_id: payload.orderId,
+      sku_id: payload.metadata?.sku_id || 'unknown',
+      buyer_id: payload.buyerId || 'buyer',
       amount: payload.amount,
       currency: payload.currency || 'USD',
-      buyer_id: payload.buyerId,
-      metadata: payload.metadata || {},
-    };
-
-    const resp = await this._fetchJson<{ ledger_proof: any }>(url, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify(body),
+      delivery_mode: payload.metadata?.delivery_mode,
     });
-
-    // Expect finance to reply with ledger_proof object (ledger_proof_id, signature, signer_kid)
-    if (!resp || !resp.ledger_proof) {
-      throw new Error('Finance create ledger returned unexpected response');
-    }
-
-    // Normalize to LedgerProof shape
-    const lp = resp.ledger_proof;
-    return {
-      ledger_proof_id: lp.ledger_proof_id || lp.id,
-      signer_kid: lp.signer_kid,
-      signature: lp.signature,
-      ts: lp.ts || new Date().toISOString(),
-      payload: lp.payload || lp,
-    };
   }
 
   supportsSettlement(): boolean {
     return !!this.baseUrl;
   }
 
-  async settleOrder(payload: CreateLedgerPayload & { deliveryMode?: string }): Promise<LedgerProof> {
-    if (!this.baseUrl) {
-      return this.createLedgerForOrder(payload);
-    }
-
-    const url = this._url('/settlement');
-    const body = {
-      order_id: payload.orderId,
-      amount: payload.amount,
-      currency: payload.currency || 'USD',
-      buyer_id: payload.buyerId,
-      delivery_mode: payload.deliveryMode,
-      metadata: payload.metadata || {},
+  private formatLedgerProof(lp: any): LedgerProof {
+    return {
+      ledger_proof_id: lp.ledger_proof_id || lp.id || lp.proof_id || `ledger-${Date.now()}`,
+      signer_kid: lp.signer_kid || lp.signerKid,
+      signature: lp.signature || lp.signatures?.[0]?.signature,
+      ts: lp.ts || lp.signedAt || lp.signatures?.[0]?.signedAt || new Date().toISOString(),
+      payload: lp.proof || lp.payload || lp,
     };
+  }
 
-    const resp = await this._fetchJson<{ ledger_proof: any }>(url, {
+  private async buildJournal(order: OrderLike) {
+    try {
+      const journal = await mapOrderToJournal({
+        order_id: order.order_id,
+        sku_id: order.sku_id,
+        amount: order.amount,
+        currency: order.currency,
+        buyer_id: order.buyer_id,
+      });
+      return journal;
+    } catch (err) {
+      throw new Error(`Failed to map order to journal: ${(err as Error).message}`);
+    }
+  }
+
+  private async postLedger(journal: any) {
+    if (!this.baseUrl) return;
+    const url = this._url('/ledger/post');
+    await this._fetchJson(url, {
       method: 'POST',
       headers: this._headers(),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ entries: [journal] }),
     });
+  }
 
-    if (!resp || !resp.ledger_proof) {
-      throw new Error('Finance settlement returned unexpected response');
+  private async fetchProofById(proofId: string) {
+    const url = this._url(`/proofs/${encodeURIComponent(proofId)}`);
+    const resp = await this._fetchJson<{ proof: any }>(url, {
+      method: 'GET',
+      headers: this._headers(),
+    });
+    const proofPayload = resp?.proof || resp;
+    return this.formatLedgerProof(proofPayload);
+  }
+
+  private async requestProof(from: string, to: string) {
+    if (!this.baseUrl) {
+      return this.formatLedgerProof({
+        proof_id: `proof-${Date.now()}`,
+        signer_kid: process.env.FINANCE_SIGNER_KID || 'finance-signer-v1',
+        signature: Buffer.from(`proof:${Date.now()}`).toString('base64'),
+        ts: new Date().toISOString(),
+      });
     }
-    const lp = resp.ledger_proof;
+    const url = this._url('/proofs');
+    const resp = await this._fetchJson<{ proof?: any; proof_id?: string }>(url, {
+      method: 'POST',
+      headers: this._headers(),
+      body: JSON.stringify({ from, to, approvals: this.defaultApprovals, requiredRoles: this.defaultRoles }),
+    });
+    if (resp?.proof) {
+      return this.formatLedgerProof(resp.proof);
+    }
+    if (resp?.proof_id) {
+      return this.fetchProofById(resp.proof_id);
+    }
+    return this.formatLedgerProof(resp);
+  }
+
+  private synthProof(order: OrderLike): LedgerProof {
+    const ledgerProofId = `ledger-sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const signature = Buffer.from(`ledger:${ledgerProofId}`).toString('base64');
     return {
-      ledger_proof_id: lp.ledger_proof_id || lp.id,
-      signer_kid: lp.signer_kid,
-      signature: lp.signature,
-      ts: lp.ts || new Date().toISOString(),
-      payload: lp.payload || lp,
+      ledger_proof_id: ledgerProofId,
+      signer_kid: process.env.FINANCE_SIGNER_KID || 'finance-signer-v1',
+      signature,
+      ts: new Date().toISOString(),
+      payload: {
+        simulated: true,
+        orderId: order.order_id,
+        amount: order.amount,
+      },
     };
+  }
+
+  private isNotFoundError(error: unknown) {
+    if (!error) return false;
+    const msg = String((error as Error).message || '').toLowerCase();
+    return msg.includes('404');
+  }
+
+  async settleOrder(order: OrderLike): Promise<LedgerProof> {
+    if (!this.baseUrl) {
+      return this.synthProof(order);
+    }
+
+    const journal = await this.buildJournal(order);
+    const body = {
+      order_id: order.order_id,
+      sku_id: order.sku_id,
+      buyer_id: order.buyer_id,
+      currency: order.currency || 'USD',
+      delivery_mode: order.delivery_mode,
+      journal,
+      approvals: this.defaultApprovals,
+      requiredRoles: this.defaultRoles,
+      actor: this.actorId,
+      idempotency_key: order.order_id,
+    };
+
+    try {
+      const url = this._url('/settlement');
+      const resp = await this._fetchJson<{ ledger_proof: any }>(url, {
+        method: 'POST',
+        headers: this._headers(),
+        body: JSON.stringify(body),
+      });
+      if (resp?.ledger_proof) {
+        return this.formatLedgerProof(resp.ledger_proof);
+      }
+    } catch (err) {
+      if (!this.isNotFoundError(err)) {
+        throw err;
+      }
+      // fall through to manual flow
+    }
+
+    // Manual fallback: post ledger and request proof
+    await this.postLedger(journal);
+    return this.requestProof(journal.timestamp, journal.timestamp);
   }
 
   async verifyLedgerProof(proof: LedgerProof): Promise<boolean> {

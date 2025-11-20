@@ -80,3 +80,26 @@ CREATE TABLE IF NOT EXISTS invoices (
   due_date DATE,
   metadata JSONB DEFAULT '{}'::jsonb
 );
+
+CREATE TABLE IF NOT EXISTS journal_requests (
+  idempotency_key TEXT PRIMARY KEY,
+  payload_hash TEXT NOT NULL,
+  journal_ids UUID[] NOT NULL DEFAULT '{}',
+  actor TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION set_journal_requests_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_journal_requests_updated_at ON journal_requests;
+CREATE TRIGGER trg_journal_requests_updated_at
+  BEFORE UPDATE ON journal_requests
+  FOR EACH ROW
+  EXECUTE PROCEDURE set_journal_requests_updated_at();

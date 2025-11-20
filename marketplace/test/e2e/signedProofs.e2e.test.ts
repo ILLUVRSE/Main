@@ -125,6 +125,7 @@ test('signed proof contains required fields and signature verifies when possible
   expect(orderJson.ok).toBe(true);
   const finalOrder = orderJson.order;
   expect(finalOrder).toBeTruthy();
+  expect(finalOrder.ledger_proof_id).toBeTruthy();
 
   if (!finalOrder.delivery || !finalOrder.delivery.proof_id) {
     // If no proof was produced, fail the test.
@@ -147,6 +148,9 @@ test('signed proof contains required fields and signature verifies when possible
   expect(proof.signer_kid).toBeTruthy();
   expect(proof.signature).toBeTruthy(); // base64
   expect(proof.canonical_payload).toBeTruthy();
+  if (finalOrder.order_metadata?.manifest_signature_id) {
+    expect(proof.manifest_signature_id).toBe(finalOrder.order_metadata.manifest_signature_id);
+  }
 
   // 6) If canonical_payload present and a public key is provided via env, verify signature
   const publicKeyPem = process.env.SIGNER_PUBLIC_KEY_PEM ?? '';

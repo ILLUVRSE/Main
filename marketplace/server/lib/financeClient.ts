@@ -175,6 +175,61 @@ export class FinanceClient {
     };
   }
 
+  supportsSettlement(): boolean {
+    return !!this.baseUrl;
+  }
+
+  async settleOrder(payload: CreateLedgerPayload & { deliveryMode?: string }): Promise<LedgerProof> {
+    if (!this.baseUrl) {
+      return this.createLedgerForOrder(payload);
+    }
+
+    const url = this._url('/settlement');
+    const body = {
+      order_id: payload.orderId,
+      amount: payload.amount,
+      currency: payload.currency || 'USD',
+      buyer_id: payload.buyerId,
+      delivery_mode: payload.deliveryMode,
+      metadata: payload.metadata || {},
+    };
+
+    const resp = await this._fetchJson<{ ledger_proof: any }>(url, {
+      method: 'POST',
+      headers: this._headers(),
+      body: JSON.stringify(body),
+    });
+
+    if (!resp || !resp.ledger_proof) {
+      throw new Error('Finance settlement returned unexpected response');
+    }
+    const lp = resp.ledger_proof;
+    return {
+      ledger_proof_id: lp.ledger_proof_id || lp.id,
+      signer_kid: lp.signer_kid,
+      signature: lp.signature,
+      ts: lp.ts || new Date().toISOString(),
+      payload: lp.payload || lp,
+    };
+  }
+
+  async verifyLedgerProof(proof: LedgerProof): Promise<boolean> {
+    if (!this.baseUrl) return true;
+    const url = this._url('/proofs/verify');
+    try {
+      const resp = await this._fetchJson<{ valid: boolean }>(url, {
+        method: 'POST',
+        headers: this._headers(),
+        body: JSON.stringify({ proof }),
+      });
+      return Boolean(resp?.valid);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.debug('finance verifyLedgerProof failed:', (err as Error).message);
+      return false;
+    }
+  }
+
   /**
    * health - basic health check against finance service
    */
@@ -197,4 +252,3 @@ export class FinanceClient {
 /* Singleton convenience instance */
 export const financeClient = new FinanceClient();
 export default financeClient;
-

@@ -13,7 +13,7 @@
 
 import { Router, Request, Response } from 'express';
 import agentProxy from '../lib/agentProxy';
-import { appendAuditEvent } from '../lib/auditWriter';
+import auditWriter from '../lib/auditWriter';
 
 const router = Router();
 
@@ -49,12 +49,13 @@ router.post('/api/agent/query', async (req: Request, res: Response) => {
 
   // Audit: record agent.query request (best-effort)
   try {
-    await appendAuditEvent({
-      actor_id: actorId,
-      event_type: 'agent.query.request',
-      payload: { prompt: typeof prompt === 'string' ? `${String(prompt).slice(0, 512)}` : '', context },
-      created_at: new Date().toISOString(),
-    }).catch(() => {
+    await auditWriter
+      .write({
+        actor: actorId,
+        action: 'agent.query.request',
+        details: { prompt: typeof prompt === 'string' ? `${String(prompt).slice(0, 512)}` : '', context },
+      })
+      .catch(() => {
       // swallow audit errors, but log
       // eslint-disable-next-line no-console
       console.debug('audit append failed for agent.query.request');
@@ -68,12 +69,17 @@ router.post('/api/agent/query', async (req: Request, res: Response) => {
 
     // Audit: record agent reply (best-effort)
     try {
-      await appendAuditEvent({
-        actor_id: actorId,
-        event_type: 'agent.query.response',
-        payload: { promptSummary: (typeof prompt === 'string' ? String(prompt).slice(0, 256) : ''), reply: (reply && (reply.reply || reply.text || '')).toString().slice(0, 1024), meta: reply.meta || null },
-        created_at: new Date().toISOString(),
-      }).catch(() => {
+      await auditWriter
+        .write({
+          actor: actorId,
+          action: 'agent.query.response',
+          details: {
+            promptSummary: (typeof prompt === 'string' ? String(prompt).slice(0, 256) : ''),
+            reply: (reply && (reply.reply || reply.text || '')).toString().slice(0, 1024),
+            meta: reply.meta || null,
+          },
+        })
+        .catch(() => {
         // eslint-disable-next-line no-console
         console.debug('audit append failed for agent.query.response');
       });
@@ -90,4 +96,3 @@ router.post('/api/agent/query', async (req: Request, res: Response) => {
 });
 
 export default router;
-

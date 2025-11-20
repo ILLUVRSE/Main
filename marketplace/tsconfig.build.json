@@ -1,0 +1,34 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "./server",
+    "declaration": false
+  },
+  "include": [
+    "server/app.ts",
+    "server/routes/checkout.route.ts",
+    "server/routes/order.route.ts",
+    "server/routes/proofs.route.ts",
+    "server/routes/license.route.ts",
+    "server/routes/preview.route.ts",
+    "server/routes/sku.route.ts",
+    "server/routes/catalog.route.ts",
+    "server/routes/health.route.ts",
+    "server/routes/webhooks.route.ts",
+    "server/lib/**/*.ts",
+    "server/middleware/**/*.ts",
+    "server/types/**/*.d.ts"
+  ],
+  "exclude": [
+    "server/lib/signingClient.ts",
+    "server/server.ts",
+    "server/routes/admin/**",
+    "server/routes/admin.*.ts",
+    "server/routes/marketplace.route.ts",
+    "server/routes/payments.route.ts",
+    "server/routes/uploads.route.ts",
+    "server/routes/agents/**"
+  ]
+}

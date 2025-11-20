@@ -68,7 +68,13 @@ test('signed proof contains required fields and signature verifies when possible
     buyer_id: 'user:e2e-buyer@example.com',
     payment_method: { provider: 'mock', payment_intent: `pi-${Date.now()}` },
     billing_metadata: { company: 'ProofCo' },
-    delivery_preferences: { encryption: 'buyer-key' },
+    delivery_preferences: {
+      mode: 'buyer-managed',
+      buyer_public_key: crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey
+        .export({ type: 'spki', format: 'pem' })
+        .toString(),
+      key_identifier: 'e2e-proof-buyer',
+    },
     order_metadata: { correlation_id: `corr-${Date.now()}` },
   };
 
@@ -140,6 +146,7 @@ test('signed proof contains required fields and signature verifies when possible
   expect(proof.artifact_sha256).toBeTruthy();
   expect(proof.signer_kid).toBeTruthy();
   expect(proof.signature).toBeTruthy(); // base64
+  expect(proof.canonical_payload).toBeTruthy();
 
   // 6) If canonical_payload present and a public key is provided via env, verify signature
   const publicKeyPem = process.env.SIGNER_PUBLIC_KEY_PEM ?? '';
@@ -189,4 +196,3 @@ test('signed proof contains required fields and signature verifies when possible
     if (first.signature) expect(first.signer_kid || first.signerId || first.signer).toBeTruthy();
   }
 }, 120_000);
-

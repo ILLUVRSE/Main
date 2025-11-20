@@ -12,6 +12,39 @@ type ProofRecord = {
   signature?: string;
   ts?: string;
   canonical_payload?: any;
+  key_metadata?: any;
+  delivery_mode?: string;
+  encryption?: any;
+};
+
+type LightweightOrder = {
+  order_id?: string;
+  delivery?: {
+    proof_id?: string;
+    artifact_sha256?: string;
+    manifest_signature_id?: string;
+    ledger_proof_id?: string;
+    signer_kid?: string;
+    signature?: string;
+    ts?: string;
+    canonical_payload?: any;
+    key_metadata?: any;
+    mode?: string;
+    encryption?: any;
+    proof?: {
+      proof_id?: string;
+      signature?: string;
+      signer_kid?: string;
+      artifact_sha256?: string;
+      manifest_signature_id?: string;
+      ledger_proof_id?: string;
+      ts?: string;
+      canonical_payload?: any;
+    };
+  };
+  ledger_proof_id?: string;
+  key_metadata?: Record<string, any>;
+  delivery_mode?: string;
 };
 
 /**
@@ -126,7 +159,7 @@ async function fetchProofFromOrders(proofId: string): Promise<ProofRecord | null
 
       // Fallback: check orders table for delivery/proof JSON
       try {
-        const q = `SELECT order_id, delivery, license FROM orders WHERE delivery->>'proof_id' = $1 LIMIT 1`;
+        const q = `SELECT order_id, delivery, license, key_metadata, delivery_mode FROM orders WHERE delivery->>'proof_id' = $1 LIMIT 1`;
         const r = await db.query(q, [proofId]);
         if (r && r.rows && r.rows.length > 0) {
           const row = r.rows[0];
@@ -142,6 +175,9 @@ async function fetchProofFromOrders(proofId: string): Promise<ProofRecord | null
             signature: proof?.signature || delivery?.signature,
             ts: proof?.ts || delivery?.ts,
             canonical_payload: proof?.canonical_payload || delivery?.canonical_payload,
+            key_metadata: row.key_metadata || delivery?.key_metadata,
+            delivery_mode: row.delivery_mode || delivery?.mode,
+            encryption: delivery?.encryption,
           };
         }
       } catch {
@@ -156,7 +192,7 @@ async function fetchProofFromOrders(proofId: string): Promise<ProofRecord | null
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const checkoutRouter = require('./checkout.route');
-    const inMemoryOrders = checkoutRouter && checkoutRouter.__inMemoryOrders;
+    const inMemoryOrders = (checkoutRouter && checkoutRouter.__inMemoryOrders) as Map<string, LightweightOrder> | undefined;
     if (inMemoryOrders && typeof inMemoryOrders.values === 'function') {
       for (const order of Array.from(inMemoryOrders.values())) {
         if (order?.delivery?.proof_id === proofId || order?.delivery?.proof?.proof_id === proofId) {
@@ -171,6 +207,9 @@ async function fetchProofFromOrders(proofId: string): Promise<ProofRecord | null
             signature: proof?.signature,
             ts: proof?.ts,
             canonical_payload: proof?.canonical_payload,
+            key_metadata: order.key_metadata || order.delivery?.key_metadata,
+            delivery_mode: order.delivery_mode || order.delivery?.mode,
+            encryption: order.delivery?.encryption,
           };
         }
       }
@@ -183,7 +222,7 @@ async function fetchProofFromOrders(proofId: string): Promise<ProofRecord | null
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const orderRoute = require('./order.route');
-    const localStore = orderRoute && orderRoute.__localStore;
+    const localStore = (orderRoute && orderRoute.__localStore) as Map<string, LightweightOrder> | undefined;
     if (localStore && typeof localStore.values === 'function') {
       for (const order of Array.from(localStore.values())) {
         if (order?.delivery?.proof_id === proofId || order?.delivery?.proof?.proof_id === proofId) {
@@ -196,6 +235,9 @@ async function fetchProofFromOrders(proofId: string): Promise<ProofRecord | null
             signature: proof?.signature,
             ts: proof?.ts,
             canonical_payload: proof?.canonical_payload,
+            key_metadata: order.key_metadata || order.delivery?.key_metadata,
+            delivery_mode: order.delivery_mode || order.delivery?.mode,
+            encryption: order.delivery?.encryption,
           };
         }
       }
@@ -257,4 +299,3 @@ router.get('/proofs/:proof_id', async (req: Request, res: Response) => {
 });
 
 export default router;
-

@@ -152,6 +152,27 @@ export default function AccountDashboard() {
     );
   }
 
+  function renderKeyMetadata(meta: any, deliveryMode?: string) {
+    if (!meta && !deliveryMode) return null;
+    return (
+      <div className="mt-2 text-xs text-muted space-y-1">
+        <div>
+          <strong>Delivery mode:</strong> {meta?.mode || deliveryMode || '—'}
+        </div>
+        {meta?.buyer_public_key_fingerprint && (
+          <div>
+            <strong>Buyer key fingerprint:</strong> {meta.buyer_public_key_fingerprint}
+          </div>
+        )}
+        {meta?.kms_key_id && (
+          <div>
+            <strong>KMS key:</strong> {meta.kms_key_id}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="container p-6">
       <h2 className="text-2xl font-heading font-bold mb-3">Account</h2>
@@ -218,6 +239,7 @@ export default function AccountDashboard() {
                         {renderDeliveryActions(o?.delivery)}
                       </div>
                     </div>
+                    {renderKeyMetadata(o?.key_metadata, o?.delivery_mode)}
                   </div>
                 );
               })}
@@ -261,4 +283,3 @@ export default function AccountDashboard() {
     </div>
   );
 }
-

@@ -99,6 +99,37 @@ Follow a canary-first deployment. Assume Kubernetes + Helm, but steps map to oth
    * Validate one end-to-end order (test buyer) in prod with a test payment provider sandbox account, confirm ledger proof and delivery proof are produced and archived.
    * Confirm audit export pipeline produces a sample export to `S3_AUDIT_BUCKET`. Run `audit-verify` on sample.
 
+## Object Lock verification (S3 Audit + Delivery artifacts)
+
+Run these commands before every prod cutover and weekly thereafter:
+
+```bash
+# Ensure bucket-level Object Lock policy is enforced
+aws s3api get-object-lock-configuration --bucket "$S3_AUDIT_BUCKET"
+
+# Spot check a recent export/delivery object for compliance (should return COMPLIANCE or GOVERNANCE)
+aws s3api head-object \
+  --bucket "$S3_AUDIT_BUCKET" \
+  --key "audit/$(date +%Y/%m/%d)/sample.json" \
+  --query 'ObjectLockMode'
+```
+
+If either command returns `null`, halt deploys and re-apply object lock per `infra/audit_export_policy.md`.
+
+## Key rotation (Marketplace + ArtifactPublisher)
+
+1. **Extract new signer public key** from KMS/signing proxy:
+
+   ```bash
+   SINGER_KID="artifact-publisher-signer-v2"
+   scripts/update-signers-from-kms.sh "$SINGER_KID" > /tmp/new-signer.json
+   ```
+
+2. **Update signer registry** (`kernel/tools/signers.json`) and the Marketplace config map/secret referencing the signer kid.
+3. **Deploy canary** with new signer env vars (`MARKETPLACE_SIGNER_KID`, `ARTIFACT_PUBLISHER_SIGNER_KID`).
+4. **Verify** with a test checkout + `GET /proofs/{id}` ensuring `signer_kid` matches the rotated key.
+5. **Revoke old key** by removing it from signer registry once all regions confirm new proofs.
+
 ---
 
 ## Smoke checks & manual verification

@@ -59,6 +59,14 @@ export class KmsClient {
     }
   }
 
+  isConfigured(): boolean {
+    return this.mode !== 'disabled';
+  }
+
+  getMode(): 'kms' | 'proxy' | 'disabled' {
+    return this.mode;
+  }
+
   /**
    * Sign a raw message buffer and return base64 signature + signer id.
    * If using KMS, MessageType='RAW' is used (KMS will hash if needed depending
@@ -168,8 +176,10 @@ export class KmsClient {
       throw new Error(`Signing proxy error ${res.status}: ${txt}`);
     }
 
-    const json = await res.json();
-    if (!json || !json.signature) {
+    const json: { signature?: string; signer_kid?: string; ts?: string } = await res
+      .json()
+      .catch(() => ({}));
+    if (!json.signature) {
       throw new Error('Signing proxy returned invalid response');
     }
 
@@ -191,7 +201,9 @@ export class KmsClient {
       const txt = await res.text();
       throw new Error(`Signing proxy public key error ${res.status}: ${txt}`);
     }
-    const json = await res.json();
+    const json: { publicKeyPem?: string; signer_kid?: string } = await res
+      .json()
+      .catch(() => ({}));
     return {
       publicKeyPem: json.publicKeyPem,
       signer_kid: json.signer_kid || kid,
@@ -222,4 +234,3 @@ export class KmsClient {
 /* Singleton convenience export */
 export const kmsClient = new KmsClient();
 export default kmsClient;
-

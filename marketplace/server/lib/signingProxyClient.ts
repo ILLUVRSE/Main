@@ -71,8 +71,10 @@ export class SigningProxyClient {
       throw new Error(`Signing proxy responded ${res.status}: ${txt}`);
     }
 
-    const json = await res.json().catch(() => null);
-    if (!json || !json.signature) {
+    const json: { signature?: string; signer_kid?: string; ts?: string } = await res
+      .json()
+      .catch(() => ({}));
+    if (!json.signature) {
       throw new Error('Signing proxy returned invalid response (missing signature)');
     }
 
@@ -100,8 +102,10 @@ export class SigningProxyClient {
       throw new Error(`Signing proxy public-key returned ${res.status}: ${txt}`);
     }
 
-    const json = await res.json().catch(() => null);
-    if (!json || !json.publicKeyPem) {
+    const json: { publicKeyPem?: string; signer_kid?: string } = await res
+      .json()
+      .catch(() => ({}));
+    if (!json.publicKeyPem) {
       return null;
     }
 
@@ -133,4 +137,3 @@ export class SigningProxyClient {
 /* singleton convenience export */
 export const signingProxyClient = new SigningProxyClient();
 export default signingProxyClient;
-

@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { DeliveryPreferences, DeliveryMode } from '../lib/deliveryEncryption';
 import { buildFulfillmentArtifacts } from '../lib/fulfillment';
@@ -226,18 +226,17 @@ router.post('/checkout', async (req: Request, res: Response) => {
     const billingMetadata = body.billing_metadata || {};
     const deliveryPreferences: DeliveryPreferences = body.delivery_preferences || {};
     const orderMetadata = { ...(body.order_metadata || {}) };
-    if (manifestSignatureId) {
-      orderMetadata.manifest_signature_id = manifestSignatureId;
-    }
+    let manifestSignatureId: string | undefined;
 
     if (!skuId || !buyerId) {
+      // eslint-disable-next-line no-console
+      console.warn('checkout.missing_fields', { skuId, buyerId });
       return res.status(400).json({ ok: false, error: { code: 'MISSING_FIELDS', message: 'sku_id and buyer_id required' } });
     }
 
     // Determine amount/currency from SKU (DB lookup) or defaults
     let amount = Number(body.amount || 0);
     let currency = String(body.currency || 'USD');
-    let manifestSignatureId: string | undefined;
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -258,6 +257,8 @@ router.post('/checkout', async (req: Request, res: Response) => {
             manifestMeta?.manifestSignature?.id ||
             undefined;
           if (row.manifest_valid === false) {
+            // eslint-disable-next-line no-console
+            console.warn('checkout.manifest_not_verified', { skuId });
             return res
               .status(409)
               .json({ ok: false, error: { code: 'MANIFEST_NOT_VERIFIED', message: 'SKU manifest not verified' } });
@@ -266,6 +267,10 @@ router.post('/checkout', async (req: Request, res: Response) => {
       }
     } catch {
       // ignore - dev fallback
+    }
+
+    if (manifestSignatureId) {
+      orderMetadata.manifest_signature_id = manifestSignatureId;
     }
 
     // Idempotency handling
@@ -317,9 +322,13 @@ router.post('/checkout', async (req: Request, res: Response) => {
       order_metadata: orderMetadata,
     });
 
+    // eslint-disable-next-line no-console
+    console.info('checkout.success', { orderId: order.order_id, skuId: order.sku_id });
     return res.json({ ok: true, order });
   } catch (err: any) {
     checkoutFailuresTotal.inc();
+    // eslint-disable-next-line no-console
+    console.error('checkout.failed', err);
     return res.status(500).json({ ok: false, error: { code: 'CHECKOUT_ERROR', message: err?.message || 'Failed to create checkout' } });
   }
 });
@@ -387,9 +396,31 @@ async function handlePaymentWebhook(body: any, actorId?: string) {
  * Endpoint used by payment provider to notify of payment events.
  * Validates signature when Stripe-like config present (best-effort). For dev, accept unsigned.
  */
-router.post('/webhooks/payment', async (req: Request, res: Response) => {
+const webhookRawParser = express.raw({ type: '*/*', limit: '1mb' });
+
+router.post('/webhooks/payment', webhookRawParser, async (req: Request, res: Response) => {
   try {
-    const body = req.body || {};
+    (req as any).rawBody = (req as any).rawBody || req.body;
+    let body: any = req.body;
+    const raw = (req as any).rawBody;
+    const needsParse =
+      !body ||
+      Buffer.isBuffer(body) ||
+      typeof body === 'string' ||
+      (typeof body === 'object' && Object.keys(body).length === 0);
+    const source = raw || body;
+    if (needsParse && source) {
+      try {
+        body = Buffer.isBuffer(source) ? JSON.parse(source.toString('utf-8')) : typeof source === 'string' ? JSON.parse(source) : source;
+      } catch (parseErr) {
+        // eslint-disable-next-line no-console
+        console.error('Payment webhook JSON parse error:', parseErr);
+        return res.status(400).json({ ok: false, error: { code: 'INVALID_WEBHOOK_JSON', message: 'Unable to parse webhook payload' } });
+      }
+    }
+    if (!body || typeof body !== 'object') {
+      body = {};
+    }
 
     // if PAYMENT_PROVIDER_STRIPE_WEBHOOK_SECRET is set, we would validate signature here.
     // For local dev/mocks we accept unsigned webhooks.

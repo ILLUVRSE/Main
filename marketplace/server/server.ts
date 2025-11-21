@@ -19,6 +19,10 @@ import adminJobs from './routes/admin/jobs.route';
 import marketplace from './routes/marketplace.route';
 import payments from './routes/payments.route';
 import webhooks from './routes/webhooks.route';
+import checkout from './routes/checkout.route';
+import order from './routes/order.route';
+import proofs from './routes/proofs.route';
+import license from './routes/license.route';
 
 // simple middleware
 import { optionalAuth } from './middleware/auth';
@@ -54,6 +58,10 @@ export function createApp() {
   // Mount public API routes
   app.use('/marketplace', marketplace);
   app.use('/payments', payments);
+  app.use('/', checkout);
+  app.use('/', order);
+  app.use('/', proofs);
+  app.use('/', license);
 
   // Mount webhooks with raw body parser
   app.use('/webhooks', express.raw({ type: '*/*', limit: '1mb' }), (req, res, next) => {
@@ -155,4 +163,3 @@ if (require.main === module) {
 }
 
 export default createApp();
-

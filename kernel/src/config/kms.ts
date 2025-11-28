@@ -7,6 +7,7 @@ export interface KmsConfig {
   bearerToken?: string;
   mtlsCertPath?: string;
   mtlsKeyPath?: string;
+  algorithm: string;
   timeoutMs: number;
 }
 
@@ -22,6 +23,8 @@ export function loadKmsConfig(): KmsConfig {
   const bearerToken = process.env.KMS_BEARER_TOKEN || undefined;
   const mtlsCertPath = process.env.KMS_MTLS_CERT_PATH ? path.resolve(process.env.KMS_MTLS_CERT_PATH) : undefined;
   const mtlsKeyPath = process.env.KMS_MTLS_KEY_PATH ? path.resolve(process.env.KMS_MTLS_KEY_PATH) : undefined;
+  const algorithmEnv = process.env.MANIFEST_SIGNING_ALG || process.env.SIGNING_ALGORITHM || 'ed25519';
+  const algorithm = algorithmEnv.trim().toLowerCase();
   const timeoutMs = Number(process.env.KMS_TIMEOUT_MS || 5000);
 
   return {
@@ -31,6 +34,7 @@ export function loadKmsConfig(): KmsConfig {
     bearerToken,
     mtlsCertPath,
     mtlsKeyPath,
+    algorithm,
     timeoutMs,
   };
 }

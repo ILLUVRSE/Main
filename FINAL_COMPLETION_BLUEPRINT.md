@@ -12,8 +12,8 @@ This blueprint enumerates the *blocking*, testable acceptance gates required to 
 ---
 
 ## Kernel — Minimum completion (MUST be 100% done)
-- [ ] TASK: OpenAPI + server || ACCEPTANCE: `kernel/openapi.yaml` exists and endpoints `POST /kernel/sign`, `POST /kernel/agent`, `POST /kernel/allocate`, `POST /kernel/division`, `GET /kernel/audit/{id}`, `GET /kernel/reason/{node}` implement the contract (JSON schema match) and health endpoint returns 200. || ALLOWED: ["kernel/","server/","RepoWriter/server/"] || TESTS: `npm --prefix kernel run test` || OWNER: Ryan
-- [ ] TASK: RBAC & Auth || ACCEPTANCE: OIDC/SSO for humans and mTLS for service-to-service enforced; SuperAdmin role exists; positive and negative access tests exist and pass. || ALLOWED: ["kernel/","infra/","RepoWriter/server/"] || TESTS: `./scripts/test-rbac.sh` || OWNER: Security Engineer
+ - [x] TASK: OpenAPI + server || ACCEPTANCE: `kernel/openapi.yaml` exists and endpoints `POST /kernel/sign`, `POST /kernel/agent`, `POST /kernel/allocate`, `POST /kernel/division`, `GET /kernel/audit/{id}`, `GET /kernel/reason/{node}` implement the contract (JSON schema match) and health endpoint returns 200. || ALLOWED: ["kernel/","server/","RepoWriter/server/"] || TESTS: `npm --prefix kernel run test` || OWNER: Ryan
+- [x] TASK: RBAC & Auth || ACCEPTANCE: OIDC/SSO for humans and mTLS for service-to-service enforced; SuperAdmin role exists; positive and negative access tests exist and pass. || ALLOWED: ["kernel/","infra/","RepoWriter/server/"] || TESTS: `./scripts/test-rbac.sh` || OWNER: Security Engineer
 - [ ] TASK: Manifest signing || ACCEPTANCE: Kernel integrates with KMS/HSM to produce ManifestSignature objects (Ed25519/RSA as required); `POST /kernel/sign` returns a signed manifest whose signature verifies; key rotation audited. || ALLOWED: ["kernel/","infra/"] || TESTS: `./scripts/test-signing.sh` || OWNER: Security Engineer
 - [ ] TASK: Audit chain (chained) || ACCEPTANCE: Kernel emits append-only AuditEvent objects with `prevHash`, SHA256 and signature; events published to Event Bus and archived to S3 with Object Lock; `tools/verify_audit_chain.py` can replay and verify the chain. || ALLOWED: ["kernel/","infra/"] || TESTS: `python3 tools/verify_audit_chain.py` || OWNER: Security Engineer
 - [ ] TASK: Multisig upgrade flow || ACCEPTANCE: 3-of-5 multisig upgrade flow implemented with automation and tests that simulate approvals and blocking behavior. || ALLOWED: ["kernel/","control-panel/"] || TESTS: `./scripts/test-multisig.sh` || OWNER: Ryan
@@ -151,4 +151,3 @@ This blueprint enumerates the *blocking*, testable acceptance gates required to 
 **Platform 100% complete** = All per-module “minimum completion” tasks in this blueprint passed, each module’s acceptance-criteria tests and docs are present/green, cross-cutting audit/security/DR checks passed, and required signoffs exist; final verification is `python3 tools/check_acceptance.py && ./scripts/run_final_audit.sh`.
 
 ---
-

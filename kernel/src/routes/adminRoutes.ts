@@ -2,6 +2,7 @@ import express, { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db';
 import { getIdempotencyTableName } from '../idempotency/config';
 import { requireRoles, Roles } from '../rbac';
+import { authMiddleware } from '../middleware/auth';
 import { cleanupExpiredAuditEvents } from '../audit/auditPolicy';
 
 interface IdempotencyRow {
@@ -13,6 +14,9 @@ interface IdempotencyRow {
   created_at: string;
   expires_at: string | null;
 }
+
+const ENV = process.env.NODE_ENV || 'development';
+const IS_PRODUCTION = ENV === 'production';
 
 function parseLimit(raw: unknown): number {
   if (typeof raw === 'string' && raw.trim()) {
@@ -26,6 +30,10 @@ function parseLimit(raw: unknown): number {
 
 export default function createAdminRouter(): Router {
   const router = express.Router();
+
+  if (IS_PRODUCTION) {
+    router.use(authMiddleware);
+  }
 
   router.get(
     '/admin/idempotency',

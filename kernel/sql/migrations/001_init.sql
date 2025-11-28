@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS manifest_signatures (
   manifest_id VARCHAR NOT NULL,
   signer_id VARCHAR NOT NULL,
   signature TEXT NOT NULL,
+  algorithm TEXT,
+  key_version TEXT,
   version VARCHAR,
   ts TIMESTAMPTZ NOT NULL DEFAULT now(),
   prev_hash TEXT

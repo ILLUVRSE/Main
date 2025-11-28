@@ -17,6 +17,8 @@ type ManifestSignatureRow = {
   manifest_id: string | null;
   signer_id: string | null;
   signature: string;
+  algorithm: string | null;
+  key_version: string | null;
   version: string | null;
   ts: string | null;
   prev_hash: string | null;
@@ -284,12 +286,14 @@ export class MockDb {
   }
 
   private insertManifestSignature(params: any[]): QueryResult<any> {
-    const [id, manifestId, signerId, signature, version, ts, prevHash] = params;
+    const [id, manifestId, signerId, signature, algorithm, keyVersion, version, ts, prevHash] = params;
     this.state.manifest_signatures.set(id, {
       id,
       manifest_id: manifestId ?? null,
       signer_id: signerId ?? null,
       signature,
+      algorithm: algorithm ?? null,
+      key_version: keyVersion ?? null,
       version: version ?? null,
       ts: ts ?? nowIso(),
       prev_hash: prevHash ?? null,

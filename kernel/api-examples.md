@@ -152,13 +152,15 @@ Response (200):
   "signature_record": {
     "manifest_id": "dvg-1a2b-3c4d",
     "signer_id": "kernel-signer-1",
+    "algorithm": "ed25519",
+    "key_version": "kernel-signer-v1",
     "signature": "BASE64_SIG",
     "version": "1.0.0",
     "ts": "2025-01-12T10:05:00Z"
   }
 }
 
-Notes: The signature record is stored and an AuditEvent emitted linking the manifest and its signature. Kernel validates caller RBAC for signing privileges.
+Notes: The signature record is stored (with signer id, algorithm, and key_version for rotation audits) and an AuditEvent emitted linking the manifest and its signature. Kernel validates caller RBAC for signing privileges.
 
 7) Fetch an Audit Event
 

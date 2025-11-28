@@ -18,6 +18,7 @@ import https from 'https';
 import fetch, { RequestInit } from 'node-fetch';
 import { ManifestSignature } from './types';
 import { KmsConfig, loadKmsConfig } from './config/kms';
+import { normalizeSignatureAlgorithm } from './services/signatureVerifier';
 
 export interface SigningRequest {
   manifest: any;
@@ -77,7 +78,11 @@ function getOrCreateKeyPair(signerId: string): KeyPair {
 }
 
 export class LocalSigningProvider implements SigningProvider {
-  constructor(private signerId: string = 'kernel-signer-local') {}
+  constructor(
+    private signerId: string = 'kernel-signer-local',
+    private algorithm: string = 'ed25519',
+    private keyVersion: string = 'local-dev',
+  ) {}
 
   async signManifest(manifest: any, request?: SigningRequest): Promise<ManifestSignature> {
     const prepared = request ?? prepareManifestSigningRequest(manifest);
@@ -90,6 +95,8 @@ export class LocalSigningProvider implements SigningProvider {
       signerId: this.signerId,
       signature,
       version: prepared.version,
+      algorithm: normalizeSignatureAlgorithm(this.algorithm),
+      keyVersion: this.keyVersion,
       ts: prepared.ts,
       prevHash: null,
     };
@@ -109,16 +116,29 @@ export class LocalSigningProvider implements SigningProvider {
   }
 }
 
-function mapKmsManifestResponse(body: any, manifestId: string, fallbackSignerId: string, ts: string): ManifestSignature {
+function mapKmsManifestResponse(
+  body: any,
+  manifestId: string,
+  fallbackSignerId: string,
+  ts: string,
+  defaultAlgorithm: string,
+  manifestVersionFallback?: string,
+): ManifestSignature {
   const mappedId = body.id ?? body.signature_id ?? crypto.randomUUID();
   const signerId = body.signer_id ?? body.signerId ?? fallbackSignerId;
   const responseManifestId = body.manifest_id ?? body.manifestId ?? manifestId;
+  const manifestVersion =
+    body.manifest_version ?? body.manifestVersion ?? body.version ?? manifestVersionFallback ?? undefined;
+  const keyVersion = body.key_version ?? body.keyVersion ?? body.key_id ?? body.keyId ?? undefined;
+  const algorithm = normalizeSignatureAlgorithm(body.algorithm ?? body.alg ?? defaultAlgorithm);
   return {
     id: String(mappedId),
     manifestId: responseManifestId,
     signerId,
     signature: body.signature ?? body.sig ?? '',
-    version: body.version ?? body.key_version ?? undefined,
+    version: manifestVersion,
+    algorithm,
+    keyVersion,
     ts: body.ts ?? ts,
     prevHash: body.prev_hash ?? body.prevHash ?? null,
   };
@@ -126,9 +146,11 @@ function mapKmsManifestResponse(body: any, manifestId: string, fallbackSignerId:
 
 class HttpKmsSigningProvider implements SigningProvider {
   private agent?: https.Agent;
+  private defaultAlgorithm: string;
 
   constructor(private config: KmsConfig) {
     this.agent = this.createHttpsAgentIfNeeded();
+    this.defaultAlgorithm = normalizeSignatureAlgorithm(config.algorithm || 'ed25519');
   }
 
   private createHttpsAgentIfNeeded(): https.Agent | undefined {
@@ -186,7 +208,14 @@ class HttpKmsSigningProvider implements SigningProvider {
       headers: this.buildHeaders(true),
       body: JSON.stringify(body),
     });
-    return mapKmsManifestResponse(response, prepared.manifestId, this.config.signerId, prepared.ts);
+    return mapKmsManifestResponse(
+      response,
+      prepared.manifestId,
+      this.config.signerId,
+      prepared.ts,
+      this.defaultAlgorithm,
+      prepared.version,
+    );
   }
 
   async signData(data: string, request?: DataSigningRequest): Promise<{ signature: string; signerId: string }> {
@@ -229,6 +258,8 @@ export class FakeKmsSigningProvider implements SigningProvider {
       manifestId?: string;
       ts?: string;
       version?: string;
+      algorithm?: string;
+      keyVersion?: string;
     } = {},
   ) {}
 
@@ -241,6 +272,8 @@ export class FakeKmsSigningProvider implements SigningProvider {
       signerId: this.options.signerId ?? 'fake-kms-signer',
       signature: this.options.signature ?? Buffer.from('fake-signature').toString('base64'),
       version: this.options.version ?? prepared.version,
+      algorithm: normalizeSignatureAlgorithm(this.options.algorithm ?? 'ed25519'),
+      keyVersion: this.options.keyVersion,
       ts: this.options.ts ?? prepared.ts,
       prevHash: null,
     };
@@ -264,10 +297,9 @@ export function createSigningProvider(
   type: 'auto' | 'local' | 'kms' = 'auto',
 ): SigningProvider {
   if (type === 'local' || (type === 'auto' && !config.endpoint)) {
-    return new LocalSigningProvider(config.signerId);
+    return new LocalSigningProvider(config.signerId, config.algorithm || 'ed25519');
   }
   return new HttpKmsSigningProvider(config);
 }
 
 export { HttpKmsSigningProvider };
-

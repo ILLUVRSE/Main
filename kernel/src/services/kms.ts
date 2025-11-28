@@ -9,13 +9,24 @@
 import http from 'http';
 import https from 'https';
 
+type RequestFactory = (options: http.RequestOptions, cb: (res: http.IncomingMessage) => void) => http.ClientRequest;
+
+export interface RequestOverrides {
+  http?: RequestFactory;
+  https?: RequestFactory;
+}
+
 /**
  * probeKmsReachable performs a simple HTTP GET against the provided endpoint
  * and resolves to `true` if the TCP connection succeeds and a response is
  * received before the timeout. Any network or protocol error results in
  * `false` so callers can surface KMS reachability in health checks.
  */
-export async function probeKmsReachable(endpoint?: string, timeoutMs = 3000): Promise<boolean> {
+export async function probeKmsReachable(
+  endpoint?: string,
+  timeoutMs = 3000,
+  overrides?: RequestOverrides
+): Promise<boolean> {
   const url = (endpoint || '').trim();
   if (!url) {
     return false;
@@ -24,7 +35,9 @@ export async function probeKmsReachable(endpoint?: string, timeoutMs = 3000): Pr
   try {
     const parsed = new URL(url);
     const isHttps = parsed.protocol === 'https:';
-    const lib = isHttps ? https : http;
+    const requester: RequestFactory = isHttps
+      ? overrides?.https || https.request
+      : overrides?.http || http.request;
 
     return await new Promise<boolean>((resolve) => {
       const opts: http.RequestOptions = {
@@ -35,7 +48,7 @@ export async function probeKmsReachable(endpoint?: string, timeoutMs = 3000): Pr
         timeout: timeoutMs,
       };
 
-      const req = lib.request(opts, (res) => {
+      const req = requester(opts, (res) => {
         res.on('data', () => {});
         res.on('end', () => resolve(true));
       });
@@ -58,4 +71,3 @@ export async function probeKmsReachable(endpoint?: string, timeoutMs = 3000): Pr
 }
 
 export default probeKmsReachable;
-

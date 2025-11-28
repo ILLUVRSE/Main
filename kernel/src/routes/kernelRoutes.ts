@@ -46,13 +46,16 @@ import {
 import createUpgradeRouter from './upgradeRoutes';
 import createControlPanelRouter from './controlPanelRoutes';
 import { getReasoningClient, ReasoningClientError } from '../reasoning/client';
+import { authMiddleware } from '../middleware/auth';
 
 const ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = ENV === 'production';
 const ENABLE_TEST_ENDPOINTS = ((process.env.ENABLE_TEST_ENDPOINTS || '').toLowerCase() === 'true') || ENV === 'test';
 
 function applyProductionGuards(...middlewares: RequestHandler[]): RequestHandler[] {
-  return IS_PRODUCTION ? middlewares : [];
+  if (!IS_PRODUCTION) return [];
+  if (!middlewares.length) return [authMiddleware];
+  return [authMiddleware, ...middlewares];
 }
 
 function requireRolesInProduction(...roles: RoleName[]): RequestHandler[] {
@@ -61,6 +64,15 @@ function requireRolesInProduction(...roles: RoleName[]): RequestHandler[] {
 
 function requireAuthInProduction(): RequestHandler[] {
   return applyProductionGuards(requireAnyAuthenticated);
+}
+
+function resolvePrincipal(req: Request): Principal {
+  const ctxPrincipal =
+    (req.authContext?.principal as Principal | undefined) || ((req as any).principal as Principal | undefined);
+  if (ctxPrincipal) {
+    return ctxPrincipal;
+  }
+  return getPrincipalFromRequest(req);
 }
 
 /** Safely serialize JSON-like values for Postgres storage */
@@ -111,7 +123,7 @@ export default function createKernelRouter(): Router {
     ...requireRolesInProduction(Roles.SUPERADMIN, Roles.OPERATOR),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const principal = ((req as any).principal || getPrincipalFromRequest(req)) as Principal | undefined;
+        const principal = resolvePrincipal(req);
 
         const result = await handleKernelCreateRequest({
           payload: req.body,
@@ -147,7 +159,7 @@ export default function createKernelRouter(): Router {
       let managed = false;
       let client: PoolClient | undefined;
       try {
-        const principal = (req as any).principal || getPrincipalFromRequest(req);
+        const principal = resolvePrincipal(req);
 
         // In production require authenticated principal and proper role/type
         if (IS_PRODUCTION) {
@@ -178,16 +190,20 @@ export default function createKernelRouter(): Router {
         }
 
         const sig = await signingProxy.signManifest(manifest);
+        const signatureAlgorithm = sig.algorithm ?? null;
+        const signatureKeyVersion = sig.keyVersion ?? null;
 
         try {
           await client.query(
-            `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, version, ts, prev_hash)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, algorithm, key_version, version, ts, prev_hash)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
             [
               sig.id,
               sig.manifestId ?? null,
               sig.signerId ?? null,
               sig.signature,
+              signatureAlgorithm,
+              signatureKeyVersion,
               sig.version ?? null,
               sig.ts ?? new Date().toISOString(),
               (sig as any).prevHash ?? null,
@@ -197,8 +213,17 @@ export default function createKernelRouter(): Router {
           console.warn('persist manifest_signature failed:', (e as Error).message || e);
         }
 
+        let auditRecordId: string | null = null;
         try {
-          await appendAuditEvent('manifest.signed', { manifestId: sig.manifestId ?? null, signatureId: sig.id, signerId: sig.signerId ?? null, principal });
+          const auditRecord = await appendAuditEvent('manifest.signed', {
+            manifestId: sig.manifestId ?? null,
+            signatureId: sig.id,
+            signerId: sig.signerId ?? null,
+            algorithm: signatureAlgorithm,
+            keyVersion: signatureKeyVersion,
+            principal,
+          });
+          auditRecordId = auditRecord.id;
         } catch (e) {
           console.warn('audit append failed for manifest.signed:', (e as Error).message || e);
         }
@@ -210,11 +235,17 @@ export default function createKernelRouter(): Router {
         }
 
         return res.json({
-          manifest_id: sig.manifestId ?? null,
-          signer_id: sig.signerId ?? null,
-          signature: sig.signature,
-          version: sig.version,
-          ts: sig.ts,
+          audit_id: auditRecordId,
+          signature_record: {
+            id: sig.id ?? null,
+            manifest_id: sig.manifestId ?? manifest?.id ?? null,
+            signer_id: sig.signerId ?? null,
+            algorithm: signatureAlgorithm,
+            key_version: signatureKeyVersion,
+            signature: sig.signature,
+            version: sig.version ?? manifest?.version ?? null,
+            ts: sig.ts ?? new Date().toISOString(),
+          },
         });
       } catch (err) {
         if (managed && client) {
@@ -236,7 +267,7 @@ export default function createKernelRouter(): Router {
     idempotencyMiddleware,
     async (req: Request, res: Response, next: NextFunction) => {
       const manifest: DivisionManifest = req.body;
-      const principal = (req as any).principal || getPrincipalFromRequest(req);
+      const principal = resolvePrincipal(req);
 
       // Validate manifest presence. Generate an id if it's missing so tests that
       // send minimal division payloads (name/budget) are accepted and the server
@@ -268,15 +299,19 @@ export default function createKernelRouter(): Router {
         }
 
         const sig = await signingProxy.signManifest(manifest);
+        const signatureAlgorithm = sig.algorithm ?? null;
+        const signatureKeyVersion = sig.keyVersion ?? null;
 
         await client.query(
-          `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, version, ts, prev_hash)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          `INSERT INTO manifest_signatures (id, manifest_id, signer_id, signature, algorithm, key_version, version, ts, prev_hash)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [
             sig.id,
             manifest.id,
             sig.signerId ?? null,
             sig.signature,
+            signatureAlgorithm,
+            signatureKeyVersion,
             sig.version ?? manifest.version ?? null,
             sig.ts ?? new Date().toISOString(),
             (sig as any).prevHash ?? null,
@@ -321,7 +356,14 @@ export default function createKernelRouter(): Router {
         }
 
         try {
-          await appendAuditEvent('manifest.update', { manifestId: manifest.id, signatureId: sig.id, signerId: sig.signerId ?? null, principal });
+          await appendAuditEvent('manifest.update', {
+            manifestId: manifest.id,
+            signatureId: sig.id,
+            signerId: sig.signerId ?? null,
+            algorithm: signatureAlgorithm,
+            keyVersion: signatureKeyVersion,
+            principal,
+          });
         } catch (e) {
           console.warn('Audit append failed for manifest.update:', (e as Error).message || e);
         }
@@ -509,7 +551,7 @@ export default function createKernelRouter(): Router {
       const body = req.body;
       if (!body) return res.status(400).json({ error: 'body required' });
 
-      const principal = (req as any).principal || getPrincipalFromRequest(req);
+      const principal = resolvePrincipal(req);
 
       // Normalize allocation context for policy evaluation
       const allocationContext = {
@@ -675,6 +717,7 @@ export default function createKernelRouter(): Router {
    */
   router.get(
     '/kernel/reason/:node',
+    ...applyProductionGuards(),
     requireAnyAuthenticated,
     async (req: Request, res: Response, next: NextFunction) => {
       const nodeId = req.params.node;

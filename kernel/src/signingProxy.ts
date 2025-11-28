@@ -21,12 +21,47 @@ import {
   prepareManifestSigningRequest,
   SigningProvider,
 } from './signingProvider';
+import { normalizeSignatureAlgorithm, verifySignaturePayload } from './services/signatureVerifier';
 
 const kmsConfig = loadKmsConfig();
 const kmsProvider: SigningProvider | null = kmsConfig.endpoint
   ? createSigningProvider(kmsConfig, 'kms')
   : null;
-const localProvider = new LocalSigningProvider(kmsConfig.signerId);
+const localProvider = new LocalSigningProvider(kmsConfig.signerId, kmsConfig.algorithm || 'ed25519');
+const publicKeyCache: Map<string, string> = new Map();
+
+function cacheKey(provider: SigningProvider, signerId?: string) {
+  const providerLabel = provider === kmsProvider ? 'kms' : 'local';
+  return `${providerLabel}:${signerId || kmsConfig.signerId}`;
+}
+
+async function resolvePublicKey(provider: SigningProvider, signerId?: string): Promise<string> {
+  const key = cacheKey(provider, signerId);
+  if (publicKeyCache.has(key)) {
+    return publicKeyCache.get(key)!;
+  }
+  if (typeof provider.getPublicKey !== 'function') {
+    throw new Error('Signing provider does not implement getPublicKey');
+  }
+  const material = await provider.getPublicKey(signerId);
+  if (!material) {
+    throw new Error(`Unable to resolve public key for signer ${signerId || kmsConfig.signerId}`);
+  }
+  publicKeyCache.set(key, material);
+  return material;
+}
+
+async function signWithVerification(
+  provider: SigningProvider,
+  manifest: any,
+  request: ReturnType<typeof prepareManifestSigningRequest>,
+): Promise<ManifestSignature> {
+  const signature = await provider.signManifest(manifest, request);
+  const algorithm = normalizeSignatureAlgorithm(signature.algorithm ?? kmsConfig.algorithm ?? 'ed25519');
+  const publicKey = await resolvePublicKey(provider, signature.signerId);
+  verifySignaturePayload(request.payload, signature.signature, algorithm, publicKey);
+  return signature;
+}
 
 export async function signManifest(manifest: any): Promise<ManifestSignature> {
   const request = prepareManifestSigningRequest(manifest);
@@ -35,11 +70,11 @@ export async function signManifest(manifest: any): Promise<ManifestSignature> {
     if (kmsConfig.requireKms) {
       throw new Error('REQUIRE_KMS=true but KMS_ENDPOINT is not configured');
     }
-    return localProvider.signManifest(manifest, request);
+    return signWithVerification(localProvider, manifest, request);
   }
 
   try {
-    return await kmsProvider.signManifest(manifest, request);
+    return await signWithVerification(kmsProvider, manifest, request);
   } catch (err) {
     const msg = (err as Error).message || err;
     console.error('signingProxy: KMS signManifest failed:', msg);
@@ -47,7 +82,7 @@ export async function signManifest(manifest: any): Promise<ManifestSignature> {
       throw new Error(`KMS signing failed and REQUIRE_KMS=true: ${msg}`);
     }
     console.warn('signingProxy: falling back to local ephemeral signing (dev only)');
-    return localProvider.signManifest(manifest, request);
+    return signWithVerification(localProvider, manifest, request);
   }
 }
 
@@ -88,6 +123,7 @@ const signingProxy = {
     KMS_ENDPOINT: kmsConfig.endpoint,
     SIGNER_ID: kmsConfig.signerId,
     REQUIRE_KMS: kmsConfig.requireKms,
+    ALGORITHM: kmsConfig.algorithm,
     KMS_BEARER_TOKEN: !!kmsConfig.bearerToken,
     KMS_MTLS_CERT_PATH: kmsConfig.mtlsCertPath,
     KMS_MTLS_KEY_PATH: kmsConfig.mtlsKeyPath,
@@ -118,4 +154,3 @@ export default signingProxy;
  *
  * Next file to update after saving this: kernel/src/routes/kernelRoutes.ts (apply RBAC and Sentinel policy enforcement).
  */
-

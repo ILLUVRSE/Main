@@ -8,13 +8,16 @@ import express, { NextFunction, Request, RequestHandler, Response, Router } from
 import { query } from '../db';
 import { appendAuditEvent } from '../auditStore';
 import { evaluateQuorum, getUpgradeMultiSigConfig, validateApprover } from '../internal/multisig';
+import { authMiddleware } from '../middleware/auth';
 import { getPrincipalFromRequest, Principal, RoleName, Roles, requireAnyAuthenticated, requireRoles } from '../rbac';
 
 const ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = ENV === 'production';
 
 function applyProductionGuards(...middlewares: RequestHandler[]): RequestHandler[] {
-  return IS_PRODUCTION ? middlewares : [];
+  if (!IS_PRODUCTION) return [];
+  if (!middlewares.length) return [authMiddleware];
+  return [authMiddleware, ...middlewares];
 }
 
 function requireRolesInProduction(...roles: RoleName[]): RequestHandler[] {
@@ -51,7 +54,12 @@ function mapUpgradeRow(row: any) {
 }
 
 function resolvePrincipal(req: Request): Principal | undefined {
-  return (req as any).principal ?? getPrincipalFromRequest(req);
+  const ctxPrincipal =
+    (req.authContext?.principal as Principal | undefined) || ((req as any).principal as Principal | undefined);
+  if (ctxPrincipal) {
+    return ctxPrincipal;
+  }
+  return getPrincipalFromRequest(req);
 }
 
 export default function createUpgradeRouter(): Router {

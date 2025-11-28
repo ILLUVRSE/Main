@@ -111,6 +111,8 @@ export function dbRowToManifestSignature(row: any): ManifestSignature {
     manifestId: row.manifest_id ?? undefined,
     signerId: row.signer_id ?? undefined,
     signature: row.signature ?? undefined,
+    algorithm: row.algorithm ?? undefined,
+    keyVersion: row.key_version ?? undefined,
     version: row.version ?? undefined,
     ts: toIso(row.ts),
     prevHash: row.prev_hash ?? undefined,
@@ -181,4 +183,3 @@ export function divisionManifestToDbRow(m: DivisionManifest): any[] {
  * - toIso returns undefined for null/invalid values and ISO string for valid timestamps.
  *   Test: pass Date, ISO string, and null and assert outputs.
  */
-

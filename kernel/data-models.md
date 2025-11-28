@@ -66,6 +66,8 @@ CREATE INDEX idx_division_manifest_name ON kernel_division_manifest(name);
 {
   "manifestId":"string",
   "signerId":"string",
+  "algorithm":"string",
+  "keyVersion":"string|null",
   "signature":"base64-ed25519",
   "version":"string",
   "ts":"2025-01-01T00:00:00Z"
@@ -80,13 +82,15 @@ CREATE TABLE kernel_manifest_signature (
   manifest_id text NOT NULL,
   signer_id text NOT NULL,
   signature text NOT NULL,
+  algorithm text,
+  key_version text,
   version text,
   ts timestamptz NOT NULL
 );
 CREATE INDEX idx_manifest_signature_manifest ON kernel_manifest_signature(manifest_id);
 ```
 
-**Notes:** `manifestId` may refer to division manifests, agent templates, upgrade manifests, etc.
+**Notes:** `manifestId` may refer to division manifests, agent templates, upgrade manifests, etc. Persist `algorithm` + `key_version` to track which signer/key version produced each record for rotation audits.
 
 ---
 
@@ -498,4 +502,3 @@ CREATE INDEX idx_reason_node_type ON reason_node(type);
 * `openapi.yaml` `components/schemas` and `kernel/data-models.md` must be consistent (field names/types).
 * Security Engineer should review `ManifestSignature` and `AuditEvent` flows (KMS signing & verification).
 * Implementations must be able to create and verify the audit chain from `AuditEvent` records.
-

@@ -1,10 +1,22 @@
 import request from '../utils/mockSupertest';
 import { getExpressAppForTests } from '../utils/testApp';
+import { ReasoningClientError, setReasoningClient } from '../../src/reasoning/client';
 
 let appForTests: any;
 
+class StubReasoningClient {
+  async getRedactedTrace(): Promise<never> {
+    throw new ReasoningClientError('trace_not_found', 404);
+  }
+}
+
 beforeAll(async () => {
+  setReasoningClient(new StubReasoningClient() as any);
   appForTests = await getExpressAppForTests();
+});
+
+afterAll(() => {
+  setReasoningClient(null);
 });
 
 describe('reasonRoutes', () => {

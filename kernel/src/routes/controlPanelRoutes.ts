@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import fetch from 'node-fetch';
 import { requireRoles, Roles } from '../rbac';
+import { authMiddleware } from '../middleware/auth';
 
 type ControlPanelSettings = {
   maintenanceMode: boolean;
@@ -20,6 +21,9 @@ const DEFAULT_SETTINGS: Omit<ControlPanelSettings, 'updatedAt'> = {
   agentManagerTarget: process.env.AGENT_MANAGER_CONTROL_URL || process.env.AGENT_MANAGER_URL || 'http://localhost:3100',
   advancedNotes: '',
 };
+
+const ENV = process.env.NODE_ENV || 'development';
+const IS_PRODUCTION = ENV === 'production';
 
 function resolveSettingsPath(): string {
   const configuredPath = process.env.CONTROL_PANEL_SETTINGS_PATH;
@@ -149,6 +153,10 @@ async function proxyControlAction(target: ControlTarget, payload: any) {
 
 export default function createControlPanelRouter(): Router {
   const router = express.Router();
+
+  if (IS_PRODUCTION) {
+    router.use(authMiddleware);
+  }
 
   router.get(
     '/settings',

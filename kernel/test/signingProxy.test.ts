@@ -13,6 +13,14 @@
 
 import { jest } from '@jest/globals';
 
+jest.mock('../src/services/signatureVerifier', () => {
+  const actual = jest.requireActual('../src/services/signatureVerifier');
+  return {
+    ...actual,
+    verifySignaturePayload: jest.fn(),
+  };
+});
+
 describe('signingProxy', () => {
   afterEach(() => {
     jest.resetModules();
@@ -63,6 +71,9 @@ describe('signingProxy', () => {
         }
         async signData(data: string, _req: any) {
           return localSignData(data, _req);
+        }
+        async getPublicKey() {
+          return Buffer.from('mock-public-key').toString('base64');
         }
       }
       return {
@@ -115,6 +126,9 @@ describe('signingProxy', () => {
         }
         async signData() {
           return { signature: 'x', signerId: 'x' };
+        }
+        async getPublicKey() {
+          return Buffer.from('mock-key').toString('base64');
         }
       }
       return {
@@ -170,6 +184,7 @@ describe('signingProxy', () => {
         createSigningProvider: jest.fn(() => ({
           signManifest: kmsSignManifest,
           signData: kmsSignData,
+          getPublicKey: jest.fn(async () => Buffer.from('kms-key').toString('base64')),
         })),
         LocalSigningProvider: jest.fn(),
         prepareManifestSigningRequest: jest.fn((m: any) => ({})),

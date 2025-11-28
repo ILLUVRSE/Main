@@ -71,6 +71,8 @@ export interface ManifestSignature {
   manifestId?: string;
   signerId: string;
   signature: string; // base64
+  algorithm?: string;
+  keyVersion?: string | null;
   version?: string;
   ts?: string; // ISO timestamp
   prevHash?: string | null;
@@ -112,4 +114,3 @@ export interface ResourceAllocation {
  * - Optional: Add mapping helpers to convert from DB snake_case rows to camelCase API types and vice-versa.
  *   Test: Create a small unit test that maps a simulated DB row to the TS interface and run `ts-node`/`jest` to confirm shapes.
  */
-

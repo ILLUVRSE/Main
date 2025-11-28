@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS manifest_signatures (
   manifest_id text NOT NULL,
   signer_id text NOT NULL,
   signature text NOT NULL,
+  algorithm text,
+  key_version text,
   version text,
   ts timestamptz NOT NULL DEFAULT now()
 );

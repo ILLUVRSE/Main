@@ -10,6 +10,8 @@ describe('signingProvider abstraction', () => {
       expect(signature.signerId).toBe('unit-test-signer');
       expect(signature.signature).toMatch(/^[A-Za-z0-9+/=]+$/);
       expect(signature.manifestId).toBe('manifest-123');
+      expect(signature.algorithm).toBe('ed25519');
+      expect(signature.keyVersion).toBe('local-dev');
 
       const publicKey = await provider.getPublicKey();
       expect(publicKey).toMatch(/^[A-Za-z0-9+/=]+$/);
@@ -46,6 +48,8 @@ describe('signingProvider abstraction', () => {
       expect(signature.signature).toBe('ZmFrZS1zaWduYXR1cmU=');
       expect(signature.manifestId).toBe('fake-manifest');
       expect(signature.version).toBe('9.9.9');
+      expect(signature.algorithm).toBe('ed25519');
+      expect(signature.keyVersion).toBeUndefined();
       expect(signature.ts).toBe('2024-01-01T00:00:00.000Z');
 
       const publicKey = await fake.getPublicKey('kms-test');

@@ -48,12 +48,43 @@ async function canonicalize(obj: any): Promise<string> {
   return JSON.stringify(sorted);
 }
 
-function verifyRsaSignature(publicKeyPem: string, message: string | Buffer, signatureB64: string) {
-  const verifier = crypto.createVerify('sha256');
-  verifier.update(typeof message === 'string' ? Buffer.from(message, 'utf8') : message);
-  verifier.end();
-  return verifier.verify(publicKeyPem, Buffer.from(signatureB64, 'base64'));
+function verifyEd25519Signature(publicKeyPem: string, message: string | Buffer, signatureB64: string) {
+  // Parse Ed25519 public key from PEM
+  // This is a naive PEM parser for the sake of the test environment where 'crypto' handles it,
+  // but for Ed25519 verify in Node we usually pass the key object or key buffer.
+  const keyObject = crypto.createPublicKey(publicKeyPem);
+  if (keyObject.asymmetricKeyType !== 'ed25519') {
+      console.warn('verifyEd25519Signature: Provided key is not ed25519', keyObject.asymmetricKeyType);
+      return false;
+  }
+
+  const msgBuffer = typeof message === 'string' ? Buffer.from(message, 'utf8') : message;
+  const sigBuffer = Buffer.from(signatureB64, 'base64');
+
+  // crypto.verify(algorithm, data, key, signature)
+  // For Ed25519, algorithm is null.
+  return crypto.verify(null, msgBuffer, keyObject, sigBuffer);
 }
+
+// Keeping the old name for compatibility if needed, but implementation is updated to support Ed25519 if the key is Ed25519
+function verifySignature(publicKeyPem: string, message: string | Buffer, signatureB64: string) {
+    try {
+        const keyObject = crypto.createPublicKey(publicKeyPem);
+        if (keyObject.asymmetricKeyType === 'ed25519') {
+            return verifyEd25519Signature(publicKeyPem, message, signatureB64);
+        } else {
+            // Fallback to RSA-SHA256 if key is not Ed25519 (legacy support)
+            const verifier = crypto.createVerify('sha256');
+            verifier.update(typeof message === 'string' ? Buffer.from(message, 'utf8') : message);
+            verifier.end();
+            return verifier.verify(publicKeyPem, Buffer.from(signatureB64, 'base64'));
+        }
+    } catch(e) {
+        console.warn('verifySignature error:', e);
+        return false;
+    }
+}
+
 
 let skipSuite = false;
 beforeAll(async () => {
@@ -181,7 +212,7 @@ test('snapshot canonicalization parity and signature verification', async () => 
     // Prefer meta.signature if snapshotMeta.signature present, else signature field in payload
     const signature = snapshotMeta.signature || (payload.signature ?? null);
     expect(signature).toBeTruthy();
-    const verified = verifyRsa(publicKeyPem, canonical, signature);
+    const verified = verifySignature(publicKeyPem, canonical, signature);
     expect(verified, 'Snapshot signature failed to verify with provided public key').toBeTruthy();
   } else {
     // No payload or no public key: at minimum ensure signature + signer_kid present in metadata
@@ -203,36 +234,3 @@ test('snapshot canonicalization parity and signature verification', async () => 
   const explain = trace.explain || trace.ordered_nodes?.[0]?.explain;
   expect(explain || trace.ordered_nodes[0].payload).toBeTruthy();
 }, TIMEOUT_MS);
-
-// helper functions
-
-async function canonicalize(obj: any): Promise<string> {
-  // deterministic sort of keys
-  function sortKeys(x: any): any {
-    if (Array.isArray(x)) return x.map(sortKeys);
-    if (x && typeof x === 'object') {
-      const out: any = {};
-      Object.keys(x).sort().forEach((k) => {
-        out[k] = sortKeys(x[k]);
-      });
-      return out;
-    }
-    return x;
-  }
-  const sorted = sortKeys(obj);
-  return JSON.stringify(sorted);
-}
-
-function verifyRsa(pubPem: string, payload: string, signatureB64: string) {
-  try {
-    const verifier = crypto.createVerify('sha256');
-    verifier.update(Buffer.from(payload, 'utf8'));
-    verifier.end();
-    const sig = Buffer.from(signatureB64, 'base64');
-    return verifier.verify(pubPem, sig);
-  } catch (e) {
-    console.warn('verifyRsa error', e);
-    return false;
-  }
-}
-

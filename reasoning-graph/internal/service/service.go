@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -195,9 +196,10 @@ func (s *Service) CreateSnapshot(ctx context.Context, req SnapshotRequest) (mode
 	}
 
 	hash := sha256.Sum256(canonical)
-	signatureBytes, err := s.signer.Sign(ctx, hash[:])
+	// Parity with Kernel: Sign the canonical payload directly (Ed25519), not the hash.
+	signatureBytes, err := s.signer.Sign(ctx, canonical)
 	if err != nil {
-		return models.ReasonSnapshot{}, fmt.Errorf("sign snapshot hash: %w", err)
+		return models.ReasonSnapshot{}, fmt.Errorf("sign snapshot: %w", err)
 	}
 	signature := base64.StdEncoding.EncodeToString(signatureBytes)
 
@@ -267,33 +269,105 @@ func (s *Service) collectSubgraph(ctx context.Context, rootIDs []uuid.UUID) (map
 	return nodes, edges, nil
 }
 
+func decodeRaw(raw json.RawMessage) (interface{}, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var v interface{}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 func canonicalizeSnapshot(nodes map[uuid.UUID]models.ReasonNode, edges map[uuid.UUID]models.ReasonEdge) ([]byte, error) {
-	nodeList := make([]models.ReasonNode, 0, len(nodes))
+	// Convert nodes to []map[string]interface{} to ensure alphabetical key sorting.
+	nodeList := make([]map[string]interface{}, 0, len(nodes))
+	// We need to sort nodes by ID first for list stability
+	sortedNodes := make([]models.ReasonNode, 0, len(nodes))
 	for _, n := range nodes {
-		nodeList = append(nodeList, n)
+		sortedNodes = append(sortedNodes, n)
 	}
-	sort.Slice(nodeList, func(i, j int) bool {
-		return nodeList[i].ID.String() < nodeList[j].ID.String()
+	sort.Slice(sortedNodes, func(i, j int) bool {
+		return sortedNodes[i].ID.String() < sortedNodes[j].ID.String()
 	})
 
-	edgeList := make([]models.ReasonEdge, 0, len(edges))
+	for _, n := range sortedNodes {
+		payload, err := decodeRaw(n.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("decode node payload for canonicalization: %w", err)
+		}
+		metadata, err := decodeRaw(n.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("decode node metadata for canonicalization: %w", err)
+		}
+
+		nm := map[string]interface{}{
+			"id":                  n.ID,
+			"type":                n.Type,
+			"payload":             payload,
+			"author":              n.Author,
+			"metadata":            metadata,
+			"createdAt":           n.CreatedAt,
+		}
+		if n.Version != nil {
+			nm["version"] = n.Version
+		}
+		if n.ManifestSignatureID != nil {
+			nm["manifestSignatureId"] = n.ManifestSignatureID
+		}
+		if n.AuditEventID != nil {
+			nm["auditEventId"] = n.AuditEventID
+		}
+		nodeList = append(nodeList, nm)
+	}
+
+	// Convert edges to []map[string]interface{}
+	edgeList := make([]map[string]interface{}, 0, len(edges))
+	sortedEdges := make([]models.ReasonEdge, 0, len(edges))
 	for _, e := range edges {
-		edgeList = append(edgeList, e)
+		sortedEdges = append(sortedEdges, e)
 	}
-	sort.Slice(edgeList, func(i, j int) bool {
-		return edgeList[i].ID.String() < edgeList[j].ID.String()
+	sort.Slice(sortedEdges, func(i, j int) bool {
+		return sortedEdges[i].ID.String() < sortedEdges[j].ID.String()
 	})
 
-	payload := struct {
-		Nodes []models.ReasonNode `json:"nodes"`
-		Edges []models.ReasonEdge `json:"edges"`
-	}{
-		Nodes: nodeList,
-		Edges: edgeList,
+	for _, e := range sortedEdges {
+		metadata, err := decodeRaw(e.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("decode edge metadata for canonicalization: %w", err)
+		}
+		em := map[string]interface{}{
+			"id":        e.ID,
+			"from":      e.From,
+			"to":        e.To,
+			"type":      e.Type,
+			"metadata":  metadata,
+			"createdAt": e.CreatedAt,
+		}
+		if e.Weight != nil {
+			em["weight"] = e.Weight
+		}
+		edgeList = append(edgeList, em)
 	}
-	data, err := json.Marshal(payload)
-	if err != nil {
+
+	// Create map for payload to ensure keys "nodes" and "edges" are sorted alphabetically (edges before nodes)
+	payload := map[string]interface{}{
+		"nodes": nodeList,
+		"edges": edgeList,
+	}
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // Parity with JSON.stringify
+	if err := enc.Encode(payload); err != nil {
 		return nil, fmt.Errorf("marshal snapshot canonical json: %w", err)
+	}
+
+	// json.Encoder.Encode appends a newline, which JSON.stringify does not.
+	data := buf.Bytes()
+	if len(data) > 0 && data[len(data)-1] == '\n' {
+		data = data[:len(data)-1]
 	}
 	return data, nil
 }

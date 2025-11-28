@@ -118,18 +118,28 @@ func TestCreateSnapshotHashesAndSigns(t *testing.T) {
 		t.Fatalf("expected hash and signature")
 	}
 
-	var payload struct {
-		Nodes []models.ReasonNode `json:"nodes"`
-		Edges []models.ReasonEdge `json:"edges"`
-	}
+	// Helper structs for decoding.
+	// We can reuse map[string]interface{} here as well, but for simple counting struct is fine.
+	// But to match the change, we can just use generic map.
+	var payload map[string]interface{}
 	if err := json.Unmarshal(snap.Snapshot, &payload); err != nil {
 		t.Fatalf("unmarshal snapshot payload: %v", err)
 	}
-	if len(payload.Nodes) != 2 {
-		t.Fatalf("expected 2 nodes in snapshot, got %d", len(payload.Nodes))
+
+	nodes, ok := payload["nodes"].([]interface{})
+	if !ok {
+		t.Fatalf("nodes missing or invalid type")
 	}
-	if len(payload.Edges) != 1 {
-		t.Fatalf("expected 1 edge in snapshot, got %d", len(payload.Edges))
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes in snapshot, got %d", len(nodes))
+	}
+
+	edges, ok := payload["edges"].([]interface{})
+	if !ok {
+		t.Fatalf("edges missing or invalid type")
+	}
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge in snapshot, got %d", len(edges))
 	}
 
 	hash := sha256.Sum256(snap.Snapshot)
@@ -140,7 +150,8 @@ func TestCreateSnapshotHashesAndSigns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode signature: %v", err)
 	}
-	if !ed25519.Verify(pub, hash[:], sigBytes) {
+	// Updated verification: Verify signature against the canonical snapshot bytes directly, NOT the hash.
+	if !ed25519.Verify(pub, snap.Snapshot, sigBytes) {
 		t.Fatalf("signature verification failed")
 	}
 }

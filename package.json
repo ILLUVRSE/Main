@@ -17,7 +17,6 @@
     "@aws-sdk/client-kms": "^3.331.0",
     "@aws-sdk/client-s3": "^3.331.0",
     "@aws-sdk/lib-storage": "^3.331.0",
-    "@aws-sdk/client-s3-browser": "^3.331.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

@@ -25,6 +25,7 @@ import crypto from 'crypto';
 import { getClient, query } from './db';
 import { getCurrentTraceId } from './middleware/tracing';
 import signingProxy from './signingProxy';
+import { canonicalizePayload } from './signingProvider';
 import { AuditEvent } from './types';
 import { evaluateAuditPolicy } from './audit/auditPolicy';
 
@@ -140,7 +141,14 @@ export async function appendAuditEvent(eventType: string, payload: any, retries 
       }
 
       // Sign the hash (may call KMS)
-      const { signature, signerId } = await signingProxy.signData(hash);
+      // We pass the same 'ts' to the signing provider so the signature covers { data: hash, ts }.
+      // This ensures we can verify the signature later using the stored 'ts'.
+      const signingReq = {
+        data: hash,
+        ts,
+        payload: canonicalizePayload({ data: hash, ts }),
+      };
+      const { signature, signerId } = await signingProxy.signData(hash, signingReq);
 
       const id = crypto.randomUUID();
       const insertSql = `

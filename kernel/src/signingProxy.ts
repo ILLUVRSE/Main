@@ -51,21 +51,21 @@ export async function signManifest(manifest: any): Promise<ManifestSignature> {
   }
 }
 
-export async function signData(data: string): Promise<{ signature: string; signerId: string }> {
-  const request = prepareDataSigningRequest(data);
+export async function signData(data: string, request?: any): Promise<{ signature: string; signerId: string }> {
+  const prepared = request || prepareDataSigningRequest(data);
 
   if (!kmsProvider) {
     if (kmsConfig.requireKms) {
       throw new Error('REQUIRE_KMS=true but KMS_ENDPOINT is not configured');
     }
-    return localProvider.signData(data, request);
+    return localProvider.signData(data, prepared);
   }
 
   try {
     if (!kmsProvider.signData) {
       throw new Error('signData not supported by signing provider');
     }
-    return await kmsProvider.signData(data, request);
+    return await kmsProvider.signData(data, prepared);
   } catch (err) {
     const msg = (err as Error).message || err;
     console.error('signingProxy: KMS signData failed:', msg);
@@ -73,7 +73,7 @@ export async function signData(data: string): Promise<{ signature: string; signe
       throw new Error(`KMS signData failed and REQUIRE_KMS=true: ${msg}`);
     }
     console.warn('signingProxy: falling back to local ephemeral signing (dev only)');
-    return localProvider.signData(data, request);
+    return localProvider.signData(data, prepared);
   }
 }
 

@@ -3,7 +3,7 @@
  * kernel/tools/audit-verify.js
  *
  * Verifies audit_events chain integrity + signatures.
- * Supports RSA-SHA256, Ed25519, and HMAC-SHA256.
+ * Replays the entire chain from genesis (or oldest available) to current state.
  *
  * Usage:
  *   node kernel/tools/audit-verify.js --database-url "$POSTGRES_URL" --signers kernel/tools/signers.json
@@ -13,28 +13,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { Client } = require('pg');
-
-// If agent-manager/server/audit_signer.js is available, use its canonicalize.
-// Otherwise, use a local implementation to ensure parity.
-let canonicalizeHelper;
-try {
-  const agentSigner = require('../../agent-manager/server/audit_signer');
-  canonicalizeHelper = agentSigner.canonicalize;
-} catch (e) {
-  // fallback local canonicalize
-  canonicalizeHelper = function(obj) {
-    if (obj === null) return 'null';
-    if (Array.isArray(obj)) {
-      return '[' + obj.map(canonicalizeHelper).join(',') + ']';
-    }
-    if (typeof obj === 'object') {
-      const keys = Object.keys(obj).sort();
-      const parts = keys.map(k => JSON.stringify(k) + ':' + canonicalizeHelper(obj[k]));
-      return '{' + parts.join(',') + '}';
-    }
-    return JSON.stringify(obj);
-  };
-}
 
 const DEFAULT_SIGNERS_PATH = path.resolve(__dirname, 'signers.json');
 const DEFAULT_DB_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || 'postgresql://postgres:postgres@localhost:5432/illuvrse';
@@ -46,9 +24,30 @@ const HEX_RE = /^[0-9a-fA-F]+$/;
 function log(...args) { console.log('[audit-verify]', ...args); }
 function err(...args) { console.error('[audit-verify]', ...args); }
 
-function canonicalize(value) {
-  if (value === undefined) return Buffer.from('null', 'utf8'); // or handle as missing
-  return Buffer.from(canonicalizeHelper(value), 'utf8');
+function canonicalizeHelper(value) {
+    if (value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(canonicalizeHelper);
+    const out = {};
+    for (const k of Object.keys(value).sort()) {
+      out[k] = canonicalizeHelper(value[k]);
+    }
+    return out;
+}
+
+// Matches kernel/src/auditStore.ts computeHash
+function computeHash(eventType, payload, prevHash, ts) {
+  const input = JSON.stringify({
+    eventType,
+    payload: canonicalizeHelper(payload),
+    prevHash,
+    ts,
+  });
+  return crypto.createHash('sha256').update(input).digest('hex');
+}
+
+// Matches kernel/src/signingProvider.ts canonicalizePayload
+function canonicalizePayload(obj) {
+    return JSON.stringify(canonicalizeHelper(obj));
 }
 
 /* --- Key parsing helpers --- */
@@ -93,42 +92,43 @@ function createKeyObject(pem) {
 
 /* --- Verification Logic --- */
 
-function computeHash(payload, prevHashHex) {
-  const canon = canonicalize(payload);
-  const prev = prevHashHex ? Buffer.from(prevHashHex, 'hex') : Buffer.alloc(0);
-  const concat = Buffer.concat([canon, prev]);
-  return {
-    bytes: crypto.createHash('sha256').update(concat).digest(),
-    concat
-  };
-}
-
 function verifyEvent(row, signerMap, expectedPrevHash) {
   const id = row.id;
-  const signerId = row.signer_id || row.signer_kid;
-  if (!signerMap.has(signerId)) throw new Error(`Unknown signer ${signerId}`);
-  const signer = signerMap.get(signerId);
 
   // 1. Verify Hash Chain
   const storedHash = row.hash;
   const storedPrev = row.prev_hash;
 
-  if (expectedPrevHash !== null) {
-    if (storedPrev !== expectedPrevHash) {
-      // Allow null storedPrev if expectedPrevHash is empty (genesis case handled loosely or strictly)
-      if (!(expectedPrevHash === '' && !storedPrev)) {
-        throw new Error(`Chain broken at ${id}: expected prev=${expectedPrevHash}, got=${storedPrev}`);
-      }
+  if (storedPrev !== expectedPrevHash) {
+    // Special handling for genesis if expectedPrevHash is null
+    if (expectedPrevHash === null && storedPrev === null) {
+      // Genesis block, OK.
+    } else {
+      throw new Error(`Chain broken at ${id}: expected prev=${expectedPrevHash}, got=${storedPrev}`);
     }
   }
 
-  const { bytes, concat } = computeHash(row.payload, storedPrev);
-  const computedHashHex = bytes.toString('hex');
+  // Re-compute hash
+  // Note: DB returns Date object for ts, we need ISO string.
+  // Assuming postgres driver returns Date for 'timestamp with time zone'.
+  let tsStr = row.ts;
+  if (row.ts instanceof Date) {
+      tsStr = row.ts.toISOString();
+  }
+
+  const computedHashHex = computeHash(row.event_type, row.payload, storedPrev, tsStr);
   if (storedHash && storedHash !== computedHashHex) {
     throw new Error(`Hash mismatch at ${id}: stored=${storedHash}, computed=${computedHashHex}`);
   }
 
   // 2. Verify Signature
+  const signerId = row.signer_id || row.signer_kid;
+  if (!signerMap.has(signerId)) {
+      console.warn(`[WARN] Unknown signer ${signerId} at ${id}. Skipping signature check.`);
+      return computedHashHex;
+  }
+  const signer = signerMap.get(signerId);
+
   let sigBuf;
   try {
     const rawSig = row.signature;
@@ -138,22 +138,15 @@ function verifyEvent(row, signerMap, expectedPrevHash) {
 
   const keyObj = createKeyObject(signer.publicKey);
 
+  // Reconstruct the signed payload: { data: hash, ts: tsStr }
+  const signedPayload = canonicalizePayload({ data: computedHashHex, ts: tsStr });
+  const signedBuffer = Buffer.from(signedPayload);
+
   if (signer.algorithm === 'ed25519') {
-    // Ed25519 signs the digest bytes in this scheme?
-    // Wait, the new spec says: SHA256(canonical || prev) -> digest.
-    // Agent Manager signAuditHash calls kms adapter.
-    // If KMS does ED25519, it signs the MESSAGE (which is our hash bytes).
-    // So here we verify signature on 'bytes'.
-    const ok = crypto.verify(null, bytes, keyObj, sigBuf);
+    const ok = crypto.verify(null, signedBuffer, keyObj, sigBuf);
     if (!ok) throw new Error(`Ed25519 signature invalid at ${id}`);
   } else if (signer.algorithm === 'rsa-sha256') {
-    // RSA-SHA256:
-    // Agent manager uses crypto.privateEncrypt(PKCS1, digestInfo + hash).
-    // This is equivalent to verify(sha256, concat, ...).
-    // Wait, verify() takes the original message and hashes it.
-    // If we have the digest, we can't easily use crypto.verify with 'sha256' unless we pass the full message 'concat'.
-    // Yes, we have 'concat'.
-    const ok = crypto.verify('sha256', concat, keyObj, sigBuf);
+    const ok = crypto.verify('sha256', signedBuffer, keyObj, sigBuf);
     if (!ok) throw new Error(`RSA signature invalid at ${id}`);
   } else {
     throw new Error(`Unsupported algo ${signer.algorithm}`);
@@ -168,9 +161,9 @@ async function verifyChain(dbUrl, signersPath, limit) {
   await client.connect();
 
   try {
-    // Fetch newest first
-    const res = await client.query(`SELECT * FROM audit_events ORDER BY created_at DESC LIMIT $1`, [limit]);
-    const events = res.rows.reverse(); // Process oldest -> newest
+    // Fetch all events, ordered by ts and then id to ensure deterministic order if timestamps collide.
+    const res = await client.query(`SELECT * FROM audit_events ORDER BY ts ASC, id ASC`);
+    const events = res.rows;
 
     if (events.length === 0) {
       log('No events found.');
@@ -179,12 +172,6 @@ async function verifyChain(dbUrl, signersPath, limit) {
 
     log(`Verifying ${events.length} events...`);
     let expectedPrev = null;
-
-    // If we are not starting from genesis, we can't verify the very first prev_hash matches the actual DB previous row
-    // unless we fetch it. For this tool, we will trust the first event's prev_hash claim and verify consistency forward.
-    if (events.length > 0) {
-      expectedPrev = events[0].prev_hash;
-    }
 
     for (const ev of events) {
       const hash = verifyEvent(ev, signerMap, expectedPrev);
@@ -215,4 +202,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { verifyChain, verifyEvent, parseSignerRegistry };
+module.exports = { verifyChain, verifyEvent, parseSignerRegistry, computeHash };

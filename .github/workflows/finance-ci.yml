@@ -34,6 +34,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Install Postgres client tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
       - name: Lint (if configured)
         working-directory: finance
         run: |
@@ -73,6 +76,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-unit
     timeout-minutes: 40
+    env:
+      POSTGRES_DB: finance_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_PORT: 5440
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET: minio123
+      MOCK_SIGNING_PROXY: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -89,14 +101,6 @@ jobs:
 
       - name: Start local orchestration for E2E (DB + signing-proxy mock)
         working-directory: finance
-        env:
-          POSTGRES_DB: finance_test
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          S3_ENDPOINT: http://localhost:9000
-          S3_ACCESS_KEY: minio
-          S3_SECRET: minio123
-          MOCK_SIGNING_PROXY: 'true'
         run: |
           # This expects a run-local.sh or docker-compose.dev.yml in finance/
           if [ -x ./run-local.sh ]; then
@@ -120,6 +124,23 @@ jobs:
         run: |
           npx vitest run --config finance/vitest.config.ts finance/test/e2e/payment_payout_flow.test.ts --runInBand || (echo "E2E tests failed" && exit 1)
 
+      - name: Dump ledger database
+        if: success()
+        env:
+          PGPASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PORT: ${{ env.POSTGRES_PORT }}
+        run: |
+          pg_dump -h 127.0.0.1 -p ${POSTGRES_PORT:-5440} -U ${POSTGRES_USER:-postgres} ${POSTGRES_DB:-finance_dev} > finance-ledger.sql
+
+      - name: Upload ledger dump
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-ledger-dump
+          path: finance-ledger.sql
+
       - name: Upload E2E artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -136,43 +157,87 @@ jobs:
           ./finance/run-local.sh teardown || true
 
   audit-verify:
-    name: Audit Verification (best-effort)
+    name: Audit Verification
     runs-on: ubuntu-latest
     needs: e2e
-    if: always()
+    if: ${{ needs.e2e.result == 'success' }}
+    env:
+      POSTGRES_DB: finance_verify
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_PORT: 5540
+      SIGNING_PROXY_PORT: 9100
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download ledger dump
+        uses: actions/download-artifact@v4
+        with:
+          name: finance-ledger-dump
+          path: artifacts
 
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install kernel tools (audit-verify)
-        run: |
-          if [ -f kernel/package.json ]; then
-            (cd kernel && npm ci)
-          fi
+      - name: Install kernel dependencies
+        working-directory: kernel
+        run: npm ci
 
-      - name: Run audit-verify (best-effort)
+      - name: Install Postgres client tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Start Postgres for verification
+        run: |
+          docker run -d --name finance-ci-verify-db \
+            -e POSTGRES_USER="${POSTGRES_USER}" \
+            -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+            -e POSTGRES_DB="${POSTGRES_DB}" \
+            -p "${POSTGRES_PORT}:5432" \
+            postgres:15-alpine >/dev/null
+          for i in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p ${POSTGRES_PORT} -U ${POSTGRES_USER} >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Restore ledger dump
         env:
-          DATABASE_URL: ${{ secrets.FINANCE_TEST_DATABASE_URL || '' }}
-          SIGNERS_PATH: kernel/tools/signers.json
+          PGPASSWORD: ${{ env.POSTGRES_PASSWORD }}
         run: |
-          if [ -f kernel/tools/audit-verify.js ]; then
-            node kernel/tools/audit-verify.js -d "${DATABASE_URL}" -s "${SIGNERS_PATH}" || echo "audit-verify failed (best-effort)"
-          else
-            echo "audit-verify.js not present - skipping"
-          fi
+          psql -h 127.0.0.1 -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d ${POSTGRES_DB} -f artifacts/finance-ledger.sql
 
-      - name: Upload audit-verify logs
-        if: always()
+      - name: Start signing proxy mock
+        run: |
+          node kernel/mock/signingProxyMock.js > /tmp/finance-signing-proxy.log 2>&1 &
+          echo $! > /tmp/finance-signing-proxy.pid
+
+      - name: Generate and verify ledger proof
+        env:
+          DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@127.0.0.1:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }}
+          SIGNING_PROXY_URL: http://127.0.0.1:${{ env.SIGNING_PROXY_PORT }}
+          SIGNERS_PATH: kernel/tools/signers.json
+          PROOF_OUT: finance/ci-proof.json
+        run: |
+          ./finance/tools/ci_generate_and_verify_proof.sh --signers "${SIGNERS_PATH}" --out "${PROOF_OUT}"
+
+      - name: Upload proof artifact
         uses: actions/upload-artifact@v4
         with:
-          name: finance-audit-verify
-          path: |
-            kernel/jest-output.json || true
+          name: finance-ledger-proof
+          path: finance/ci-proof.json
+
+      - name: Teardown verification services
+        if: always()
+        run: |
+          if [ -f /tmp/finance-signing-proxy.pid ]; then
+            kill $(cat /tmp/finance-signing-proxy.pid) || true
+            rm -f /tmp/finance-signing-proxy.pid
+          fi
+          docker rm -f finance-ci-verify-db >/dev/null 2>&1 || true
 
   require-signing-check:
     name: Signing Path Guard (protected branches)

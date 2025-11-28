@@ -311,6 +311,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /kernel/sign:
+    post:
+      tags:
+        - kernel
+      summary: Sign a manifest and return manifestSignatureId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignRequest'
+      responses:
+        "200":
+          description: manifest signature stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  manifestSignatureId:
+                    type: string
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /kernel/audit/{id}:
+    get:
+      tags:
+        - kernel
+      summary: Fetch audit event by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: audit event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+        "404":
+          description: not found
+
   /kernel/division:
     post:
       tags:
@@ -519,4 +568,3 @@ paths:
           description: validation error
 
 # (Further paths / definitions may exist below -- keep file consistent with upstream)
-

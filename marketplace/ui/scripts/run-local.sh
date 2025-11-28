@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_PORT="${MOCK_API_PORT:-4001}"
 
 export NEXT_PUBLIC_API_BASE_URL="http://localhost:${API_PORT}"
+export DEV_SKIP_OIDC="${DEV_SKIP_OIDC:-true}"
+export NEXT_PUBLIC_DEV_SKIP_OIDC="${NEXT_PUBLIC_DEV_SKIP_OIDC:-$DEV_SKIP_OIDC}"
+export NEXT_PUBLIC_MOCK_OIDC="${NEXT_PUBLIC_MOCK_OIDC:-false}"
+export ADMIN_PASSWORD="${ADMIN_PASSWORD:-changeme}"
 
 echo "Starting Illuvrse mock API on port ${API_PORT}…"
 node "${ROOT_DIR}/mock-api/server.js" &

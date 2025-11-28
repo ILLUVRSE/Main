@@ -23,9 +23,9 @@
 ## Marketplace
 - [x] Backend checkout + delivery endpoints wired to Finance + signed proof generation.
 - [x] Sandbox runner + unit/e2e tests passing.
-- [ ] Next.js storefront + control-panel with OIDC/dev fallback implemented.
+- [x] Next.js storefront + control-panel with OIDC/dev fallback implemented.
 - [x] Docs updated (`docs/PRODUCTION.md` for Object Lock + key rotation).
-- [ ] Signed proof e2e + checkout acceptance tests green in CI workflow.
+- [x] Signed proof e2e + checkout acceptance tests green in CI workflow (`.github/workflows/signed-proof-e2e.yml`).
 - [x] Signoff templates (security, finance lead, Ryan) committed.
 
 ## Finance
@@ -42,10 +42,11 @@
 - [ ] Run-local scripts validated.
 
 ## CI / Golden Path / Runbooks
-- [ ] `.github/workflows/golden-path-e2e.yml` boots stack + runs IDEA/Marketplace/Finance e2e + audit verify.
+- [x] `.github/workflows/golden-path-e2e.yml` boots stack + runs IDEA/Marketplace/Finance e2e + audit verify.
+- [x] `.github/workflows/signed-proof-e2e.yml` runs ArtifactPublisher signed-proof verification in CI (checkout → finance ledger proof → proof verification).
 - [ ] Module CI workflows reference `scripts/ci/check-no-private-keys.sh` + `kernel/ci/require_kms_check.sh`.
 - [x] SRE runbooks for signing/KMS outage and audit export failures present (`sre/runbooks/*.md`).
-- [ ] Documentation for manual validation commands (curl health, audit-verify, run-local) consolidated.
+- [x] Documentation for manual validation commands (curl health, audit-verify, run-local) consolidated.
 
 ## Manual Follow-ups (Production Only)
 - [ ] Provision production KMS keys + update `SIGNING_PROXY_URL` secrets (owner: Security Eng).

@@ -18,11 +18,11 @@ const NAV_LINKS: NavLink[] = [
 
 export default function Header() {
   const pathname = usePathname();
-  const { user, login, logout } = useAuth();
+  const { user, login, logout, mode } = useAuth();
 
   const handleJoin = () => {
     if (!user) {
-      login('demo-token', { id: 'user:guest', email: 'guest@illuvrse.com', name: 'Guest', roles: ['buyer'] }, true);
+      Promise.resolve(login()).catch((err) => console.error('[auth] login failed', err));
     }
   };
 
@@ -74,6 +74,7 @@ export default function Header() {
               <button
                 onClick={handleJoin}
                 className="rounded-[12px] bg-[var(--color-primary)] px-5 py-2 text-base font-semibold text-white shadow-[var(--shadow-card)] transition hover:bg-[var(--color-primary-accessible)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
+                data-auth-mode={mode}
               >
                 Join in
               </button>

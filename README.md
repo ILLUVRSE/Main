@@ -157,6 +157,17 @@ cd artifact-publisher/server && npm ci
 # See artifact-publisher/run-local.sh and sentinelnet/run-local.sh for examples.
 ```
 
+### Golden-path orchestration
+
+Use `./scripts/run-golden-path.sh start` to boot the subset of services needed for the buyer flow smoke tests (Finance run-local mocks, Marketplace backend stack, Marketplace UI mock API, optional Control-Panel). Logs land in `/tmp/golden-path/*.log`, and the helper waits for each `/health` endpoint before returning. Stop everything with `./scripts/run-golden-path.sh teardown`.
+
+CI mirrors the same flow via `.github/workflows/golden-path-e2e.yml`, which:
+
+1. Boots the stack with `scripts/run-golden-path.sh`.
+2. Runs Marketplace Playwright acceptance tests (OIDC mock path + signed badge check).
+3. Runs Finance e2e ledger tests.
+4. Generates and verifies a ledger proof (`finance/tools/ci_generate_and_verify_proof.sh`) and uploads the proof + Playwright report artifacts.
+
 ---
 
 ## Contribution & governance notes (how we stay safe)

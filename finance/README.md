@@ -23,7 +23,23 @@ All files for Finance live under:
    * Integration points for Marketplace (orders), Payment Provider (Stripe), and Payout orchestration.
 
 ## # Local orchestration
-Run `./finance/run-local.sh` to spin up the express-based mock Finance API (`finance/mock/financeMockServer.js`) along with an optional disposable Postgres container (`START_POSTGRES=true`) for workflows that need a backing DB; the script writes the mock PID to `/tmp/finance-run-local.pid`, exposes the service on `http://127.0.0.1:8050`, and accepts `teardown` to stop anything it started so Marketplace E2E and CI pipelines can reuse the same tooling without touching production code. To run the real Finance service locally, export `DATABASE_URL`, `S3_AUDIT_BUCKET`, and signer/KMS envs, then run `npx ts-node finance/service/src/server.ts` (or `tsx finance/service/src/server.ts`) from the repo root. For audit chores, feed proof JSON + PEM files into `node finance/tools/verify_proof.js --proof <file> --public-key <pem>` to ensure the recorded signatures verify before handing artifacts to auditors.
+Run `./finance/run-local.sh` to spin up the express-based mock Finance API (`finance/mock/financeMockServer.js`) along with disposable dependencies:
+
+- Postgres (`START_POSTGRES=true`, overridable via `POSTGRES_DB|USER|PASSWORD|PORT`)
+- MinIO/S3 (`START_MINIO=true` unless `S3_ENDPOINT` already provided)
+- Signing proxy mock (`MOCK_SIGNING_PROXY=true`)
+
+The script writes process/container metadata under `/tmp/finance-run-local.*`, exposes the service on `http://127.0.0.1:8050`, and accepts `teardown` to stop anything it started. You can disable individual bits via `START_FINANCE_MOCK=false` or `START_MINIO=false` when you only need infra primitives (e.g., the CI audit job). To run the real Finance service locally, export `DATABASE_URL`, `S3_AUDIT_BUCKET`, and signer/KMS envs, then run `npx ts-node finance/service/src/server.ts` (or `tsx finance/service/src/server.ts`) from the repo root. For audit chores, feed proof JSON + PEM files into `node finance/tools/verify_proof.js --proof <file> --public-key <pem>` to ensure the recorded signatures verify before handing artifacts to auditors.
+
+### Proof helper (CI)
+
+`finance/tools/ci_generate_and_verify_proof.sh` wraps `generate_ledger_proof.sh` and `kernel/tools/audit-verify.js` so CI can:
+
+1. Point at a Postgres URL (`DATABASE_URL` env),
+2. Generate `proof.json` for a `[from,to]` window via `SIGNING_PROXY_URL` or `AUDIT_SIGNING_PRIVATE_KEY`,
+3. Run `audit-verify` against `kernel/tools/signers.json`.
+
+The script exits non-zero if any step fails, producing the proof at `finance/ci-proof.json` by default.
 
 ## # Security & governance
 - Finance must run in a high-trust isolated environment.  

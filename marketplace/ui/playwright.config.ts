@@ -13,6 +13,20 @@ import path from 'path';
  */
 
 const PROJECT_ROOT = path.resolve(__dirname);
+const defaultMockOidc = process.env.MOCK_OIDC ?? process.env.NEXT_PUBLIC_MOCK_OIDC ?? 'true';
+
+const webServerEnv = {
+  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://127.0.0.1:3000',
+  NEXT_PUBLIC_MOCK_OIDC: defaultMockOidc,
+  MOCK_OIDC: defaultMockOidc,
+  DEV_SKIP_OIDC: process.env.DEV_SKIP_OIDC || (defaultMockOidc === 'true' ? 'true' : 'false'),
+  NEXT_PUBLIC_DEV_SKIP_OIDC:
+    process.env.NEXT_PUBLIC_DEV_SKIP_OIDC || process.env.DEV_SKIP_OIDC || (defaultMockOidc === 'true' ? 'true' : 'false'),
+  MOCK_SIGNING_PROXY: process.env.MOCK_SIGNING_PROXY || 'true',
+};
+
+process.env.MOCK_OIDC ??= defaultMockOidc;
+process.env.NEXT_PUBLIC_MOCK_OIDC ??= defaultMockOidc;
 
 export default defineConfig({
   testDir: path.join(PROJECT_ROOT, 'tests', 'e2e'),
@@ -57,6 +71,7 @@ export default defineConfig({
     cwd: path.join(PROJECT_ROOT),
     url: 'http://127.0.0.1:3000',
     timeout: 180_000,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
+    env: webServerEnv,
   },
 });

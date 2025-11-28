@@ -11,7 +11,17 @@ class RequestBuilder {
   }
 
   set(name, value) {
-    this.headers[name.toLowerCase()] = value;
+    if (name && typeof name === 'object') {
+      Object.entries(name).forEach(([key, val]) => {
+        if (typeof key === 'string') {
+          this.headers[key.toLowerCase()] = val;
+        }
+      });
+      return this;
+    }
+    if (typeof name === 'string') {
+      this.headers[name.toLowerCase()] = value;
+    }
     return this;
   }
 
@@ -23,6 +33,18 @@ class RequestBuilder {
       }
     }
     return this;
+  }
+
+  expect(statusCode) {
+    return this.then((res) => {
+      const actual = res.statusCode ?? res.status ?? 0;
+      if (typeof statusCode === 'number' && actual !== statusCode) {
+        const err = new Error(`Expected status ${statusCode} but received ${actual}`);
+        err.response = res;
+        throw err;
+      }
+      return res;
+    });
   }
 
   then(onFulfilled, onRejected) {

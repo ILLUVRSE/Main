@@ -1,9 +1,27 @@
 import { Project, ProjectPreview, SignResponse } from '@/types/project';
 
+type AuthTokens = {
+  accessToken?: string | null;
+  idToken?: string | null;
+};
+
 const DEFAULT_API_BASE = 'http://localhost:4001';
 
 const API_BASE =
   (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL)?.replace(/\/$/, '') || DEFAULT_API_BASE;
+
+let activeTokens: AuthTokens = {};
+
+export function setAuthTokens(tokens: AuthTokens | null) {
+  activeTokens = {
+    accessToken: tokens?.accessToken ?? null,
+    idToken: tokens?.idToken ?? null,
+  };
+}
+
+export function setAuthToken(token: string | null) {
+  setAuthTokens({ accessToken: token });
+}
 
 function buildUrl(path: string) {
   if (/^https?:\/\//.test(path)) return path;
@@ -12,13 +30,24 @@ function buildUrl(path: string) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers || {});
+
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  if (activeTokens.accessToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${activeTokens.accessToken}`);
+  }
+
+  if (activeTokens.idToken && !headers.has('x-id-token')) {
+    headers.set('x-id-token', activeTokens.idToken);
+  }
+
   const response = await fetch(buildUrl(path), {
     cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
     ...init,
+    headers,
   });
 
   if (!response.ok) {

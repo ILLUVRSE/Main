@@ -1,0 +1,63 @@
+name: Signed Proof E2E
+
+on:
+  push:
+    paths:
+      - 'artifact-publisher/**'
+      - 'marketplace/**'
+      - 'finance/**'
+      - 'kernel/**'
+      - 'docs/GOLDEN_PATH.md'
+      - 'RELEASE_CHECKLIST.md'
+      - '.github/workflows/signed-proof-e2e.yml'
+      - 'scripts/ci/check-no-private-keys.sh'
+  pull_request:
+    paths:
+      - 'artifact-publisher/**'
+      - 'marketplace/**'
+      - 'finance/**'
+      - 'kernel/**'
+      - 'docs/GOLDEN_PATH.md'
+      - 'RELEASE_CHECKLIST.md'
+      - '.github/workflows/signed-proof-e2e.yml'
+      - 'scripts/ci/check-no-private-keys.sh'
+
+jobs:
+  signed-proof:
+    name: Checkout → Finance → Signed Proof verification
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: '20'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure no private keys are committed
+        run: ./scripts/ci/check-no-private-keys.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: artifact-publisher/server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: artifact-publisher/server
+        run: npm ci
+
+      - name: Run signed proof end-to-end test
+        working-directory: artifact-publisher/server
+        env:
+          NODE_ENV: test
+        run: npm run test:signed-proof
+
+      - name: Upload signed-proof vitest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-proof-vitest-report
+          path: |
+            artifact-publisher/server/test-results
+            artifact-publisher/server/vitest-report.html
+          if-no-files-found: ignore

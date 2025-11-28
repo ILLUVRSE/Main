@@ -1,0 +1,6 @@
+{
+  "kernelUrl": "http://127.0.0.1:6137",
+  "artifactPublisherUrl": "http://127.0.0.1:6137",
+  "marketplaceUrl": "http://127.0.0.1:8080",
+  "marketplaceTestBuyerToken": ""
+}

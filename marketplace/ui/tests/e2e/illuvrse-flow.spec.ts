@@ -3,6 +3,9 @@ import { test, expect } from '@playwright/test';
 test('project preview and signing flow', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /Luminous markets/i })).toBeVisible();
+  if (process.env.MOCK_OIDC === 'true' || process.env.NEXT_PUBLIC_MOCK_OIDC === 'true') {
+    await expect(page.getByText(/Welcome back/i)).toBeVisible();
+  }
 
   await page.goto('/marketplace');
   await expect(page.getByRole('heading', { name: 'Illuvrse Shelves' })).toBeVisible();

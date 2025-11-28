@@ -1,0 +1,39 @@
+{
+  "name": "kernel-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kernel runtime server implementing kernel/openapi.yaml",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "test": "jest --runInBand --colors",
+    "ci": "npm run build && npm test"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-openapi-validator": "^5.6.0",
+    "js-yaml": "^4.1.0",
+    "pg": "^8.16.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.17.10",
+    "@types/pg": "^8.11.10",
+    "@types/supertest": "^2.0.17",
+    "jest": "^29.7.0",
+    "pg-mem": "^3.0.5",
+    "supertest": "^6.3.4",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

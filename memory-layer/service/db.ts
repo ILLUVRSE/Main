@@ -382,7 +382,7 @@ export async function insertMemoryNodeWithAudit(
           expires_at
         )
         VALUES ($1,$2,COALESCE($3::jsonb,'{}'::jsonb),COALESCE($4::jsonb,'{}'::jsonb),COALESCE($5,FALSE),$6::int,
-          CASE WHEN $6::int IS NULL THEN NULL ELSE now() + make_interval(secs => $6::int) END)
+          CASE WHEN $6::int IS NULL THEN NULL ELSE now() + make_interval(0,0,0,0,0,0,$6::int) END)
         RETURNING *
       `,
         [
@@ -396,6 +396,77 @@ export async function insertMemoryNodeWithAudit(
       );
 
       const node = hydrateMemoryNode(insertNodeRes.rows[0]);
+
+      // Insert vector queue item if embedding is present (Atomicity for Vector Writes)
+      if (input.embedding) {
+        const provider = process.env.VECTOR_DB_PROVIDER ?? 'postgres';
+        const namespace = process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory';
+        const embedding = input.embedding;
+        await client.query(
+          `
+            INSERT INTO memory_vectors (
+              memory_node_id,
+              provider,
+              namespace,
+              embedding_model,
+              dimension,
+              external_vector_id,
+              status,
+              error,
+              vector_data,
+              metadata,
+              created_at,
+              updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,now(),now())
+            ON CONFLICT (memory_node_id, namespace) DO UPDATE
+              SET vector_data = EXCLUDED.vector_data,
+                  embedding_model = EXCLUDED.embedding_model,
+                  dimension = EXCLUDED.dimension,
+                  external_vector_id = EXCLUDED.external_vector_id,
+                  status = 'pending',
+                  error = NULL,
+                  updated_at = now()
+          `,
+          [
+            node.id,
+            provider,
+            namespace,
+            embedding.model,
+            embedding.dimension ?? (Array.isArray(embedding.vector) ? embedding.vector.length : null),
+            input.embeddingId ?? null,
+            'pending', // Status is pending, worker will pick it up
+            null,
+            JSON.stringify(embedding.vector ?? []),
+            JSON.stringify({
+              owner: node.owner,
+              metadata: node.metadata,
+              piiFlags: node.pii_flags
+            })
+          ]
+        );
+      }
+
+      // Insert Reasoning Graph queue item (Atomicity for Reasoning Graph)
+      // We push a job to notify Reasoning Graph about the new memory node
+      const reasonPayload = {
+        memoryNodeId: node.id,
+        owner: node.owner,
+        metadata: node.metadata,
+        timestamp: new Date().toISOString()
+      };
+
+      await client.query(
+        `
+        INSERT INTO reasoning_graph_queue (
+          memory_node_id,
+          status,
+          payload,
+          created_at,
+          updated_at
+        ) VALUES ($1, 'pending', $2::jsonb, now(), now())
+        `,
+        [node.id, JSON.stringify(reasonPayload)]
+      );
 
       // Insert artifacts inline
       if (Array.isArray(input.artifacts) && input.artifacts.length) {

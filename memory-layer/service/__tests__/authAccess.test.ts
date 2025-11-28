@@ -1,10 +1,10 @@
 import memoryRoutes from '../routes/memoryRoutes';
-import type { MemoryNodeView, MemoryService } from '../types';
+import type { MemoryNodeView, MemoryServiceDeps } from '../types';
 import type { Router, Request, Response, NextFunction } from 'express';
 
 type Principal = { id: string; roles: string[] };
 
-const buildServiceMock = (): jest.Mocked<MemoryService> => ({
+const buildServiceMock = (): any => ({
   createMemoryNode: jest.fn(),
   getMemoryNode: jest.fn(),
   getArtifact: jest.fn(),
@@ -115,7 +115,7 @@ const invokeNodeRoute = async (handlers: Handler[], principal: Principal | undef
 };
 
 describe('memoryRoutes auth + pii redaction', () => {
-  let service: jest.Mocked<MemoryService>;
+  let service: any;
   let nodeFixture: MemoryNodeView;
   let handlers: Handler[];
 

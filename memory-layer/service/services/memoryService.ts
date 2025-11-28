@@ -211,114 +211,16 @@ export const createMemoryService = (deps: MemoryServiceDeps) => ({
       // ignore metrics failures
     }
 
-    // After commit: attempt vector upsert (async). We do not block the API response on vector DB.
-    let vectorRef: string | null = null;
-    if (input.embedding) {
-      // measure vector upsert duration
-      const start = Date.now();
-      try {
-        const vectorResponse = await deps.vectorAdapter.upsertEmbedding({
-          memoryNodeId: node.id,
-          embeddingId: input.embeddingId ?? node.embedding_id,
-          embedding: { model: input.embedding.model, dimension: input.embedding.dimension ?? undefined, vector: input.embedding.vector, namespace: process.env.VECTOR_DB_NAMESPACE ?? "kernel-memory" },
-          metadata: {
-            owner: node.owner,
-            metadata: node.metadata,
-            piiFlags: node.pii_flags
-          }
-        });
-        const elapsed = (Date.now() - start) / 1000.0;
-        // metrics
-        try {
-          metricsModule.metrics.vectorWrite.observe({ provider: process.env.VECTOR_DB_PROVIDER ?? 'postgres', namespace: process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory', owner: node.owner }, elapsed);
-        } catch {}
-        if (vectorResponse.externalVectorId) {
-          // persist external vector id on memory_nodes
-          await updateMemoryNodeEmbedding(node.id, vectorResponse.externalVectorId);
-          vectorRef = vectorResponse.externalVectorId ?? null;
-        }
-        try {
-          metricsModule.metrics.vectorWrite.success({ provider: process.env.VECTOR_DB_PROVIDER ?? 'postgres', namespace: process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory' });
-        } catch {}
-      } catch (err) {
-        // Adapter failed — insert a pending memory_vectors row so worker can retry.
-        const elapsed = (Date.now() - start) / 1000.0;
-        try {
-          metricsModule.metrics.vectorWrite.failure({ provider: process.env.VECTOR_DB_PROVIDER ?? 'postgres', namespace: process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory', error: (err as Error).message ?? 'adapter_error' });
-          metricsModule.metrics.vectorWrite.observe({ provider: process.env.VECTOR_DB_PROVIDER ?? 'postgres', namespace: process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory', owner: node.owner }, elapsed);
-        } catch {}
-        console.error(`[memoryService] vector upsert failed for node ${node.id}:`, (err as Error).message || err);
-        try {
-          const pool = getPool();
-          const provider = process.env.VECTOR_DB_PROVIDER ?? 'postgres';
-          const namespace = process.env.VECTOR_DB_NAMESPACE ?? 'kernel-memory';
-          const embedding = input.embedding;
-          // write vector_data as JSONB, status 'pending' so worker will pick it up
-          await pool.query(
-            `
-            INSERT INTO memory_vectors (
-              memory_node_id,
-              provider,
-              namespace,
-              embedding_model,
-              dimension,
-              external_vector_id,
-              status,
-              error,
-              vector_data,
-              metadata,
-              created_at,
-              updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,now(),now())
-            ON CONFLICT (memory_node_id, namespace) DO UPDATE
-              SET vector_data = EXCLUDED.vector_data,
-                  embedding_model = EXCLUDED.embedding_model,
-                  dimension = EXCLUDED.dimension,
-                  external_vector_id = EXCLUDED.external_vector_id,
-                  status = 'pending',
-                  error = EXCLUDED.error,
-                  updated_at = now()
-          `,
-            [
-              node.id,
-              provider,
-              namespace,
-              embedding.model,
-              embedding.dimension ?? (Array.isArray(embedding.vector) ? embedding.vector.length : null),
-              input.embeddingId ?? null,
-              'pending',
-              (err as Error).message ?? 'adapter_error',
-              JSON.stringify(embedding.vector ?? []),
-              JSON.stringify({
-                owner: node.owner,
-                metadata: node.metadata,
-                piiFlags: node.pii_flags
-              })
-            ]
-          );
-          // Update vector queue depth metric (approx)
-          try {
-            const qRes = await pool.query<{ count: string }>(
-              `SELECT count(1) AS count FROM memory_vectors WHERE status = 'pending' AND namespace = $1`,
-              [namespace]
-            );
-            const depth = Number(qRes.rows[0]?.count ?? 0);
-            metricsModule.metrics.vectorQueue.setDepth(depth, { provider, namespace });
-          } catch {
-            // ignore
-          }
-        } catch (uerr) {
-          console.error('[memoryService] failed to enqueue vector for retry:', (uerr as Error).message || uerr);
-          try {
-            metricsModule.metrics.vectorQueue.workerError((uerr as Error).message ?? 'enqueue_failed');
-          } catch {}
-        }
-      }
-    }
+    // After commit: The vectors and reasoning graph updates are already queued in the DB transaction.
+    // The workers will pick them up.
+    // We can optionally trigger workers or return immediate status 'queued'.
+
+    // Optimization: Trigger workers (or if we want to wait for completion, we could, but better to be async).
+    // For now we return immediately.
 
     return {
       memoryNodeId: node.id,
-      embeddingVectorId: vectorRef,
+      embeddingVectorId: null, // Asynchronous now
       auditEventId: (audit as any).id
     };
   },

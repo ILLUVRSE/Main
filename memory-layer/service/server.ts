@@ -9,6 +9,8 @@ import { VectorDbAdapter } from './vector/vectorDbAdapter';
 import { createMemoryService } from './services/memoryService';
 import { getPool } from './db';
 import { authMiddleware } from './middleware/auth';
+import { startPolling as startVectorPolling } from './worker/vectorWorker';
+import { startPolling as startReasoningPolling } from './worker/reasoningWorker';
 
 // Observability
 import metricsModule from './observability/metrics';
@@ -249,6 +251,22 @@ async function start() {
   if (require.main === module) {
     app.listen(port, () => {
       console.info(`Memory Layer service listening on port ${port} (env=${nodeEnv})`);
+
+      // Start background workers
+      // We don't await them as they run indefinitely
+      try {
+        startVectorPolling(vectorAdapter);
+        console.info('[startup] Vector worker started');
+      } catch (e) {
+        console.error('[startup] Failed to start vector worker', e);
+      }
+
+      try {
+        startReasoningPolling();
+        console.info('[startup] Reasoning worker started');
+      } catch (e) {
+         console.error('[startup] Failed to start reasoning worker', e);
+      }
     });
   }
 }

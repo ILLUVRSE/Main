@@ -18,10 +18,12 @@ module.exports = {
 
   // Only run tests inside the memory-layer test directory
   testMatch: [
-    '<rootDir>/memory-layer/test/**/*.test.ts',
-    '<rootDir>/memory-layer/test/**/*.spec.ts',
-    '<rootDir>/memory-layer/test/integration/**/*.test.ts',
-    '<rootDir>/memory-layer/test/integration/**/*.spec.ts'
+    '<rootDir>/test/**/*.test.ts',
+    '<rootDir>/test/**/*.spec.ts',
+    '<rootDir>/test/integration/**/*.test.ts',
+    '<rootDir>/test/integration/**/*.spec.ts',
+    '<rootDir>/service/__tests__/**/*.test.ts',
+    '<rootDir>/service/__tests__/**/*.spec.ts'
   ],
 
   // Transform TypeScript using ts-jest

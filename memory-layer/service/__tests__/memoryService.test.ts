@@ -7,9 +7,14 @@ import { setPool, insertAuditEvent } from '../db';
 import { createMemoryService } from '../services/memoryService';
 import { VectorDbAdapter } from '../vector/vectorDbAdapter';
 
+jest.mock('../storage/s3Client', () => ({
+  validateArtifactChecksum: jest.fn().mockResolvedValue(true)
+}));
+
 const migrations = [
   path.join(__dirname, '../../sql/migrations/001_create_memory_schema.sql'),
-  path.join(__dirname, '../../sql/migrations/002_enhance_memory_vectors.sql')
+  path.join(__dirname, '../../sql/migrations/002_enhance_memory_vectors.sql'),
+  path.join(__dirname, '../../sql/migrations/003_create_reasoning_queue.sql')
 ];
 
 const sanitizeSql = (sql: string) =>
@@ -37,21 +42,38 @@ describe('Memory Layer service', () => {
 
   beforeAll(() => {
     process.env.AUDIT_SIGNING_KEY = 'unit-test-secret';
+    process.env.VECTOR_DB_NAMESPACE = 'test-memory';
   });
 
   beforeEach(async () => {
     const db = newDb({ autoCreateForeignKeyIndices: true });
     db.public.registerFunction({
       name: 'gen_random_uuid',
-      returns: 'uuid',
+      returns: db.public.getType('uuid') as any,
       implementation: () => randomUUID(),
       impure: true
     });
     db.public.registerFunction({
       name: 'char_length',
-      args: ['text'],
-      returns: 'int4',
+      args: [db.public.getType('text') as any],
+      returns: db.public.getType('int4') as any,
       implementation: (value: string | null) => (value ?? '').length
+    });
+    db.public.registerFunction({
+      name: 'make_interval',
+      args: [
+        db.public.getType('int'),
+        db.public.getType('int'),
+        db.public.getType('int'),
+        db.public.getType('int'),
+        db.public.getType('int'),
+        db.public.getType('int'),
+        db.public.getType('int')
+      ] as any,
+      returns: db.public.getType('interval') as any,
+      implementation: (y: number, mon: number, w: number, d: number, h: number, m: number, s: number) => {
+        return { years: y, months: mon, weeks: w, days: d, hours: h, minutes: m, seconds: s };
+      }
     });
     const pg = db.adapters.createPg();
     pool = new pg.Pool();
@@ -115,10 +137,19 @@ describe('Memory Layer service', () => {
 
     expect(artifact.artifactId).toBeTruthy();
 
+    // Verify pending status (Outbox pattern)
     const vectorRows = await pool.query('SELECT memory_node_id, namespace, status FROM memory_vectors');
     expect(vectorRows.rows).toHaveLength(1);
     expect(vectorRows.rows[0].namespace).toEqual('test-memory');
-    expect(vectorRows.rows[0].status).toEqual('completed');
+    expect(vectorRows.rows[0].status).toEqual('pending');
+
+    // Verify reasoning queue insertion
+    const reasonRows = await pool.query('SELECT memory_node_id, status FROM reasoning_graph_queue');
+    expect(reasonRows.rows).toHaveLength(1);
+    expect(reasonRows.rows[0].status).toEqual('pending');
+
+    // Manually simulate worker success for vectors
+    await pool.query("UPDATE memory_vectors SET status = 'completed'");
 
     const rawVectorResults = await vectorAdapter.search({
       queryEmbedding: [0, 1, 0],

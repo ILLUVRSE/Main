@@ -44,6 +44,7 @@ import {
   IdempotencyKeyConflictError,
 } from '../handlers/kernelCreate';
 import createUpgradeRouter from './upgradeRoutes';
+import createMultisigRouter from './multisigRoutes';
 import createControlPanelRouter from './controlPanelRoutes';
 import { getReasoningClient, ReasoningClientError } from '../reasoning/client';
 import { authMiddleware } from '../middleware/auth';
@@ -146,6 +147,7 @@ export default function createKernelRouter(): Router {
   );
 
   router.use('/kernel/upgrade', createUpgradeRouter());
+  router.use('/kernel/multisig', createMultisigRouter());
   router.use('/control-panel', createControlPanelRouter());
 
   /**

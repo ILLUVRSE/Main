@@ -45,6 +45,7 @@ import {
 } from '../handlers/kernelCreate';
 import createUpgradeRouter from './upgradeRoutes';
 import createControlPanelRouter from './controlPanelRoutes';
+import createMultisigRouter from './multisigRoutes';
 import { getReasoningClient, ReasoningClientError } from '../reasoning/client';
 import { authMiddleware } from '../middleware/auth';
 
@@ -147,6 +148,7 @@ export default function createKernelRouter(): Router {
 
   router.use('/kernel/upgrade', createUpgradeRouter());
   router.use('/control-panel', createControlPanelRouter());
+  router.use('/multisig', createMultisigRouter());
 
   /**
    * POST /kernel/sign

@@ -14,6 +14,11 @@ type Config struct {
 	AllowDebugToken     bool
 	SignerKeyB64        string
 	SignerID            string
+	ReasoningAllowMTLS  bool
+	KernelSignerKeysFile string
+	ReasoningWriteScope string
+	KernelTrustedCN     string
+	ReasoningDevAllowLocal bool
 	MaxTraceDepth       int
 	SnapshotDepth       int
 	MaxSnapshotRoots    int
@@ -37,6 +42,11 @@ func Load() (Config, error) {
 		AllowDebugToken:     getBool("REASONING_GRAPH_ALLOW_DEBUG_TOKEN", false),
 		SignerKeyB64:        os.Getenv("REASONING_GRAPH_SNAPSHOT_KEY_B64"),
 		SignerID:            getEnv("REASONING_GRAPH_SIGNER_ID", "reasoning-graph-dev"),
+		ReasoningAllowMTLS:  getBool("REASONING_ALLOW_MTLS", false),
+		KernelSignerKeysFile: os.Getenv("KERNEL_SIGNER_KEYS_FILE"),
+		ReasoningWriteScope: getEnv("REASONING_WRITE_SCOPE", "reasoning:write"),
+		KernelTrustedCN:     getEnv("KERNEL_TRUSTED_CN", "kernel"),
+		ReasoningDevAllowLocal: getBool("REASONING_DEV_ALLOW_LOCAL", false),
 		MaxTraceDepth:       getInt("REASONING_GRAPH_MAX_TRACE_DEPTH", defaultMaxTraceDepth),
 		SnapshotDepth:       getInt("REASONING_GRAPH_SNAPSHOT_DEPTH", defaultSnapshotDepth),
 		MaxSnapshotRoots:    getInt("REASONING_GRAPH_MAX_SNAPSHOT_ROOTS", defaultMaxSnapshotRoots),

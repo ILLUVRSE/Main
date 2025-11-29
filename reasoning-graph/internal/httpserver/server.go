@@ -13,6 +13,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
+	"fmt"
+
+	"github.com/ILLUVRSE/Main/reasoning-graph/internal/auth"
 	"github.com/ILLUVRSE/Main/reasoning-graph/internal/config"
 	"github.com/ILLUVRSE/Main/reasoning-graph/internal/models"
 	"github.com/ILLUVRSE/Main/reasoning-graph/internal/service"
@@ -20,16 +23,24 @@ import (
 )
 
 type Server struct {
-	cfg config.Config
-	db  store.Store
-	svc *service.Service
+	cfg      config.Config
+	db       store.Store
+	svc      *service.Service
+	verifier *auth.Verifier
 }
 
 func New(cfg config.Config, db store.Store, svc *service.Service) *Server {
+	v, err := auth.NewVerifier(cfg)
+	if err != nil {
+		// In production this should probably be fatal, but for now we log or just proceed (auth will fail)
+		// Since we can't easily log here without logger passed in, we'll let it be nil and fail in middleware
+		fmt.Printf("Warning: failed to initialize auth verifier: %v\n", err)
+	}
 	return &Server{
-		cfg: cfg,
-		db:  db,
-		svc: svc,
+		cfg:      cfg,
+		db:       db,
+		svc:      svc,
+		verifier: v,
 	}
 }
 
@@ -339,19 +350,33 @@ func buildHumanSummary(nodes []models.ReasonNode, edges []models.ReasonEdge) []m
 
 func (s *Server) writeAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. Debug Token (Legacy/Emergency)
 		if s.cfg.AllowDebugToken {
 			if token := r.Header.Get("X-Debug-Token"); token != "" && token == s.cfg.DebugToken {
 				next.ServeHTTP(w, r)
 				return
 			}
-			respondError(w, http.StatusUnauthorized, "REASONING_GRAPH_AUTH", "debug token required")
+		}
+
+		// 2. Use Verifier
+		if s.verifier != nil {
+			if err := s.verifier.VerifyRequest(r); err != nil {
+				// Log error (if we had a logger)
+				// fmt.Printf("Auth failed: %v\n", err)
+				// We distinguish between unauthorized (missing/bad creds) and forbidden (bad scope)
+				if strings.Contains(err.Error(), "missing required scope") {
+					respondError(w, http.StatusForbidden, "REASONING_GRAPH_FORBIDDEN", err.Error())
+				} else {
+					respondError(w, http.StatusUnauthorized, "REASONING_GRAPH_UNAUTHORIZED", err.Error())
+				}
+				return
+			}
+			next.ServeHTTP(w, r)
 			return
 		}
-		if r.TLS == nil {
-			respondError(w, http.StatusUnauthorized, "REASONING_GRAPH_AUTH", "mtls required")
-			return
-		}
-		next.ServeHTTP(w, r)
+
+		// Fallback to strict fail if verifier not initialized but auth required
+		respondError(w, http.StatusInternalServerError, "REASONING_GRAPH_AUTH_ERROR", "auth verifier not initialized")
 	})
 }
 

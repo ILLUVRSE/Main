@@ -1,0 +1,10 @@
+{
+  "name": "reasoning-graph",
+  "version": "1.0.0",
+  "description": "Reasoning Graph Service (Go)",
+  "scripts": {
+    "test": "go test -v ./..."
+  },
+  "author": "Illuverse",
+  "license": "ISC"
+}

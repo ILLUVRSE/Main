@@ -52,12 +52,31 @@ npx ts-node memory-layer/service/server.ts
 ### Optional: Vector Worker & TTL Cleaner
 
 ```bash
-# Vector worker
-npx ts-node memory-layer/service/worker/vectorWorker.ts
+# Vector worker (new implementation)
+npx ts-node memory-layer/src/ingest/worker.ts
 
 # TTL cleaner
 npx ts-node memory-layer/service/jobs/ttlCleaner.ts
 ```
+
+### Vector & Embedding Pipeline
+
+The new vector & embedding pipeline supports idempotent writes and queue-based ingest with fallback.
+
+* **Components**:
+    * Producer: `memory-layer/src/embeddings/producer.ts`
+    * Worker: `memory-layer/src/ingest/worker.ts`
+    * Queue: Postgres-backed (durable) or in-memory.
+    * Adapters: `LocalMockEmbeddingProvider`, `HttpEmbeddingProvider`, `MockVectorDB`, `ProdVectorDBAdapter`.
+
+* **Configuration**:
+    * `VECTOR_DB_PROVIDER`: `mock` (default) or `postgres` / `pinecone` (future).
+    * `EMBEDDING_PROVIDER`: `mock` (default) or `http`.
+    * `EMBEDDING_API_URL`, `EMBEDDING_API_KEY`: For HTTP provider.
+    * `VECTOR_QUEUE_TABLE`: Defaults to `embedding_queue`.
+
+* **Running with Docker Compose**:
+  Use `memory-layer/docker-compose.memory-layer.yml` to spin up required services.
 
 ---
 

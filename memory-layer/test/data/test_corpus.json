@@ -1,0 +1,33 @@
+
+[
+  {
+    "id": "1",
+    "text": "The quick brown fox jumps over the lazy dog.",
+    "metadata": { "category": "animals" }
+  },
+  {
+    "id": "2",
+    "text": "A fast brown fox leaps over a sleepy dog.",
+    "metadata": { "category": "animals" }
+  },
+  {
+    "id": "3",
+    "text": "SpaceX launches rockets into orbit.",
+    "metadata": { "category": "space" }
+  },
+  {
+    "id": "4",
+    "text": "Elon Musk is the CEO of SpaceX.",
+    "metadata": { "category": "space" }
+  },
+  {
+    "id": "5",
+    "text": "Python is a popular programming language.",
+    "metadata": { "category": "tech" }
+  },
+  {
+    "id": "6",
+    "text": "Javascript is used for web development.",
+    "metadata": { "category": "tech" }
+  }
+]

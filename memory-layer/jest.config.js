@@ -32,10 +32,17 @@ module.exports = {
   },
 
   // Ignore node_modules except if you need to transform specific packages (rare)
-  transformIgnorePatterns: ['/node_modules/'],
+  // transformIgnorePatterns: ['/node_modules/'],
+  transformIgnorePatterns: [
+    'node_modules/(?!(node-fetch|data-uri-to-buffer|fetch-blob|formdata-polyfill|uuid)/)'
+  ],
 
   // Module file extensions for imports
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json', 'node'],
+
+  moduleNameMapper: {
+    '^node-fetch$': '<rootDir>/test/mocks/node-fetch.js'
+  },
 
   // Use a separate tsconfig for Jest to force CommonJS and avoid ESM issues
   globals: {

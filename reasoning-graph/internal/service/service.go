@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -165,6 +166,322 @@ func (s *Service) ComputeTrace(ctx context.Context, start uuid.UUID, direction m
 
 	return result, nil
 }
+
+// GetOrderedCausalTrace returns a topologically ordered causal path for the given trace ID (node ID).
+// It traverses ancestors (causes) and returns them in causal order (causes before effects).
+func (s *Service) GetOrderedCausalTrace(ctx context.Context, id uuid.UUID) (models.OrderedTraceResult, error) {
+	// 1. Fetch all ancestors (transitive closure of 'incoming' edges)
+	// We use BFS to collect the subgraph.
+	nodes := make(map[uuid.UUID]models.ReasonNode)
+	edges := make(map[uuid.UUID]models.ReasonEdge)
+	visited := make(map[uuid.UUID]bool)
+	queue := []uuid.UUID{id}
+	visited[id] = true
+
+	// Limit depth/size to prevent infinite loops or OOM on massive graphs
+	// For now, hardcoded limit or use config
+	maxNodes := 1000
+	cycleDetected := false
+	cycleDetails := []string{}
+
+	for len(queue) > 0 {
+		if len(nodes) > maxNodes {
+			break
+		}
+		currID := queue[0]
+		queue = queue[1:]
+
+		node, err := s.store.GetNode(ctx, currID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue // skip missing nodes in graph (shouldn't happen with FKs)
+			}
+			return models.OrderedTraceResult{}, err
+		}
+		nodes[currID] = node
+
+		// Get incoming edges (causes)
+		incoming, err := s.store.ListEdgesTo(ctx, currID)
+		if err != nil {
+			return models.OrderedTraceResult{}, err
+		}
+
+		for _, e := range incoming {
+			edges[e.ID] = e
+			if !visited[e.From] {
+				visited[e.From] = true
+				queue = append(queue, e.From)
+			}
+		}
+	}
+
+	// 2. Fetch Annotations for all collected nodes and edges
+	targetIDs := make([]uuid.UUID, 0, len(nodes)+len(edges))
+	for id := range nodes {
+		targetIDs = append(targetIDs, id)
+	}
+	for id := range edges {
+		targetIDs = append(targetIDs, id)
+	}
+
+	annotations, err := s.store.ListAnnotations(ctx, targetIDs)
+	if err != nil {
+		return models.OrderedTraceResult{}, fmt.Errorf("list annotations: %w", err)
+	}
+
+	annMap := make(map[uuid.UUID][]models.ReasonAnnotation)
+	for _, ann := range annotations {
+		annMap[ann.TargetID] = append(annMap[ann.TargetID], ann)
+	}
+
+	// 3. Topological Sort (Kahn's Algorithm)
+	// Build adjacency list for the subgraph induced by collected nodes and edges.
+	// We want "parents before children". Since we traversed backwards (ancestors),
+	// the edges are From -> To. So this is standard topo sort.
+
+	// We also treat edges as items in the sorted list?
+	// The requirement: "ordered_path: array of entries where each entry is { id, type: 'node' | 'edge' ... }"
+	// "Parents before children" usually applies to nodes.
+	// If A -> E -> B (A causes B via Edge E), then order: A, E, B.
+	// So we can model the graph as: Node A -> Edge E -> Node B.
+	// Thus:
+	//   Edge E depends on Node A (From)
+	//   Node B depends on Edge E (To)
+
+	// Let's build a dependency graph where items are Nodes AND Edges.
+	// Item IDs: Node IDs and Edge IDs.
+
+	type itemRef struct {
+		id   uuid.UUID
+		kind string // "node" or "edge"
+	}
+
+	topoAdj := make(map[uuid.UUID][]uuid.UUID)
+	topoInDegree := make(map[uuid.UUID]int)
+
+	// Initialize for nodes
+	for id := range nodes {
+		topoInDegree[id] = 0
+	}
+	// Initialize for edges
+	for id := range edges {
+		topoInDegree[id] = 0
+	}
+
+	for _, e := range edges {
+		// A -> Edge -> B
+		// Edge depends on FromNode (A)
+		// ToNode (B) depends on Edge
+
+		// A -> Edge
+		topoAdj[e.From] = append(topoAdj[e.From], e.ID)
+		topoInDegree[e.ID]++
+
+		// Edge -> B
+		topoAdj[e.ID] = append(topoAdj[e.ID], e.To)
+		topoInDegree[e.To]++
+	}
+
+	// Priority Queue for deterministic tie-breaking?
+	// Kahn's algorithm with a Priority Queue (or just sorting the available set)
+	// Tie-break: timestamp then UUID.
+
+	// Items with in-degree 0
+	zeroIn := []uuid.UUID{}
+	for id, deg := range topoInDegree {
+		if deg == 0 {
+			zeroIn = append(zeroIn, id)
+		}
+	}
+
+	sortKeys := func(ids []uuid.UUID) {
+		sort.Slice(ids, func(i, j int) bool {
+			// Get timestamp
+			var tsI, tsJ time.Time
+			if n, ok := nodes[ids[i]]; ok {
+				tsI = n.CreatedAt
+			} else if e, ok := edges[ids[i]]; ok {
+				tsI = e.CreatedAt
+			}
+			if n, ok := nodes[ids[j]]; ok {
+				tsJ = n.CreatedAt
+			} else if e, ok := edges[ids[j]]; ok {
+				tsJ = e.CreatedAt
+			}
+
+			if !tsI.Equal(tsJ) {
+				return tsI.Before(tsJ)
+			}
+			return ids[i].String() < ids[j].String()
+		})
+	}
+
+	sortKeys(zeroIn)
+
+	orderedPath := []models.OrderedTraceEntry{}
+	processedCount := 0
+	totalItems := len(nodes) + len(edges)
+
+	for len(zeroIn) > 0 {
+		currID := zeroIn[0]
+		zeroIn = zeroIn[1:]
+		processedCount++
+
+		// Add to result
+		var entry models.OrderedTraceEntry
+		if n, ok := nodes[currID]; ok {
+			entry = models.OrderedTraceEntry{
+				ID:          n.ID,
+				Type:        "node",
+				EntityType:  n.Type,
+				Timestamp:   n.CreatedAt,
+				Annotations: annMap[n.ID],
+				Payload:     n.Payload,
+			}
+			if n.AuditEventID != nil {
+				entry.AuditRef = &models.AuditRef{EventID: *n.AuditEventID}
+			}
+			// Parents for a node are the incoming edges
+			// But in our "A->E->B" model, the parent of B is E.
+			// Let's stick to the graph structure for parent_ids.
+			// The prompt says "parent_ids" which usually means immediate causal predecessors.
+			// For B, parent is A (via E). Or is it E?
+			// "parent_ids" usually refers to nodes.
+			// If type is "node", parent_ids = IDs of nodes that have edges pointing to this node.
+			// If type is "edge", parent_ids = ID of the From node.
+
+			if entry.Type == "node" {
+				parents := []uuid.UUID{}
+				// Find edges pointing to this node
+				// We can iterate edges (inefficient but safe for small graphs) or build reverse map
+				for _, e := range edges {
+					if e.To == n.ID {
+						parents = append(parents, e.From) // Node parent
+					}
+				}
+				// Sort parents for determinism
+				sort.Slice(parents, func(i, j int) bool { return parents[i].String() < parents[j].String() })
+				entry.ParentIDs = parents
+			}
+		} else if e, ok := edges[currID]; ok {
+			entry = models.OrderedTraceEntry{
+				ID:          e.ID,
+				Type:        "edge",
+				EntityType:  e.Type,
+				Timestamp:   e.CreatedAt,
+				Annotations: annMap[e.ID],
+				From:        &e.From,
+				To:          &e.To,
+			}
+			if e.AuditEventID != nil {
+				entry.AuditRef = &models.AuditRef{EventID: *e.AuditEventID}
+			}
+			entry.ParentIDs = []uuid.UUID{e.From}
+		}
+
+		entry.CausalIndex = len(orderedPath)
+		orderedPath = append(orderedPath, entry)
+
+		// Update neighbors
+		neighbors := topoAdj[currID]
+		// Sort neighbors to ensure we process them in deterministic order if they become 0-degree at same time
+		// (Actually strictly not needed if we sort zeroIn every insertion, but good practice)
+
+		for _, neighbor := range neighbors {
+			topoInDegree[neighbor]--
+			if topoInDegree[neighbor] == 0 {
+				zeroIn = append(zeroIn, neighbor)
+			}
+		}
+		// Re-sort zeroIn to maintain priority queue invariant
+		sortKeys(zeroIn)
+	}
+
+	// Cycle Detection
+	if processedCount < totalItems {
+		cycleDetected = true
+		// Find items that were not processed (still have in-degree > 0)
+		remaining := []string{}
+		for id, deg := range topoInDegree {
+			if deg > 0 {
+				remaining = append(remaining, id.String())
+
+				// Force add them to the path using deterministic tie break (timestamp) to allow consumers to see them
+				// The prompt says: "still return a deterministic acyclic reduction ... include details of cycle detection"
+				// "Break cycles deterministically (e.g., by earliest timestamp...)"
+
+				// We can just dump the remaining items sorted by timestamp
+			}
+		}
+		cycleDetails = remaining
+
+		// Add remaining items sorted by timestamp
+		remainingIDs := []uuid.UUID{}
+		for id, deg := range topoInDegree {
+			if deg > 0 {
+				remainingIDs = append(remainingIDs, id)
+			}
+		}
+		sortKeys(remainingIDs)
+
+		for _, id := range remainingIDs {
+			var entry models.OrderedTraceEntry
+			if n, ok := nodes[id]; ok {
+				entry = models.OrderedTraceEntry{
+					ID:          n.ID,
+					Type:        "node",
+					EntityType:  n.Type,
+					Timestamp:   n.CreatedAt,
+					Annotations: annMap[n.ID],
+					Payload:     n.Payload,
+				}
+				if n.AuditEventID != nil {
+					entry.AuditRef = &models.AuditRef{EventID: *n.AuditEventID}
+				}
+				// Parents logic
+				parents := []uuid.UUID{}
+				for _, e := range edges {
+					if e.To == n.ID {
+						parents = append(parents, e.From)
+					}
+				}
+				sort.Slice(parents, func(i, j int) bool { return parents[i].String() < parents[j].String() })
+				entry.ParentIDs = parents
+
+			} else if e, ok := edges[id]; ok {
+				entry = models.OrderedTraceEntry{
+					ID:          e.ID,
+					Type:        "edge",
+					EntityType:  e.Type,
+					Timestamp:   e.CreatedAt,
+					Annotations: annMap[e.ID],
+					From:        &e.From,
+					To:          &e.To,
+				}
+				if e.AuditEventID != nil {
+					entry.AuditRef = &models.AuditRef{EventID: *e.AuditEventID}
+				}
+				entry.ParentIDs = []uuid.UUID{e.From}
+			}
+
+			entry.CausalIndex = len(orderedPath)
+			orderedPath = append(orderedPath, entry)
+		}
+	}
+
+	return models.OrderedTraceResult{
+		TraceID:     id,
+		OrderedPath: orderedPath,
+		Metadata: models.OrderedTraceMetadata{
+			TraceID:       id,
+			CreatedAt:     time.Now().UTC(),
+			Length:        len(orderedPath),
+			CycleDetected: cycleDetected,
+			CycleDetails:  strings.Join(cycleDetails, ","),
+		},
+	}, nil
+}
+
 
 func (s *Service) getNode(ctx context.Context, cache map[uuid.UUID]models.ReasonNode, id uuid.UUID) (models.ReasonNode, error) {
 	if node, ok := cache[id]; ok {

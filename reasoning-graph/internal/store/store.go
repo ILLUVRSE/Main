@@ -27,6 +27,7 @@ type Store interface {
 	ListEdgesTo(ctx context.Context, nodeID uuid.UUID) ([]models.ReasonEdge, error)
 	CreateSnapshot(ctx context.Context, in SnapshotInput) (models.ReasonSnapshot, error)
 	GetSnapshot(ctx context.Context, id uuid.UUID) (models.ReasonSnapshot, error)
+	ListAnnotations(ctx context.Context, targetIDs []uuid.UUID) ([]models.ReasonAnnotation, error)
 	Ping(ctx context.Context) error
 }
 
@@ -50,12 +51,13 @@ type NodeInput struct {
 }
 
 type EdgeInput struct {
-	ID       uuid.UUID
-	From     uuid.UUID
-	To       uuid.UUID
-	Type     string
-	Weight   *float64
-	Metadata json.RawMessage
+	ID           uuid.UUID
+	From         uuid.UUID
+	To           uuid.UUID
+	Type         string
+	Weight       *float64
+	Metadata     json.RawMessage
+	AuditEventID *string
 }
 
 type SnapshotInput struct {
@@ -170,8 +172,8 @@ func (s *PGStore) CreateEdge(ctx context.Context, in EdgeInput) (models.ReasonEd
 	metadata := ensureJSON(in.Metadata, "{}")
 
 	query := `
-		INSERT INTO reason_edges (id, from_node, to_node, type, weight, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		INSERT INTO reason_edges (id, from_node, to_node, type, weight, metadata, audit_event_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		RETURNING created_at
 	`
 
@@ -185,18 +187,20 @@ func (s *PGStore) CreateEdge(ctx context.Context, in EdgeInput) (models.ReasonEd
 		in.Type,
 		in.Weight,
 		metadata,
+		in.AuditEventID,
 	).Scan(&createdAt); err != nil {
 		return models.ReasonEdge{}, fmt.Errorf("insert edge: %w", err)
 	}
 
 	return models.ReasonEdge{
-		ID:        in.ID,
-		From:      in.From,
-		To:        in.To,
-		Type:      in.Type,
-		Weight:    in.Weight,
-		Metadata:  metadata,
-		CreatedAt: createdAt,
+		ID:           in.ID,
+		From:         in.From,
+		To:           in.To,
+		Type:         in.Type,
+		Weight:       in.Weight,
+		Metadata:     metadata,
+		AuditEventID: in.AuditEventID,
+		CreatedAt:    createdAt,
 	}, nil
 }
 
@@ -210,9 +214,10 @@ func (s *PGStore) listEdges(ctx context.Context, query string, nodeID uuid.UUID)
 	var edges []models.ReasonEdge
 	for rows.Next() {
 		var (
-			edge     models.ReasonEdge
-			metadata []byte
-			weight   sql.NullFloat64
+			edge         models.ReasonEdge
+			metadata     []byte
+			weight       sql.NullFloat64
+			auditEventID sql.NullString
 		)
 		if err := rows.Scan(
 			&edge.ID,
@@ -221,6 +226,7 @@ func (s *PGStore) listEdges(ctx context.Context, query string, nodeID uuid.UUID)
 			&edge.Type,
 			&weight,
 			&metadata,
+			&auditEventID,
 			&edge.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan edge: %w", err)
@@ -230,6 +236,9 @@ func (s *PGStore) listEdges(ctx context.Context, query string, nodeID uuid.UUID)
 			edge.Weight = &v
 		}
 		edge.Metadata = append(json.RawMessage(nil), metadata...)
+		if auditEventID.Valid {
+			edge.AuditEventID = &auditEventID.String
+		}
 		edges = append(edges, edge)
 	}
 	if err := rows.Err(); err != nil {
@@ -240,7 +249,7 @@ func (s *PGStore) listEdges(ctx context.Context, query string, nodeID uuid.UUID)
 
 func (s *PGStore) ListEdgesFrom(ctx context.Context, nodeID uuid.UUID) ([]models.ReasonEdge, error) {
 	const query = `
-		SELECT id, from_node, to_node, type, weight, metadata, created_at
+		SELECT id, from_node, to_node, type, weight, metadata, audit_event_id, created_at
 		FROM reason_edges
 		WHERE from_node = $1
 		ORDER BY created_at ASC
@@ -250,12 +259,55 @@ func (s *PGStore) ListEdgesFrom(ctx context.Context, nodeID uuid.UUID) ([]models
 
 func (s *PGStore) ListEdgesTo(ctx context.Context, nodeID uuid.UUID) ([]models.ReasonEdge, error) {
 	const query = `
-		SELECT id, from_node, to_node, type, weight, metadata, created_at
+		SELECT id, from_node, to_node, type, weight, metadata, audit_event_id, created_at
 		FROM reason_edges
 		WHERE to_node = $1
 		ORDER BY created_at ASC
 	`
 	return s.listEdges(ctx, query, nodeID)
+}
+
+func (s *PGStore) ListAnnotations(ctx context.Context, targetIDs []uuid.UUID) ([]models.ReasonAnnotation, error) {
+	if len(targetIDs) == 0 {
+		return []models.ReasonAnnotation{}, nil
+	}
+	const query = `
+		SELECT id, target_id, target_type, annotation_type, payload, audit_event_id, created_at
+		FROM reason_annotations
+		WHERE target_id = ANY($1)
+		ORDER BY created_at ASC
+	`
+	rows, err := s.db.QueryContext(ctx, query, pq.Array(targetIDs))
+	if err != nil {
+		return nil, fmt.Errorf("query annotations: %w", err)
+	}
+	defer rows.Close()
+
+	var anns []models.ReasonAnnotation
+	for rows.Next() {
+		var (
+			ann          models.ReasonAnnotation
+			payload      []byte
+			auditEventID sql.NullString
+		)
+		if err := rows.Scan(
+			&ann.ID,
+			&ann.TargetID,
+			&ann.TargetType,
+			&ann.AnnotationType,
+			&payload,
+			&auditEventID,
+			&ann.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan annotation: %w", err)
+		}
+		ann.Payload = append(json.RawMessage(nil), payload...)
+		if auditEventID.Valid {
+			ann.AuditEventID = &auditEventID.String
+		}
+		anns = append(anns, ann)
+	}
+	return anns, nil
 }
 
 func (s *PGStore) CreateSnapshot(ctx context.Context, in SnapshotInput) (models.ReasonSnapshot, error) {

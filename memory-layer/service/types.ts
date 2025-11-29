@@ -36,6 +36,10 @@ export type ArtifactRecord = {
   size_bytes?: number | null;
   created_by?: string | null;
   metadata: any;
+  s3_key?: string | null;
+  content_type?: string | null;
+  storage_class?: string | null;
+  provenance_verified?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -64,6 +68,10 @@ export type ArtifactInput = {
   sizeBytes?: number | null;
   createdBy?: string | null;
   metadata?: Record<string, unknown>;
+  s3Key?: string | null;
+  contentType?: string | null;
+  storageClass?: string | null;
+  provenanceVerified?: boolean;
 };
 
 export type MemoryEmbedding = {

@@ -111,7 +111,7 @@ export async function insertMemoryNode(input: MemoryNodeInput): Promise<MemoryNo
       COALESCE($4::jsonb, '{}'::jsonb),
       COALESCE($5, FALSE),
       $6::int,
-      CASE WHEN $6::int IS NULL THEN NULL ELSE now() + make_interval(secs => $6::int) END
+      CASE WHEN $6::int IS NULL THEN NULL ELSE now() + make_interval(0,0,0,0,0,0,$6::int) END
     )
     RETURNING *
   `,
@@ -183,11 +183,19 @@ export async function insertArtifact(nodeId: string | null, artifact: ArtifactIn
       manifest_signature_id,
       size_bytes,
       created_by,
-      metadata
+      metadata,
+      s3_key,
+      content_type,
+      storage_class,
+      provenance_verified
     )
-    VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb, '{}'::jsonb))
+    VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb, '{}'::jsonb), $8, $9, $10, $11)
     ON CONFLICT (artifact_url, sha256) DO UPDATE
-    SET updated_at = now()
+    SET updated_at = now(),
+        s3_key = COALESCE(EXCLUDED.s3_key, artifacts.s3_key),
+        content_type = COALESCE(EXCLUDED.content_type, artifacts.content_type),
+        storage_class = COALESCE(EXCLUDED.storage_class, artifacts.storage_class),
+        provenance_verified = COALESCE(EXCLUDED.provenance_verified, artifacts.provenance_verified)
     RETURNING id
   `,
     [
@@ -197,7 +205,11 @@ export async function insertArtifact(nodeId: string | null, artifact: ArtifactIn
       artifact.manifestSignatureId ?? null,
       artifact.sizeBytes ?? null,
       artifact.createdBy ?? null,
-      JSON.stringify(artifact.metadata ?? {})
+      JSON.stringify(artifact.metadata ?? {}),
+      artifact.s3Key ?? null,
+      artifact.contentType ?? null,
+      artifact.storageClass ?? null,
+      artifact.provenanceVerified ?? false
     ]
   );
 
@@ -480,11 +492,19 @@ export async function insertMemoryNodeWithAudit(
               manifest_signature_id,
               size_bytes,
               created_by,
-              metadata
+              metadata,
+              s3_key,
+              content_type,
+              storage_class,
+              provenance_verified
             )
-            VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb,'{}'::jsonb))
+            VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb,'{}'::jsonb), $8, $9, $10, $11)
             ON CONFLICT (artifact_url, sha256) DO UPDATE
-            SET updated_at = now()
+            SET updated_at = now(),
+                s3_key = COALESCE(EXCLUDED.s3_key, artifacts.s3_key),
+                content_type = COALESCE(EXCLUDED.content_type, artifacts.content_type),
+                storage_class = COALESCE(EXCLUDED.storage_class, artifacts.storage_class),
+                provenance_verified = COALESCE(EXCLUDED.provenance_verified, artifacts.provenance_verified)
             RETURNING id
           `,
             [
@@ -494,7 +514,11 @@ export async function insertMemoryNodeWithAudit(
               artifact.manifestSignatureId ?? null,
               artifact.sizeBytes ?? null,
               artifact.createdBy ?? null,
-              JSON.stringify(artifact.metadata ?? {})
+              JSON.stringify(artifact.metadata ?? {}),
+              artifact.s3Key ?? null,
+              artifact.contentType ?? null,
+              artifact.storageClass ?? null,
+              artifact.provenanceVerified ?? false
             ]
           );
         }

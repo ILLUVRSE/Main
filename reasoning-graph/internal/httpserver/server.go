@@ -63,6 +63,7 @@ func (s *Server) Router() http.Handler {
 
 		r.Get("/node/{id}", s.handleGetNode)
 		r.Get("/trace/{id}", s.handleTrace)
+		r.Get("/traces/{id}", s.handleGetOrderedTrace)
 		r.Get("/snapshot/{id}", s.handleGetSnapshot)
 	})
 
@@ -127,11 +128,12 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 }
 
 type createEdgeRequest struct {
-	From     string          `json:"from"`
-	To       string          `json:"to"`
-	Type     string          `json:"type"`
-	Weight   *float64        `json:"weight"`
-	Metadata json.RawMessage `json:"metadata"`
+	From         string          `json:"from"`
+	To           string          `json:"to"`
+	Type         string          `json:"type"`
+	Weight       *float64        `json:"weight"`
+	Metadata     json.RawMessage `json:"metadata"`
+	AuditEventID *string         `json:"auditEventId"`
 }
 
 func (s *Server) handleCreateEdge(w http.ResponseWriter, r *http.Request) {
@@ -155,11 +157,12 @@ func (s *Server) handleCreateEdge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	edge, err := s.db.CreateEdge(r.Context(), store.EdgeInput{
-		From:     fromID,
-		To:       toID,
-		Type:     req.Type,
-		Weight:   req.Weight,
-		Metadata: req.Metadata,
+		From:         fromID,
+		To:           toID,
+		Type:         req.Type,
+		Weight:       req.Weight,
+		Metadata:     req.Metadata,
+		AuditEventID: req.AuditEventID,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) || strings.Contains(err.Error(), "foreign key constraint") {
@@ -238,6 +241,25 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respondJSON(w, http.StatusOK, trace)
+}
+
+func (s *Server) handleGetOrderedTrace(w http.ResponseWriter, r *http.Request) {
+	nodeID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "REASONING_GRAPH_BAD_REQUEST", "invalid node id")
+		return
+	}
+
+	result, err := s.svc.GetOrderedCausalTrace(r.Context(), nodeID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			respondError(w, http.StatusNotFound, "REASONING_GRAPH_NOT_FOUND", "trace/node not found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "REASONING_GRAPH_INTERNAL", err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
 }
 
 type snapshotRequest struct {

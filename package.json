@@ -15,8 +15,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.331.0",
-    "@aws-sdk/client-s3": "^3.331.0",
+    "@aws-sdk/client-s3": "^3.940.0",
     "@aws-sdk/lib-storage": "^3.331.0",
+    "@smithy/shared-ini-file-loader": "^4.4.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
@@ -26,23 +27,24 @@
     "node-fetch": "^3.3.2",
     "pg": "^8.16.3",
     "stripe": "^14.19.0",
-    "uuid": "^13.0.0"
+    "uuid": "^8.3.2"
   },
   "devDependencies": {
-    "@types/express": "^4.17.20",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^20.4.2",
-    "@types/pg": "^8.11.10",
-    "@types/uuid": "^9.0.2",
     "@types/body-parser": "^1.19.5",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.20",
     "@types/helmet": "^4.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.4.2",
+    "@types/node-fetch": "^2.6.2",
+    "@types/pg": "^8.11.10",
+    "@types/uuid": "^9.0.8",
     "jest": "^30.2.0",
+    "pg-mem": "^3.0.5",
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.1",
+    "tsx": "^4.7.1",
     "typescript": "^5.9.3",
-    "@types/node-fetch": "^2.6.2",
-    "vitest": "^1.6.1",
-    "tsx": "^4.7.1"
+    "vitest": "^1.6.1"
   }
 }

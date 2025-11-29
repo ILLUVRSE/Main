@@ -47,6 +47,7 @@ import createUpgradeRouter from './upgradeRoutes';
 import createControlPanelRouter from './controlPanelRoutes';
 import { getReasoningClient, ReasoningClientError } from '../reasoning/client';
 import { authMiddleware } from '../middleware/auth';
+import { incrementSpawnCount, observeSpawnLatency, incrementLifecycleFailure } from '../metrics/prometheus';
 
 const ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = ENV === 'production';
@@ -438,6 +439,7 @@ export default function createKernelRouter(): Router {
         const id = (typeof body.id === 'string' && body.id.trim()) ? body.id : crypto.randomUUID();
         body.id = id;
 
+        const start = Date.now();
         // Try DB persist inside transaction
         try {
           const resolved = await resolveClient(res);
@@ -482,11 +484,17 @@ export default function createKernelRouter(): Router {
             console.warn('Filesystem fallback failed for agent.create:', (fsErr as Error).message || fsErr);
           }
 
+          incrementSpawnCount('agent', 'success');
+          observeSpawnLatency('agent', Date.now() - start);
+
           // Still return created id so tests can proceed deterministically
           res.setHeader('Content-Type', 'application/json');
           return res.status(201).json({ id });
         }
       } catch (err) {
+        incrementSpawnCount('agent', 'failure');
+        incrementLifecycleFailure('agent.create');
+
         // Unexpected errors: ensure client released if necessary, then propagate
         if (managed && client) {
           try { await client.query('ROLLBACK').catch(() => {}); } catch(_) {}

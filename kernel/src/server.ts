@@ -22,6 +22,7 @@ import {
   incrementReadinessFailure,
   incrementKmsProbeSuccess,
   incrementKmsProbeFailure,
+  setProcessMetrics,
   getMetrics,
   getMetricsContentType,
 } from './metrics/prometheus';
@@ -142,6 +143,24 @@ async function tryInstallOpenApiValidator(app: express.Express, apiSpec: any): P
  */
 export async function createApp() {
   const app = express();
+
+  // Metrics collection interval
+  let lastCpuUsage = process.cpuUsage();
+  setInterval(() => {
+    try {
+      const diff = process.cpuUsage(lastCpuUsage);
+      lastCpuUsage = process.cpuUsage();
+      // user + system is in microseconds.
+      // Total time elapsed is 5000ms = 5,000,000 microseconds.
+      // We want percentage (0-100).
+      // cpuPercent = ((diff.user + diff.system) / 5_000_000) * 100
+      const totalDiff = diff.user + diff.system;
+      const cpuPercent = (totalDiff / 50000) || 0; // microseconds / 5000ms * 100 -> / 50000
+      const mem = process.memoryUsage().heapUsed;
+      setProcessMetrics(cpuPercent, mem);
+    } catch { /* ignore */ }
+  }, 5000).unref();
+
   app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '1mb' }));
   app.use((req, res, next) => {
     res.locals.routePath = req.path;

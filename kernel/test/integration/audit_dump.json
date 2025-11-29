@@ -1,0 +1,38 @@
+[
+  {
+    "id": "c0d497c1-6142-4949-a7b2-7f1435fcd8e0",
+    "eventType": "TEST_EVENT_1",
+    "payload": {
+      "data": "value_1"
+    },
+    "prevHash": null,
+    "hash": "8837b6fe6bc24ed38e365bd768253cf6bffa9fb74173eb987f0b77d69149b300",
+    "signature": "/RXVR+5+3s46x7GQx3XR7lZk5Yc5iSACtI7r+1ZdfimvVSKcb01LiB6fZedImisD29Gmbawnwj/uBZGQpmcsDw==",
+    "signerId": "kernel-signer-local",
+    "ts": "2025-11-29T12:43:07.783Z"
+  },
+  {
+    "id": "e58911ea-5fc9-4394-be7f-2a4362e1c60a",
+    "eventType": "TEST_EVENT_2",
+    "payload": {
+      "data": "value_2"
+    },
+    "prevHash": "8837b6fe6bc24ed38e365bd768253cf6bffa9fb74173eb987f0b77d69149b300",
+    "hash": "e56a4bb5495624288534ca1ead6df681674e705cdce4880ec2ae6c9cd1e72f63",
+    "signature": "pFW7kgqWDeUr3Rkt2ts/ETNdRfEmIzhWTQq0fRhQhTYRwBiPMiAgJTQfw2CGYNkUYKZBCMfyN+DtCUUrlnZyAw==",
+    "signerId": "kernel-signer-local",
+    "ts": "2025-11-29T12:43:07.785Z"
+  },
+  {
+    "id": "f2cbb20f-b92a-4d53-9b9b-df3650bb607e",
+    "eventType": "TEST_EVENT_3",
+    "payload": {
+      "data": "value_3"
+    },
+    "prevHash": "e56a4bb5495624288534ca1ead6df681674e705cdce4880ec2ae6c9cd1e72f63",
+    "hash": "732e41817c810e6fb7beafe76fc32bf344f7da3022f64b46e6a877a06b1c2923",
+    "signature": "CsVl5YfrlKNx+PRbd3V1zyp7e5QxcJ2w3KhpFarydHXwr2jpIj5aEFf6+YVEloKBxItN28cwOeCTpuKVXK8nBA==",
+    "signerId": "kernel-signer-local",
+    "ts": "2025-11-29T12:43:07.786Z"
+  }
+]

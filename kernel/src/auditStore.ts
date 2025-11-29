@@ -27,6 +27,8 @@ import { getCurrentTraceId } from './middleware/tracing';
 import signingProxy from './signingProxy';
 import { AuditEvent } from './types';
 import { evaluateAuditPolicy } from './audit/auditPolicy';
+import { getPublisher } from './audit/infra/publisher';
+import { getArchiver } from './audit/infra/archiver';
 
 /**
  * Simple in-memory audit metrics (exported).
@@ -164,6 +166,32 @@ export async function appendAuditEvent(eventType: string, payload: any, retries 
 
       // success metric
       auditMetrics.audit_write_success_total++;
+
+      // Post-commit: Publish and Archive
+      // We do this asynchronously or synchronously depending on requirements.
+      // The task says "Publish every AuditEvent... Archive to S3".
+      // We should probably log errors but not fail the transaction since it's already committed.
+      const fullEvent: AuditEvent = {
+        id,
+        eventType,
+        payload: payloadWithTrace,
+        prevHash: prevHash || null,
+        hash,
+        signature,
+        signerId,
+        ts
+      };
+
+      try {
+        await Promise.all([
+          getPublisher().publish(fullEvent),
+          getArchiver().archive(fullEvent)
+        ]);
+      } catch (postCommitErr: any) {
+        console.error(`appendAuditEvent: Post-commit publish/archive failed for ${id}`, postCommitErr);
+        // We do not rethrow here to preserve the transaction success,
+        // but in a strict system we might want to have a recovery mechanism.
+      }
 
       return { id, hash, ts };
     } catch (err) {

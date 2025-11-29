@@ -112,12 +112,30 @@ export async function signData(data: string): Promise<{ signature: string; signe
   }
 }
 
+export async function getPublicKey(signerId?: string): Promise<{ publicKey: string; keyId: string }> {
+  // If provider is set to use KMS, try to get from KMS
+  // Else use local
+  const provider = kmsProvider ?? localProvider;
+  try {
+    const pk = await resolvePublicKey(provider, signerId);
+    return { publicKey: pk, keyId: signerId ?? kmsConfig.signerId };
+  } catch (err) {
+    // If KMS failed, and we are allowed to fall back
+    if (kmsProvider && !kmsConfig.requireKms) {
+       const pk = await resolvePublicKey(localProvider, signerId);
+       return { publicKey: pk, keyId: signerId ?? kmsConfig.signerId };
+    }
+    throw err;
+  }
+}
+
 /**
  * Exported proxy object
  */
 const signingProxy = {
   signManifest,
   signData,
+  getPublicKey,
   // expose config for testing/inspection
   _internal: {
     KMS_ENDPOINT: kmsConfig.endpoint,

@@ -1,0 +1,6 @@
+{
+  "test-signer-1": {
+    "publicKey": "MCowBQYDK2VwAyEAmLsY+CxuWWQr18LsXSu6KeHjRy1kBiP2OTNyViu+euY=",
+    "kid": "test-signer-1"
+  }
+}

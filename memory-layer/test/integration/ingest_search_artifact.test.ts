@@ -33,6 +33,10 @@ function ensureEnvOrSkip(): string | null {
     console.warn('Skipping integration test: DATABASE_URL or POSTGRES_URL is not set.');
     return null;
   }
+  if (conn.includes('mock')) {
+      console.warn('Skipping integration test: Mock DB URL detected.');
+      return null;
+  }
   return conn;
 }
 

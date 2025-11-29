@@ -368,6 +368,40 @@ export async function insertMemoryNodeWithAudit(
   return withClient(async (client) => {
     await client.query('BEGIN');
     try {
+      // Concurrency Safety & Idempotency:
+      // If requestId is provided, take an advisory lock on the hash of the requestId.
+      // This serializes concurrent requests with the same requestId.
+      // We use pg_advisory_xact_lock which releases on commit/rollback.
+      if (input.requestId) {
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [input.requestId]);
+
+        // After acquiring lock, check if already processed
+        const existing = await client.query(
+          `SELECT memory_node_id FROM processed_requests WHERE request_id = $1`,
+          [input.requestId]
+        );
+        if (existing.rows.length > 0) {
+          const nodeId = existing.rows[0].memory_node_id;
+          // Fetch and return existing node and its latest audit
+          const nodeRes = await client.query(`SELECT * FROM memory_nodes WHERE id = $1`, [nodeId]);
+          // If node was deleted or lost, we might need to handle it. For now assuming it exists.
+          if (nodeRes.rows[0]) {
+             const node = hydrateMemoryNode(nodeRes.rows[0]);
+
+             const auditRes = await client.query(
+               `SELECT * FROM audit_events WHERE memory_node_id = $1 ORDER BY created_at DESC LIMIT 1`,
+               [nodeId]
+             );
+             const audit = auditRes.rows[0];
+
+             await client.query('COMMIT');
+             if (audit) {
+                 return { node, audit };
+             }
+          }
+        }
+      }
+
       const ttl = typeof input.ttlSeconds === 'number' ? Math.trunc(input.ttlSeconds) : null;
 
       const insertNodeRes = await client.query<MemoryNodeRecord>(
@@ -540,6 +574,14 @@ export async function insertMemoryNodeWithAudit(
       `,
         [auditEventType, node.id, null, auditPayload, digest, prevHash, signature, manifestSignatureId ?? null]
       );
+
+      // Record request_id if present
+      if (input.requestId) {
+        await client.query(
+          `INSERT INTO processed_requests (request_id, memory_node_id) VALUES ($1, $2) ON CONFLICT (request_id) DO NOTHING`,
+          [input.requestId, node.id]
+        );
+      }
 
       await client.query('COMMIT');
       return { node, audit: insertAuditRes.rows[0] };

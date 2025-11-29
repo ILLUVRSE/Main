@@ -28,11 +28,14 @@ module.exports = {
 
   // Transform TypeScript using ts-jest
   transform: {
-    '^.+\\.tsx?$': 'ts-jest'
+    '^.+\\.tsx?$': 'ts-jest',
+    '^.+\\.js$': 'ts-jest'
   },
 
   // Ignore node_modules except if you need to transform specific packages (rare)
-  transformIgnorePatterns: ['/node_modules/'],
+  transformIgnorePatterns: [
+    '/node_modules/(?!(node-fetch|uuid|@opentelemetry|data-uri-to-buffer|fetch-blob|formdata-polyfill)/)'
+  ],
 
   // Module file extensions for imports
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json', 'node'],

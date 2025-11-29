@@ -82,6 +82,7 @@ export type MemoryNodeInput = {
   piiFlags?: Record<string, unknown> | null;
   legalHold?: boolean | null;
   ttlSeconds?: number | null;
+  requestId?: string | null;
 };
 
 export type AuditContext = {

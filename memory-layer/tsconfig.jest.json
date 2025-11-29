@@ -12,6 +12,7 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": false,
     "resolveJsonModule": true,
+    "allowJs": true,
     "types": ["node", "jest"],
     "outDir": "./dist-jest"
   },

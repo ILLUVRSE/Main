@@ -14,7 +14,8 @@
     "memory-layer:ttl-cleaner": "node dist/memory-layer/service/jobs/ttlCleaner.js",
     "memory-layer:audit-verify": "npx ts-node memory-layer/service/audit/verifyTool.ts",
     "memory-layer:audit-replay": "npx ts-node memory-layer/tools/auditReplay.ts",
-    "memory-layer:test:integration": "jest memory-layer/test/integration --runInBand"
+    "memory-layer:test:integration": "jest memory-layer/test/integration --runInBand",
+    "test": "jest memory-layer/test --runInBand"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.927.0",

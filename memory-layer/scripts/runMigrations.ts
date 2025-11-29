@@ -1,132 +1,117 @@
-/**
- * memory-layer/scripts/runMigrations.ts
- *
- * Simple migration runner for the Memory Layer.
- *
- * Usage:
- *   DATABASE_URL=... npx ts-node memory-layer/scripts/runMigrations.ts memory-layer/sql/migrations
- *
- * Behavior:
- *  - Reads SQL files from the given directory (default: memory-layer/sql/migrations).
- *  - Sorts them lexicographically and executes each file's contents against DATABASE_URL.
- *  - Skips files that have already been recorded in a `schema_migrations` table.
- *  - If `schema_migrations` table doesn't exist, it will be created by this script.
- *  - Runs each migration inside a transaction, marking `schema_migrations` on success.
- *
- * Notes:
- *  - Migration files are expected to be idempotent, but running them inside a transaction
- *    ensures partial failures do not leave the DB half-applied.
- */
 
 import fs from 'fs';
 import path from 'path';
 import { Client } from 'pg';
 
-const argv = process.argv.slice(2);
-const migrationsDir = argv[0] ?? path.join(__dirname, '..', 'sql', 'migrations');
-
-function log(...args: unknown[]) {
-  // simple logger that prefixes timestamp
-  console.log(new Date().toISOString(), '-', ...args);
-}
-
-async function ensureMigrationsTable(client: Client) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      id VARCHAR PRIMARY KEY,
-      filename TEXT NOT NULL,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
-}
-
-async function listAppliedMigrations(client: Client): Promise<Set<string>> {
-  const res = await client.query<{ id: string }>('SELECT id FROM schema_migrations');
-  return new Set(res.rows.map((r) => r.id));
-}
-
-async function applyMigration(client: Client, id: string, filename: string, sql: string) {
-  // Run migration inside a transaction
-  await client.query('BEGIN');
-  try {
-    await client.query(sql);
-    // Record applied migration
-    await client.query('INSERT INTO schema_migrations(id, filename) VALUES ($1, $2)', [id, filename]);
-    await client.query('COMMIT');
-    log(`applied migration ${filename}`);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  }
-}
-
-function readSqlFiles(dir: string): Array<{ id: string; filename: string; fullpath: string; sql: string }> {
-  if (!fs.existsSync(dir)) {
-    throw new Error(`migrations directory does not exist: ${dir}`);
-  }
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql'));
-  files.sort(); // lexicographic order, assumes files prefixed with sequence numbers
-  return files.map((filename) => {
-    const fullpath = path.join(dir, filename);
-    const sql = fs.readFileSync(fullpath, { encoding: 'utf8' });
-    // Use filename as id (you may change to sha if needed)
-    const id = filename;
-    return { id, filename, fullpath, sql };
-  });
-}
-
 async function main() {
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connStr) {
-    console.error('ERROR: set DATABASE_URL or POSTGRES_URL');
-    process.exit(2);
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    console.error('DATABASE_URL is not set.');
+    process.exit(1);
   }
 
-  log('starting migration runner');
-  log('migrations directory:', migrationsDir);
+  const args = process.argv.slice(2);
+  const migrationsDir = args[0];
+  const mode = args.includes('--mode=mock') ? 'mock' : 'real';
 
-  const client = new Client({ connectionString: connStr });
-  await client.connect();
+  if (!migrationsDir || migrationsDir.startsWith('--')) {
+    console.error('Usage: npx ts-node runMigrations.ts <migrations-dir> [--mode=mock]');
+    process.exit(1);
+  }
+
+  console.log(`Using migrations directory: ${migrationsDir}`);
+
+  if (mode === 'mock') {
+    console.log('Running in MOCK mode. Validating migration files only.');
+    if (!fs.existsSync(migrationsDir)) {
+      console.error(`Migrations directory does not exist: ${migrationsDir}`);
+      process.exit(1);
+    }
+    const files = fs.readdirSync(migrationsDir)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+
+    console.log(`Found ${files.length} migration files.`);
+    for (const file of files) {
+       console.log(`[MOCK] Would apply ${file}`);
+       // Validate we can read it
+       fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    }
+    console.log('Mock migrations check passed.');
+    process.exit(0);
+  }
+
+  const client = new Client({
+    connectionString: databaseUrl,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined
+  });
 
   try {
-    await ensureMigrationsTable(client);
-    const applied = await listAppliedMigrations(client);
-    const files = readSqlFiles(migrationsDir);
+    await client.connect();
+    console.log('Connected to database.');
 
-    const pending = files.filter((f) => !applied.has(f.id));
-    if (!pending.length) {
-      log('no pending migrations; exiting.');
-      return;
+    // Ensure migrations directory exists
+    if (!fs.existsSync(migrationsDir)) {
+      console.error(`Migrations directory does not exist: ${migrationsDir}`);
+      process.exit(1);
     }
 
-    log(`found ${pending.length} pending migration(s)`);
-    for (const mig of pending) {
-      log(`running migration ${mig.filename} ...`);
+    const files = fs.readdirSync(migrationsDir)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+
+    // Create schema_migrations table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        name VARCHAR PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+
+    console.log(`Found ${files.length} migration files.`);
+
+    for (const file of files) {
+      // Check if already applied
+      const res = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [file]);
+      if (res.rows.length > 0) {
+        console.log(`Skipping ${file} (already applied).`);
+        continue;
+      }
+
+      console.log(`Applying ${file}...`);
+      const filePath = path.join(migrationsDir, file);
+      const sql = fs.readFileSync(filePath, 'utf-8');
+
       try {
-        await applyMigration(client, mig.id, mig.filename, mig.sql);
+        // Run migration in a transaction block?
+        // If the file has BEGIN/COMMIT, we shouldn't nest.
+        // But we want to update schema_migrations atomically with the migration.
+        // Assuming migration files handle their own transactions (BEGIN/COMMIT) which seems to be the case,
+        // we can't easily wrap them.
+        // We will execute the migration, then insert into schema_migrations.
+        // This leaves a small risk if insert fails, but acceptable for this simple runner.
+        // Alternatively, we could require migrations NOT to have BEGIN/COMMIT and wrap them here.
+        // The existing files HAVE BEGIN/COMMIT. So we run them as is.
+
+        await client.query(sql);
+        await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
+        console.log(`Applied ${file}.`);
       } catch (err) {
-        console.error(`migration ${mig.filename} failed:`, (err as Error).message || err);
-        console.error('stopping further migrations.');
-        process.exitCode = 1;
-        return;
+        console.error(`Error applying ${file}:`, err);
+        process.exit(1);
       }
     }
 
-    log('all pending migrations applied successfully');
+    console.log('All migrations applied successfully.');
   } catch (err) {
-    console.error('migration runner failed:', (err as Error).message || err);
-    process.exitCode = 1;
+    console.error('Migration failed:', err);
+    process.exit(1);
   } finally {
     await client.end();
   }
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error('unhandled error in migration runner:', err);
-    process.exit(1);
-  });
-}
-
-export {};
-
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});

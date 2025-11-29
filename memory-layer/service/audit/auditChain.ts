@@ -2,46 +2,52 @@
  * memory-layer/service/audit/auditChain.ts
  *
  * Canonicalization, digest computation, and audit signing utilities.
+ * aligned with shared/lib/audit.ts for Kernel parity.
  *
  * Exports:
  *  - canonicalizePayload(value: unknown): string
  *  - computeAuditDigest(canonicalPayload: string, prevHashHex: string | null): string
- *  - signAuditDigest(digestHex: string): Promise<string | null>   // preferred async signer
- *  - signAuditDigestSync(digestHex: string): string | null       // synchronous fallback (local-key)
+ *  - signAuditDigest(digestHex: string): Promise<string | null>
+ *  - signAuditDigestSync(digestHex: string): string | null
  *  - verifySignature(signatureBase64: string, digestBuf: Buffer): Promise<boolean>
- *
- * Behavior:
- *  - Prefer KMS adapter if AUDIT_SIGNING_KMS_KEY_ID configured.
- *  - Else prefer signing proxy if SIGNING_PROXY_URL configured.
- *  - Else (dev/CI) prefer mock signer if MOCK_AUDIT_SIGNING_KEY or NODE_ENV=development.
- *  - Else fall back to local key / secret (AUDIT_SIGNING_KEY / AUDIT_SIGNING_SECRET / AUDIT_SIGNING_PRIVATE_KEY).
- *  - In production callers should ensure signing is available (server startup enforces REQUIRE_KMS).
  */
 
 import crypto from 'node:crypto';
 import { Buffer } from 'buffer';
-import * as kmsAdapter from './kmsAdapter';
+// Lazy load kmsAdapter to avoid AWS SDK dependency in non-KMS envs (dev/test)
+// import * as kmsAdapter from './kmsAdapter';
 import signingProxy from './signingProxyClient';
 import mockSigner from './mockSigner';
 
 const DEFAULT_ALG = 'hmac-sha256';
 
 /**
- * Canonicalize payload deterministically for audit digest.
- * Sorted keys, JSON-escaped strings; mirrors prior canonicalization.
+ * Sort value for canonicalization.
+ * Matches shared/lib/audit.ts sortValue implementation.
  */
-export const canonicalizePayload = (value: unknown): string => {
-  if (value === null || value === undefined) return 'null';
+function sortValue(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
   if (Array.isArray(value)) {
-    return `[${value.map((entry) => canonicalizePayload(entry)).join(',')}]`;
+    return value.map(sortValue);
   }
+  if (value instanceof Date) return value.toISOString();
+  if (Buffer.isBuffer(value)) return value.toString('utf8');
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([_, v]) => v !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalizePayload(entry)}`);
-    return `{${entries.join(',')}}`;
+      .map(([k, v]) => [k, sortValue(v)]);
+    return Object.fromEntries(entries);
   }
-  return JSON.stringify(value);
+  return value;
+}
+
+/**
+ * Canonicalize payload deterministically for audit digest.
+ * Uses JSON.stringify(sortValue(payload)).
+ */
+export const canonicalizePayload = (value: unknown): string => {
+  return JSON.stringify(sortValue(value));
 };
 
 /**
@@ -57,7 +63,7 @@ export const computeAuditDigest = (canonicalPayload: string, prevHashHex: string
 /**
  * Async signing of a precomputed digest (hex string).
  * Preferred API for production (supports KMS / signing proxy / mockSigner / local keys).
- * Returns base64 signature string, or `null` if no signer is configured (caller may decide behavior).
+ * Returns base64 signature string, or `null` if no signer is configured.
  */
 export async function signAuditDigest(digestHex: string): Promise<string | null> {
   if (!digestHex || typeof digestHex !== 'string') {
@@ -69,6 +75,8 @@ export async function signAuditDigest(digestHex: string): Promise<string | null>
   const kmsConfigured = Boolean(process.env.AUDIT_SIGNING_KMS_KEY_ID || process.env.AUDIT_SIGNING_KMS_KEY);
   if (kmsConfigured) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const kmsAdapter = require('./kmsAdapter');
       const resp = await kmsAdapter.signAuditHash(digestBuf);
       if (!resp || !resp.signature) throw new Error('KMS adapter returned no signature');
       return resp.signature;
@@ -106,9 +114,6 @@ export async function signAuditDigest(digestHex: string): Promise<string | null>
 
 /**
  * Synchronous signing fallback using local env keys.
- * Returns base64 signature string or null if no local key available.
- *
- * NOTE: production should not rely on this; prefer KMS. In production an absent local key should be treated as error.
  */
 export function signAuditDigestSync(digestHex: string): string | null {
   const signingKey = process.env.AUDIT_SIGNING_KEY ?? process.env.AUDIT_SIGNING_SECRET ?? process.env.AUDIT_SIGNING_PRIVATE_KEY ?? null;
@@ -147,13 +152,11 @@ export function signAuditDigestSync(digestHex: string): string | null {
     }
   }
 
-  // Fallback deterministic HMAC so we always produce something when key exists.
   return crypto.createHmac('sha256', signingKey).update(digestBuffer).digest('base64');
 }
 
 /**
  * Verify signature over a precomputed digest buffer.
- * Prefers KMS verify when configured; falls back to signing proxy, mock, and local verification.
  */
 export async function verifySignature(signatureBase64: string, digestBuf: Buffer): Promise<boolean> {
   if (!Buffer.isBuffer(digestBuf)) throw new Error('digestBuf must be a Buffer');
@@ -163,6 +166,8 @@ export async function verifySignature(signatureBase64: string, digestBuf: Buffer
   const kmsConfigured = Boolean(process.env.AUDIT_SIGNING_KMS_KEY_ID || process.env.AUDIT_SIGNING_KMS_KEY);
   if (kmsConfigured) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const kmsAdapter = require('./kmsAdapter');
       return await kmsAdapter.verifySignature(signatureBase64, digestBuf);
     } catch (err) {
       throw new Error(`KMS verify failed: ${(err as Error).message || String(err)}`);
@@ -188,7 +193,7 @@ export async function verifySignature(signatureBase64: string, digestBuf: Buffer
     }
   }
 
-  // 4) Local verification fallback: assume HMAC or RSA/ED25519 based on AUDIT_SIGNING_ALG.
+  // 4) Local verification fallback
   const algorithm = (process.env.AUDIT_SIGNING_ALG ?? DEFAULT_ALG).toLowerCase();
   const sigBuf = Buffer.from(signatureBase64, 'base64');
 
@@ -196,6 +201,7 @@ export async function verifySignature(signatureBase64: string, digestBuf: Buffer
     const signingKey = process.env.AUDIT_SIGNING_KEY ?? process.env.AUDIT_SIGNING_SECRET ?? null;
     if (!signingKey) throw new Error('local signing key not configured for HMAC verification');
     const expected = crypto.createHmac('sha256', signingKey).update(digestBuf).digest();
+    if (expected.length !== sigBuf.length) return false;
     return crypto.timingSafeEqual(expected, sigBuf);
   }
 
@@ -231,4 +237,3 @@ export default {
   signAuditDigestSync,
   verifySignature
 };
-

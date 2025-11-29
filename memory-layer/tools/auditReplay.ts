@@ -30,8 +30,7 @@ import fs from 'fs';
 import { URL } from 'url';
 import { Client } from 'pg';
 import { S3 } from 'aws-sdk';
-import { canonicalizePayload, computeAuditDigest } from '../service/audit/auditChain';
-import * as kmsAdapter from '../service/audit/kmsAdapter';
+import auditChain, { canonicalizePayload, computeAuditDigest } from '../service/audit/auditChain';
 
 type InputEvent = {
   id?: string;
@@ -156,9 +155,10 @@ async function main() {
       if (ev.signature) {
         try {
           const digestBuf = Buffer.from(ev.hash, 'hex');
-          const sigOk = await kmsAdapter.verifySignature(ev.signature, digestBuf);
+          // Use auditChain verify to support multiple signers/fallbacks (KMS, Proxy, Local)
+          const sigOk = await auditChain.verifySignature(ev.signature, digestBuf);
           if (!sigOk) {
-            console.error('  SIG_INVALID (KMS verification returned false)');
+            console.error('  SIG_INVALID (Verification returned false)');
             if (!force) throw new Error('Signature invalid - aborting (use --force to override)');
             else console.warn('  --force specified: continuing despite invalid signature');
           } else {

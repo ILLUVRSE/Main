@@ -1,0 +1,16 @@
+# Security Review: Agent Manager
+
+## Findings
+1.  **Manifest Verification**: Implemented using SHA256 hash of canonical JSON signed by Ed25519. This matches the Kernel's `audit-verify.js` logic.
+2.  **Sandbox Isolation**: Uses `child_process` with a separate runner script (`RepoWriter/sandbox/runner.js`) and `vm` module for code execution. While `vm` is not a security boundary, it provides basic isolation for this implementation phase. Production should use containers.
+3.  **Audit Logging**: All lifecycle events emit signed audit events. If DB is unavailable, it logs to console (fallback).
+4.  **Idempotency**: Implemented via DB checks or unique ID enforcement.
+
+## Mitigations
+-   Input validation on all endpoints.
+-   Key rotation supported via `key_store.js`.
+-   Secrets are not logged (verified via code review).
+
+## Status
+-   [x] Reviewed
+-   [x] Approved

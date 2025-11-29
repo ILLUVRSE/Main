@@ -196,6 +196,18 @@ async function verifyChain(dbUrl, signersPath, limit) {
   }
 }
 
+async function verifyEvents(events, signerMap) {
+  let expectedPrev = null;
+  if (events.length > 0) {
+    expectedPrev = events[0].prev_hash;
+  }
+  for (const ev of events) {
+    const hash = verifyEvent(ev, signerMap, expectedPrev);
+    expectedPrev = hash;
+  }
+  return true;
+}
+
 // CLI
 if (require.main === module) {
   const args = process.argv.slice(2);
@@ -215,4 +227,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { verifyChain, verifyEvent, parseSignerRegistry };
+module.exports = { verifyChain, verifyEvent, parseSignerRegistry, verifyEvents };

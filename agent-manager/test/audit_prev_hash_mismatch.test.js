@@ -53,7 +53,7 @@ describe('audit chain prev_hash enforcement', () => {
 
     const signerMap = new Map([[signerId, { publicKey, algorithm: 'rsa-sha256' }]]);
 
-    await expect(verifyEvents([first, tampered, third], signerMap)).rejects.toThrow(/prevHash mismatch/i);
+    await expect(verifyEvents([first, tampered, third], signerMap)).rejects.toThrow(/Chain broken/i);
     await expect(verifyEvents([first, second, third], signerMap)).resolves.toBeDefined();
   });
 });

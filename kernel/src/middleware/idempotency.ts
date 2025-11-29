@@ -198,10 +198,10 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
   const requestHash = computeRequestHash(req);
   const client = await getClient();
 
-const finalizeCleanup = async (ctx: IdempotencyContext, done: { finished: boolean }): Promise<void> => {
-  if (done.finished) {
-    return;
-  }
+  const finalizeCleanup = async (ctx: IdempotencyContext, done: { finished: boolean }): Promise<void> => {
+    if (done.finished) {
+      return;
+    }
   done.finished = true;
   try {
     await ctx.client.query('ROLLBACK');

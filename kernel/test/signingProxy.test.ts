@@ -14,7 +14,7 @@
 import { jest } from '@jest/globals';
 
 jest.mock('../src/services/signatureVerifier', () => {
-  const actual = jest.requireActual('../src/services/signatureVerifier');
+  const actual = jest.requireActual('../src/services/signatureVerifier') as any;
   return {
     ...actual,
     verifySignaturePayload: jest.fn(),

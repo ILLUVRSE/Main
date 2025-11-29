@@ -29,5 +29,16 @@ export default function journalRouter(ledgerService: LedgerService): Router {
     }
   });
 
+  // Allocation endpoint
+  router.post('/allocate', async (req, res, next) => {
+    try {
+      const actor = (req.headers['x-user-email'] as string) || 'finance-service';
+      const result = await ledgerService.createAllocation(req.body, actor);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+        next(err);
+    }
+  });
+
   return router;
 }

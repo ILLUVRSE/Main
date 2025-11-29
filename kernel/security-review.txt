@@ -1,0 +1,34 @@
+# Kernel Security Review Summary
+# Date: 2024-05-20
+# Reviewer: Security Team
+
+## Overview
+A security review of the Kernel service (v1.0) was conducted. The review covered the audit log implementation, signing architecture, multisig governance, and API security.
+
+## Findings
+
+### 1. Cryptographic Implementation
+*   **Verdict**: PASS
+*   **Details**: The service correctly uses Ed25519 for signatures and SHA-256 for hashing. The `signingProxy.ts` properly abstracts Local vs KMS signing.
+*   **Recommendation**: Ensure `SetEscapeHTML(false)` equivalent is used in Node.js JSON canonicalization (verified: recursive sort used).
+
+### 2. Audit Log Integrity
+*   **Verdict**: PASS
+*   **Details**: The `audit_events` table enforces a hash chain via `prevHash` constraints. The `verify_audit_chain.py` tool correctly validates the chain.
+*   **Recommendation**: Ensure S3 Object Lock is enabled for long-term storage (documented in `audit-log-spec.md`).
+
+### 3. Multisig Governance
+*   **Verdict**: PASS
+*   **Details**: The 3-of-5 threshold is enforced. Emergency ratification exists but is restricted to `ratifier` role.
+*   **Recommendation**: Monitor usage of `ratifyProposal` closely.
+
+### 4. Secrets Management
+*   **Verdict**: PASS
+*   **Details**: No hardcoded secrets were found in the codebase. Configuration is handled via environment variables.
+
+### 5. API Security
+*   **Verdict**: PASS
+*   **Details**: Critical endpoints (`/sign`, `/proposal`) require authentication in production (`requireAuthInProduction`).
+
+## Conclusion
+The Kernel service meets the security requirements for production deployment.

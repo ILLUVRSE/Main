@@ -85,6 +85,21 @@ export function createApp() {
 
   // Health & status
   app.get('/health', (req: Request, res: Response) => res.json({ ok: true }));
+
+  if (process.env.NODE_ENV === 'development') {
+    app.get('/marketplace/products/seed', (req: Request, res: Response) => {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const fixturesPath = path.join(__dirname, '../test/fixtures/products.json');
+        const products = fs.readFileSync(fixturesPath, 'utf-8');
+        res.json(JSON.parse(products));
+      } catch (error) {
+        logger.error('marketplace.products.seed.failed', { error });
+        res.status(500).json({ ok: false, error: 'Failed to read seed fixtures.' });
+      }
+    });
+  }
   app.get('/status', async (req: Request, res: Response) => {
     try {
       const settings = await settingsService.getAll();

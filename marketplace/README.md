@@ -1,5 +1,17 @@
 # ILLUVRSE — Marketplace
 
+## Developer Quickstart (added)
+
+```text
+docker compose up -d postgres minio
+npm --prefix marketplace/server install
+npm --prefix marketplace/web install
+node marketplace/scripts/seedFixtures.js
+npm --prefix marketplace/server run dev   # start existing Express server
+npm --prefix marketplace/web run dev      # start Next.js frontend
+Open http://localhost:3000/marketplace
+```
+
 The Marketplace is the customer-facing service for listing signed SKUs, running preview sandboxes, performing checkout, issuing licenses, producing encrypted delivery, and publishing signed delivery proofs tied to Finance ledger proofs and Kernel manifests.
 
 This repository area contains:

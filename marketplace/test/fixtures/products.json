@@ -1,0 +1,66 @@
+[
+  {
+    "id": "prod_1",
+    "title": "Illuvium: Zero",
+    "short_description": "A new world-building game.",
+    "price": 49.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_1"
+  },
+  {
+    "id": "prod_2",
+    "title": "Illuvium: Overworld",
+    "short_description": "Explore the vast world of Illuvium.",
+    "price": 59.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_2"
+  },
+  {
+    "id": "prod_3",
+    "title": "Illuvium: Arena",
+    "short_description": "Battle it out in the arena.",
+    "price": 39.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_3"
+  },
+  {
+    "id": "prod_4",
+    "title": "Illuvial Pack",
+    "short_description": "A pack of 5 random Illuvials.",
+    "price": 19.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_4"
+  },
+  {
+    "id": "prod_5",
+    "title": "Ranger Skin",
+    "short_description": "A new skin for your ranger.",
+    "price": 9.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_5"
+  },
+  {
+    "id": "prod_6",
+    "title": "Leviathan Skin",
+    "short_description": "A new skin for your leviathan.",
+    "price": 14.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_6"
+  },
+  {
+    "id": "prod_7",
+    "title": "Weapon Pack",
+    "short_description": "A pack of 3 random weapons.",
+    "price": 12.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_7"
+  },
+  {
+    "id": "prod_8",
+    "title": "Emote Pack",
+    "short_description": "A pack of 5 random emotes.",
+    "price": 4.99,
+    "manifest_reference": "Qm...",
+    "signer_kid": "kid_8"
+  }
+]
